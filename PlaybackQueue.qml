@@ -362,6 +362,7 @@ Rectangle {
                 MouseArea {
                     id: rowHover
                     anchors.fill: parent
+                    anchors.rightMargin: 8   // leave the scrollbar thumb's column free (see UC-12)
                     hoverEnabled: true
                     cursorShape:  Qt.PointingHandCursor
                     onClicked: {
@@ -431,18 +432,51 @@ Rectangle {
                 }
             } // delegate Item
 
-            // Custom scrollbar
+            // Custom scrollbar — draggable thumb (see UC-12)
             Rectangle {
+                id: queueScrollTrack
+                z: 2   // guarantee hit-testing above delegate content, regardless of stacking order
                 anchors { right: queueList.right; top: queueList.top; bottom: queueList.bottom }
                 width: 4
                 color: Theme.surfaceContainerLowest
                 Rectangle {
+                    id: queueScrollThumb
                     width:  parent.width
                     height: Math.max(24, parent.height * queueList.visibleArea.heightRatio)
                     y:      queueList.visibleArea.yPosition * parent.height
-                    color:  Theme.outlineVariant
+                    color:  queueThumbMA.pressed        ? Theme.secondary
+                          : queueThumbMA.containsMouse   ? Theme.fgSurfaceVariant
+                          :                                Theme.outlineVariant
                     radius: 2
                     visible: queueList.contentHeight > queueList.height
+
+                    MouseArea {
+                        id: queueThumbMA
+                        anchors.fill: parent
+                        hoverEnabled:    true
+                        preventStealing: true
+                        cursorShape:     Qt.PointingHandCursor
+
+                        property real pressTrackY:   0
+                        property real pressContentY: 0
+
+                        onPressed: function(mouse) {
+                            var pt = mapToItem(queueScrollTrack, mouse.x, mouse.y)
+                            pressTrackY   = pt.y
+                            pressContentY = queueList.contentY
+                        }
+
+                        onPositionChanged: function(mouse) {
+                            if (!pressed) return
+                            var pt = mapToItem(queueScrollTrack, mouse.x, mouse.y)
+                            var trackRange = queueScrollTrack.height - queueScrollThumb.height
+                            if (trackRange <= 0) return
+                            var contentRange = queueList.contentHeight - queueList.height
+                            if (contentRange <= 0) return
+                            var newY = pressContentY + (pt.y - pressTrackY) * (contentRange / trackRange)
+                            queueList.contentY = Math.max(0, Math.min(newY, contentRange))
+                        }
+                    }
                 }
             }
         }

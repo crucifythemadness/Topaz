@@ -94,18 +94,51 @@ Rectangle {
             wrapMode: Text.WordWrap
         }
 
-        // Custom scrollbar
+        // Custom scrollbar — draggable thumb (see UC-12)
         Rectangle {
+            id: albumScrollTrack
+            z: 2   // guarantee hit-testing above delegate content, regardless of stacking order
             anchors { right: albumList.right; top: albumList.top; bottom: albumList.bottom }
             width: 4
             color: Theme.surfaceContainerLowest
             Rectangle {
+                id: albumScrollThumb
                 width:  parent.width
                 height: Math.max(24, parent.height * albumList.visibleArea.heightRatio)
                 y:      albumList.visibleArea.yPosition * parent.height
-                color:  Theme.outlineVariant
+                color:  albumThumbMA.pressed        ? Theme.secondary
+                      : albumThumbMA.containsMouse   ? Theme.fgSurfaceVariant
+                      :                                Theme.outlineVariant
                 radius: 2
                 visible: albumList.contentHeight > albumList.height
+
+                MouseArea {
+                    id: albumThumbMA
+                    anchors.fill: parent
+                    hoverEnabled:    true
+                    preventStealing: true
+                    cursorShape:     Qt.PointingHandCursor
+
+                    property real pressTrackY:   0
+                    property real pressContentY: 0
+
+                    onPressed: function(mouse) {
+                        var pt = mapToItem(albumScrollTrack, mouse.x, mouse.y)
+                        pressTrackY   = pt.y
+                        pressContentY = albumList.contentY
+                    }
+
+                    onPositionChanged: function(mouse) {
+                        if (!pressed) return
+                        var pt = mapToItem(albumScrollTrack, mouse.x, mouse.y)
+                        var trackRange = albumScrollTrack.height - albumScrollThumb.height
+                        if (trackRange <= 0) return
+                        var contentRange = albumList.contentHeight - albumList.height
+                        if (contentRange <= 0) return
+                        var newY = pressContentY + (pt.y - pressTrackY) * (contentRange / trackRange)
+                        albumList.contentY = Math.max(0, Math.min(newY, contentRange))
+                    }
+                }
             }
         }
     }

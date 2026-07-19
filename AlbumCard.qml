@@ -178,6 +178,7 @@ Rectangle {
                         MouseArea {
                             id: trackMA
                             anchors.fill: parent
+                            anchors.rightMargin: 8   // leave the scrollbar thumb's column free (see UC-12)
                             hoverEnabled: true
                             cursorShape:  dragging ? Qt.DragCopyCursor
                                                    : Qt.PointingHandCursor

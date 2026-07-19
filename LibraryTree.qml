@@ -307,18 +307,51 @@ Rectangle {
             }
         }
 
-        // Custom scrollbar
+        // Custom scrollbar — draggable thumb (see UC-12)
         Rectangle {
+            id: treeScrollTrack
+            z: 2   // guarantee hit-testing above delegate content, regardless of stacking order
             anchors { right: treeList.right; top: treeList.top; bottom: treeList.bottom }
             width: 4
             color: Theme.surfaceContainerLowest
             Rectangle {
+                id: treeScrollThumb
                 width:  parent.width
                 height: Math.max(20, parent.height * treeList.visibleArea.heightRatio)
                 y:      treeList.visibleArea.yPosition * parent.height
-                color:  Theme.outlineVariant
+                color:  treeThumbMA.pressed         ? Theme.secondary
+                      : treeThumbMA.containsMouse    ? Theme.fgSurfaceVariant
+                      :                                Theme.outlineVariant
                 radius: 2
                 visible: treeList.contentHeight > treeList.height
+
+                MouseArea {
+                    id: treeThumbMA
+                    anchors.fill: parent
+                    hoverEnabled:    true
+                    preventStealing: true
+                    cursorShape:     Qt.PointingHandCursor
+
+                    property real pressTrackY:   0
+                    property real pressContentY: 0
+
+                    onPressed: function(mouse) {
+                        var pt = mapToItem(treeScrollTrack, mouse.x, mouse.y)
+                        pressTrackY   = pt.y
+                        pressContentY = treeList.contentY
+                    }
+
+                    onPositionChanged: function(mouse) {
+                        if (!pressed) return
+                        var pt = mapToItem(treeScrollTrack, mouse.x, mouse.y)
+                        var trackRange = treeScrollTrack.height - treeScrollThumb.height
+                        if (trackRange <= 0) return
+                        var contentRange = treeList.contentHeight - treeList.height
+                        if (contentRange <= 0) return
+                        var newY = pressContentY + (pt.y - pressTrackY) * (contentRange / trackRange)
+                        treeList.contentY = Math.max(0, Math.min(newY, contentRange))
+                    }
+                }
             }
         }
     }
