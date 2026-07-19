@@ -1,0 +1,148 @@
+#pragma once
+
+#include "appconfig.h"
+#include "trackinfo.h"
+
+#include <QAbstractListModel>
+#include <QQmlEngine>
+#include <QStringList>
+#include <QVariantList>
+
+class LibraryScanner;
+class QThread;
+
+// ── LibraryModel ──────────────────────────────────────────────────────────
+// QAbstractListModel that backs the Topaz audio library.
+//
+// Owns a LibraryScanner worker on a dedicated QThread.
+// Exposes the full track list as a QML list model (for PlaybackQueue) plus
+// Q_INVOKABLE query helpers used by LibraryData.qml, LibraryTree.qml and
+// AlbumBrowser.qml to build the tree / album views.
+//
+// Lifecycle (called from Main.qml):
+//   1. Component.onCompleted → loadCacheAndStartStatCheck()
+//      • loads Topaz.library.json instantly (< 100ms for 12K tracks)
+//      • fires libraryRefreshed() so the UI can display cached data
+//      • schedules a background stat-check on the worker thread
+//   2. Gear icon → SetupDialog → user clicks SCAN DIRECTORIES
+//      → startFullScan()  (or BottomBar "SCAN DIRECTORIES" button)
+class LibraryModel : public QAbstractListModel
+{
+    Q_OBJECT
+    QML_ELEMENT
+
+    Q_PROPERTY(AppConfig* appConfig  READ appConfig  WRITE setAppConfig  NOTIFY appConfigChanged)
+    Q_PROPERTY(bool        scanning   READ scanning   NOTIFY scanningChanged)
+    Q_PROPERTY(int         scanProgress READ scanProgress NOTIFY scanProgressChanged)
+    Q_PROPERTY(int         trackCount READ trackCount  NOTIFY trackCountChanged)
+
+public:
+    // ── Roles exposed to QML delegates ───────────────────────────────────
+    enum TrackRole {
+        TrackIdRole       = Qt::UserRole + 1,
+        FilePathRole,
+        FileNameRole,
+        TitleRole,
+        ArtistRole,
+        AlbumArtistRole,
+        AlbumRole,
+        GenreRole,
+        TrackNumberRole,
+        YearRole,
+        DurationRole,       // milliseconds (int)
+        DurationStringRole, // "MM:SS"
+        BitrateRole,        // kbps (int)
+        FileSizeRole,
+        CoverThumbRole      // base64 JPEG or empty string
+    };
+    Q_ENUM(TrackRole)
+
+    explicit LibraryModel(QObject *parent = nullptr);
+    ~LibraryModel() override;
+
+    // ── QAbstractListModel ────────────────────────────────────────────────
+    int      rowCount(const QModelIndex &parent = {}) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QHash<int, QByteArray> roleNames() const override;
+
+    // ── Properties ────────────────────────────────────────────────────────
+    AppConfig *appConfig()    const { return m_appConfig; }
+    bool       scanning()     const { return m_scanning; }
+    int        scanProgress() const { return m_scanProgress; }
+    int        trackCount()   const { return m_tracks.size(); }
+    void       setAppConfig(AppConfig *cfg);
+
+    // ── Invokable actions ─────────────────────────────────────────────────
+    // Load cache from disk, emit libraryRefreshed(), then start a background
+    // stat-check.  Call this from Main.qml Component.onCompleted.
+    Q_INVOKABLE void loadCacheAndStartStatCheck();
+
+    // Trigger a full re-scan of all configured folders in background.
+    Q_INVOKABLE void startFullScan();
+
+    // ── Invokable query helpers (used by LibraryData.qml) ────────────────
+
+    // Distinct genres present in the current library, sorted.
+    Q_INVOKABLE QStringList genres() const;
+
+    // Artist names for a genre, sorted alphabetically.
+    Q_INVOKABLE QStringList artistsForGenre(const QString &genre) const;
+
+    // Album titles for an artist (optionally filtered by genre), sorted.
+    Q_INVOKABLE QStringList albumsForArtist(const QString &artist,
+                                             const QString &genre = {}) const;
+
+    // Returns a QVariantList of album objects compatible with AlbumBrowser /
+    // AlbumCard.  Each element is a QVariantMap:
+    //   { albumTitle, albumArtist, artistLabel, isActive, coverThumb, tracks }
+    // where tracks is a QVariantList of { number, title, duration, filePath }.
+    Q_INVOKABLE QVariantList filteredAlbums(const QStringList &activeGenres,
+                                             const QString     &selectedArtist,
+                                             const QString     &selectedAlbum) const;
+
+    // Cover thumbnail base64 string for the given album (first available).
+    Q_INVOKABLE QString coverThumbForAlbum(const QString &album,
+                                            const QString &albumArtist) const;
+
+    // Single-pass tree builder for LibraryData._rebuildTree().
+    // Returns QVariantList matching the shape:
+    //   [ { genre, artists: [ { name, albums: [ { title } ] } ] } ]
+    // for exactly the supplied activeGenres list.
+    // One O(N_tracks) scan replaces N_genres + N_artists separate scans.
+    Q_INVOKABLE QVariantList buildLibraryTree(const QStringList &activeGenres) const;
+
+signals:
+    void appConfigChanged();
+    void scanningChanged();
+    void scanProgressChanged();
+    void trackCountChanged();
+
+    // Emitted after the model is populated (cache load or scan complete).
+    // LibraryData.qml connects to this to rebuild its tree.
+    void libraryRefreshed();
+
+    // Internal – queued signals to the worker thread.
+    void _requestFullScan(QStringList  genres,
+                          QVariantList folders,
+                          QList<TrackInfo> cache);
+    void _requestStatCheck(QStringList  genres,
+                           QVariantList folders,
+                           QList<TrackInfo> cache);
+
+private slots:
+    void onScanProgress(int done, int total);
+    void onScanCompleted(QList<TrackInfo> tracks);
+
+private:
+    void applyTracks(QList<TrackInfo> &&tracks);
+    void startWorkerThread();
+
+    static QString formatDuration(qint64 ms);
+
+    AppConfig        *m_appConfig    = nullptr;
+    QList<TrackInfo>  m_tracks;
+    LibraryScanner   *m_scanWorker   = nullptr;
+    QThread          *m_scanThread   = nullptr;
+    bool              m_scanning     = false;
+    int               m_scanProgress = 0;
+};

@@ -1,0 +1,21 @@
+{
+  "cmake.cmakePath": "C:/Qt/Tools/CMake_64/bin/cmake.exe",
+  "cmake.generator": "Ninja",
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.configureEnvironment": {
+    "PATH": "C:/Qt/Tools/mingw1310_64/bin;C:/Qt/6.10.2/mingw_64/bin;${env:PATH}"
+  },
+  "cmake.buildEnvironment": {
+    "PATH": "C:/Qt/Tools/mingw1310_64/bin;C:/Qt/6.10.2/mingw_64/bin;${env:PATH}"
+  },
+  "cmake.configureSettings": {
+    "CMAKE_PREFIX_PATH": "C:/Qt/6.10.2/mingw_64",
+    "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/Ninja/ninja.exe",
+    "CMAKE_C_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/gcc.exe",
+    "CMAKE_CXX_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/g++.exe",
+    "CMAKE_RC_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/windres.exe"
+  },
+  "chat.tools.terminal.autoApprove": {
+    "&": true
+  }
+}

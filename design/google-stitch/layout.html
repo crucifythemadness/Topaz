@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Topaz | Technical Monolith v2</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;400;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "inverse-primary": "#6d3bd7",
+                        "on-secondary-fixed-variant": "#005047",
+                        "on-surface": "#e5e2e1",
+                        "error-container": "#93000a",
+                        "surface-container-lowest": "#0e0e0e",
+                        "tertiary-fixed-dim": "#ffb869",
+                        "on-tertiary": "#482900",
+                        "secondary-fixed": "#62fae3",
+                        "primary-fixed-dim": "#d0bcff",
+                        "outline": "#958ea0",
+                        "tertiary-fixed": "#ffdcbb",
+                        "inverse-surface": "#e5e2e1",
+                        "surface-tint": "#d0bcff",
+                        "tertiary-container": "#ca801e",
+                        "on-error-container": "#ffdad6",
+                        "surface-container": "#201f1f",
+                        "inverse-on-surface": "#313030",
+                        "surface": "#131313",
+                        "on-secondary-container": "#004d44",
+                        "surface-variant": "#353534",
+                        "on-primary-fixed": "#23005c",
+                        "primary": "#d0bcff",
+                        "on-secondary-fixed": "#00201c",
+                        "secondary": "#44e2cd",
+                        "on-background": "#e5e2e1",
+                        "on-tertiary-container": "#3f2300",
+                        "on-primary-container": "#340080",
+                        "on-tertiary-fixed-variant": "#673d00",
+                        "on-primary": "#3c0091",
+                        "surface-container-low": "#1c1b1b",
+                        "surface-dim": "#131313",
+                        "on-tertiary-fixed": "#2c1700",
+                        "on-surface-variant": "#cbc3d7",
+                        "surface-container-high": "#2a2a2a",
+                        "secondary-fixed-dim": "#3cddc7",
+                        "on-primary-fixed-variant": "#5516be",
+                        "on-secondary": "#003731",
+                        "primary-container": "#a078ff",
+                        "error": "#ffb4ab",
+                        "background": "#131313",
+                        "surface-bright": "#393939",
+                        "outline-variant": "#494454",
+                        "surface-container-highest": "#353534",
+                        "tertiary": "#ffb869",
+                        "primary-fixed": "#e9ddff",
+                        "secondary-container": "#03c6b2",
+                        "on-error": "#690005"
+                    },
+                    fontFamily: {
+                        "headline": ["Manrope", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        body { background-color: #131313; color: #e5e2e1; font-family: 'Inter', sans-serif; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .technical-scroll::-webkit-scrollbar { width: 4px; }
+        .technical-scroll::-webkit-scrollbar-track { background: #0e0e0e; }
+        .technical-scroll::-webkit-scrollbar-thumb { background: #494454; border-radius: 2px; }
+        .text-glow-primary { text-shadow: 0 0 10px rgba(208, 188, 255, 0.4); }
+        .text-glow-secondary { text-shadow: 0 0 10px rgba(68, 226, 205, 0.4); }
+        .border-technical { border: 1px solid rgba(149, 142, 160, 0.2); }
+    </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden selection:bg-primary-container selection:text-on-primary-container">
+<!-- Top Navigation Shell -->
+<header class="flex justify-between items-center w-full px-6 py-4 bg-[#131313] border-b border-outline-variant/10 z-50">
+<div class="text-2xl font-bold tracking-[0.15em] text-[#E5E2E1] font-headline uppercase" style="">Topaz</div>
+<nav class="hidden md:flex items-center gap-12">
+<a class="text-[#D0BCFF] border-b-2 border-[#D0BCFF] pb-1 font-label text-xs uppercase tracking-[0.2em] font-bold" href="#" style="">Library</a>
+<a class="text-[#CBC3D7] font-medium font-label text-xs uppercase tracking-[0.2em] hover:text-[#E5E2E1] transition-colors" href="#" style="">PLAYLISTS</a>
+</nav>
+<div class="flex items-center gap-6">
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors text-xl" style="">settings</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors text-xl" style="">equalizer</span>
+<div class="w-8 h-8 rounded-full bg-surface-container-highest flex items-center justify-center overflow-hidden border border-outline-variant/30">
+<img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBmxI70MBmbbhdkmnoZD0Chd_ixZylzTOah3HwVWxHt5HcRRY3ylTd-EWcOM_quSYa1r6DetLP6ukiTTrcRuNVDMnqbjZvKmd4rhOBfxCmoOLAhGLdRfZAzTZ6zbLmQD59VURWV-Olo7ET9fq_8yXnQn9dlUIfVYRsTamE-cxZCKHfB3Z0rME1T7skXWhAG2E3DJAOorBh5dV9bwLu6p3vAmjfb6nkEqsyv8xqtVGCBCuLKq-yk6Jkj7hXQuHSfy3pCiE3K_rSdPQ" style=""/>
+</div>
+</div>
+</header>
+<!-- Genre Toggle Grid (30 Items) -->
+<section class="bg-surface-container-low px-6 py-3 border-b border-outline-variant/10">
+<div class="grid grid-cols-5 md:grid-cols-10 gap-1.5">
+<!-- Row 1 -->
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Ambient</button>
+<button class="bg-secondary-container text-on-secondary-container py-2 px-1 text-[10px] font-bold uppercase tracking-wider border border-secondary shadow-[0_0_10px_rgba(68,226,205,0.1)]" style="">Techno</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Jazz</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Classical</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Rock</button>
+<button class="bg-secondary-container text-on-secondary-container py-2 px-1 text-[10px] font-bold uppercase tracking-wider border border-secondary" style="">IDM</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Glitch</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Dub</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Minimal</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">House</button>
+<!-- Row 2 -->
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Phonk</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Industrial</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Synthwave</button>
+<button class="bg-secondary-container text-on-secondary-container py-2 px-1 text-[10px] font-bold uppercase tracking-wider border border-secondary" style="">Drone</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Vaporwave</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Garage</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Grime</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Trance</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Hardcore</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Lo-Fi</button>
+<!-- Row 3 -->
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Psytrance</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Dark Ambient</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Dubstep</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Future Bass</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Electro</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Breakcore</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Nu Jazz</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">Trip Hop</button>
+<button class="bg-surface-container-high py-2 px-1 text-[10px] font-label uppercase tracking-wider text-on-surface-variant hover:bg-surface-container-highest transition-all border border-transparent hover:border-outline-variant/20" style="">EBM</button>
+<button class="bg-secondary-container text-on-secondary-container py-2 px-1 text-[10px] font-bold uppercase tracking-wider border border-secondary" style="">Noise</button>
+</div>
+</section>
+<!-- Main Content Grid -->
+<main class="flex-grow flex overflow-hidden">
+<!-- Column 1: Tree Control (256px) -->
+<aside class="w-64 bg-surface-container-lowest flex flex-col p-5 technical-scroll overflow-y-auto border-r border-outline-variant/10">
+<div class="mb-8">
+<div class="flex items-center gap-3 text-primary font-bold font-headline mb-5 uppercase tracking-[0.2em] text-xs" style="">
+<span class="material-symbols-outlined text-sm" style="">folder_open</span>
+                Library Root
+            </div>
+<div class="ml-4 space-y-6">
+<div>
+<div class="flex items-center gap-2 text-primary font-bold text-[11px] font-body mb-3 tracking-widest uppercase" style="">
+<span class="material-symbols-outlined text-[14px]" style="">label</span>
+                        Techno
+                    </div>
+<div class="ml-4 space-y-3">
+<div class="space-y-1">
+<div class="flex items-center gap-2 text-on-surface font-semibold text-[11px] mb-2" style="">
+<span class="material-symbols-outlined text-[12px]" style="">person</span>
+                                ALVA NOTO
+                            </div>
+<div class="ml-5 space-y-2">
+<div class="text-on-surface-variant text-[10px] hover:text-primary cursor-pointer transition-colors py-0.5 border-l border-outline-variant/20 pl-3" style="">Xerrox Vol. 1</div>
+<div class="text-on-surface-variant text-[10px] hover:text-primary cursor-pointer transition-colors py-0.5 border-l border-outline-variant/20 pl-3" style="">Xerrox Vol. 2</div>
+<div class="text-primary text-[10px] font-bold py-0.5 flex items-center gap-2 border-l-2 border-primary pl-3 bg-primary/5" style="">
+                                    Xerrox Vol. 3
+                                </div>
+<div class="text-on-surface-variant text-[10px] hover:text-primary cursor-pointer transition-colors py-0.5 border-l border-outline-variant/20 pl-3" style="">Univrs</div>
+</div>
+</div>
+<div class="flex items-center gap-2 text-on-surface-variant font-medium text-[11px] hover:text-on-surface cursor-pointer py-1" style="">
+<span class="material-symbols-outlined text-[12px]" style="">person</span>
+                            RICHIE HAWTIN
+                        </div>
+<div class="flex items-center gap-2 text-on-surface-variant font-medium text-[11px] hover:text-on-surface cursor-pointer py-1" style="">
+<span class="material-symbols-outlined text-[12px]" style="">person</span>
+                            SURGEON
+                        </div>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- Column 2: Album Browser -->
+<section class="flex-grow flex flex-col bg-surface overflow-hidden">
+<div class="p-8 technical-scroll overflow-y-auto flex-grow">
+<div class="flex justify-between items-end mb-10">
+<h2 class="font-headline text-2xl font-black text-on-surface tracking-[-0.03em] uppercase" style="">Album Browser</h2>
+<div class="text-[10px] font-mono text-on-surface-variant tracking-widest uppercase" style="">3 items showing in /Techno/Alva_Noto</div>
+</div>
+<div class="grid grid-cols-1 2xl:grid-cols-2 gap-8">
+<!-- Album Card 1 -->
+<div class="bg-surface-container-low p-5 rounded-sm flex gap-6 border-l-2 border-primary shadow-lg shadow-black/20 group hover:bg-surface-container transition-all">
+<div class="relative flex-shrink-0">
+<img class="w-40 h-40 object-cover rounded-sm border border-outline-variant/20" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA_0vOlzbCklv7Z_5DLZQfj69XVUaSJNoDE8Ckqimm37-OJsWU96GVOgzUq2GuYyjGMib5FZkxOsyVAX4D72AVDBjM6vy1AiE68BNssFvO7TfrBi-oh02ONkQZ2HtNSu33zoJv9ih2xdxTyEdsDkUGGpQow_9MNm-3x2_cpDNR1CnUCG5dfbtoVgLU7ecRl2yzojdiC2YK_kh888oyq0ocg22yBMNd4UTm5Z1kd-g5EnpZLKCjdT1FJc18f9bpv29gDwxWNrAMzOw" style=""/>
+<div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-3xl" style="">play_arrow</span>
+</div>
+</div>
+<div class="flex-grow flex flex-col py-1">
+<h3 class="font-headline font-extrabold text-xl text-primary leading-tight mb-1" style="">Xerrox Vol. 3</h3>
+<p class="font-label text-[10px] text-on-surface-variant mb-5 uppercase tracking-[0.15em] font-semibold" style="">Alva Noto • Raster-Noton</p>
+<div class="space-y-2 mt-auto">
+<div class="flex justify-between text-[11px] font-mono text-on-surface-variant hover:text-on-surface cursor-pointer group/track border-b border-outline-variant/5 pb-1">
+<span class="group-hover/track:text-secondary" style="">01. Xerrox Isola</span>
+<span class="text-secondary/60" style="">08:12</span>
+</div>
+<div class="flex justify-between text-[11px] font-mono text-on-surface-variant hover:text-on-surface cursor-pointer group/track border-b border-outline-variant/5 pb-1">
+<span class="group-hover/track:text-secondary" style="">02. Xerrox Solura</span>
+<span class="text-secondary/60" style="">07:54</span>
+</div>
+<div class="flex justify-between text-[11px] font-mono text-on-surface-variant hover:text-on-surface cursor-pointer group/track">
+<span class="group-hover/track:text-secondary" style="">03. Xerrox Helm Transer</span>
+<span class="text-secondary/60" style="">06:22</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Album Card 2 -->
+<div class="bg-surface-container-low p-5 rounded-sm flex gap-6 border-l-2 border-outline-variant/30 shadow-lg shadow-black/20 group hover:bg-surface-container transition-all">
+<div class="relative flex-shrink-0">
+<img class="w-40 h-40 object-cover rounded-sm grayscale brightness-75 border border-outline-variant/20" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC6b4DutrjkXIxrzjdsiXVCMHtLjXoSXQo5u-q720gPzzLSrMfzj9mAfX0yxlGb0GX0UuVJKRswyhs1jyn8GGcXjQsCbv1ECpaMnCc0BoOHVFmh2IlmspbIJQ65OnUl1jccvW4dpXhNA8aPRKGFmBhZ4D2Vw3JNg7mYPOL1u2Yid6a0VPojJ2gy4-FxE8elBSyZ1rxnvHn0o-vIIJ1OBN-IfJZeP2HvKsimbeVOiswrC2k84piigHiAIChp2SdtT4d7rQE4CvE5JA" style=""/>
+<div class="absolute inset-0 bg-on-surface/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-3xl" style="">play_arrow</span>
+</div>
+</div>
+<div class="flex-grow flex flex-col py-1">
+<h3 class="font-headline font-extrabold text-xl text-on-surface leading-tight mb-1" style="">Univrs</h3>
+<p class="font-label text-[10px] text-on-surface-variant mb-5 uppercase tracking-[0.15em] font-semibold" style="">Alva Noto • Raster-Noton</p>
+<div class="space-y-2 mt-auto">
+<div class="flex justify-between text-[11px] font-mono text-on-surface-variant hover:text-on-surface cursor-pointer group/track border-b border-outline-variant/5 pb-1">
+<span class="group-hover/track:text-secondary" style="">01. Uni Ac</span>
+<span class="text-secondary/60" style="">05:12</span>
+</div>
+<div class="flex justify-between text-[11px] font-mono text-on-surface-variant hover:text-on-surface cursor-pointer group/track">
+<span class="group-hover/track:text-secondary" style="">02. Uni Core</span>
+<span class="text-secondary/60" style="">04:45</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Album Card 3 -->
+<div class="bg-surface-container-low p-5 rounded-sm flex gap-6 border-l-2 border-outline-variant/30 shadow-lg shadow-black/20 group hover:bg-surface-container transition-all">
+<img class="w-40 h-40 object-cover rounded-sm flex-shrink-0 border border-outline-variant/20" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDbVEej0fVPnUH8-1Nb2qW4vfHSBKvu6rV4mzSFW9XHrGFeafAjOCslO3_xPqcUY8uWUI3ThX5TyFVZOTe5Iznc_-7ijANCVC3x2jz6I8bXV-HtrWoto0nx4cEDhg3kuGuPL_XNw8lm7RPMU5HXnyypsejAq54GLz-qaK9AfeMVWToDqI5UfXHsm2Yt7jKoDbTrQNboDoOOaexwjqEPdb9VW91S3QEHXlDppRB7FRtKiAfSt_KGSCtky-PMxZSBmUd5O7tEd1xqvw" style=""/>
+<div class="flex-grow flex flex-col py-1">
+<h3 class="font-headline font-extrabold text-xl text-on-surface leading-tight mb-1" style="">DE9 | Closer to the Edit</h3>
+<p class="font-label text-[10px] text-on-surface-variant mb-5 uppercase tracking-[0.15em] font-semibold" style="">Richie Hawtin • M-nus</p>
+<div class="mt-auto">
+<div class="text-[10px] font-mono text-secondary py-1 bg-secondary/5 px-2 inline-block rounded-sm" style="">CONTINUOUS MIX • 74:22</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Column 3: Playback Queue (Width restricted) -->
+<section class="w-72 bg-surface-container-low flex flex-col border-l border-outline-variant/10">
+<div class="p-6 border-b border-outline-variant/10 bg-surface-container-high/30">
+<h2 class="font-headline text-lg font-black text-on-surface tracking-widest flex items-center gap-2 uppercase" style="">
+<span class="material-symbols-outlined text-secondary text-lg" style="">queue_music</span>
+                Queue
+            </h2>
+</div>
+<div class="flex-grow overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container-high sticky top-0 z-10">
+<tr>
+<th class="py-2.5 px-4 text-[9px] font-bold text-on-surface-variant uppercase tracking-widest border-b border-outline-variant/20" style="">#</th>
+<th class="py-2.5 px-4 text-[9px] font-bold text-on-surface-variant uppercase tracking-widest border-b border-outline-variant/20" style="">Track</th>
+<th class="py-2.5 px-4 text-[9px] font-bold text-on-surface-variant uppercase tracking-widest border-b border-outline-variant/20 text-right" style="">Bitrate</th>
+</tr>
+</thead>
+<tbody class="technical-scroll overflow-y-auto">
+<tr class="bg-primary/10 group cursor-default border-l-4 border-primary">
+<td class="py-3.5 px-4 text-[10px] font-mono text-primary font-bold" style="">01</td>
+<td class="py-3.5 px-4" style="">
+<div class="text-[11px] font-bold text-on-surface truncate w-32" style="">Xerrox Isola</div>
+<div class="text-[8px] text-on-surface-variant uppercase tracking-tighter truncate w-32" style="">Alva Noto • Xerrox 3</div>
+</td>
+<td class="py-3.5 px-4 text-[10px] font-mono text-secondary text-right font-medium" style="">1411</td>
+</tr>
+<tr class="border-b border-outline-variant/5 group hover:bg-surface-container-highest/40 transition-colors">
+<td class="py-3.5 px-4 text-[10px] font-mono text-on-surface-variant" style="">02</td>
+<td class="py-3.5 px-4" style="">
+<div class="text-[11px] font-medium text-on-surface group-hover:text-primary truncate w-32" style="">Xerrox Solura</div>
+<div class="text-[8px] text-on-surface-variant uppercase tracking-tighter truncate w-32" style="">Alva Noto • Xerrox 3</div>
+</td>
+<td class="py-3.5 px-4 text-[10px] font-mono text-on-surface-variant text-right" style="">940</td>
+</tr>
+<tr class="border-b border-outline-variant/5 group hover:bg-surface-container-highest/40 transition-colors">
+<td class="py-3.5 px-4 text-[10px] font-mono text-on-surface-variant" style="">03</td>
+<td class="py-3.5 px-4" style="">
+<div class="text-[11px] font-medium text-on-surface group-hover:text-primary truncate w-32" style="">Uni Core</div>
+<div class="text-[8px] text-on-surface-variant uppercase tracking-tighter truncate w-32" style="">Alva Noto • Univrs</div>
+</td>
+<td class="py-3.5 px-4 text-[10px] font-mono text-on-surface-variant text-right" style="">1411</td>
+</tr>
+<tr class="border-b border-outline-variant/5 group hover:bg-surface-container-highest/40 transition-colors">
+<td class="py-3.5 px-4 text-[10px] font-mono text-on-surface-variant" style="">04</td>
+<td class="py-3.5 px-4" style="">
+<div class="text-[11px] font-medium text-on-surface group-hover:text-primary truncate w-32" style="">Closer (Edit)</div>
+<div class="text-[8px] text-on-surface-variant uppercase tracking-tighter truncate w-32" style="">Richie Hawtin • DE9</div>
+</td>
+<td class="py-3.5 px-4 text-[10px] font-mono text-on-surface-variant text-right" style="">320</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- Column 4: Now Playing & Playlist Management -->
+<aside class="w-80 bg-surface-container-high flex flex-col overflow-hidden border-l border-outline-variant/10">
+<!-- Now Playing Section -->
+<div class="p-8 flex flex-col items-center border-b border-outline-variant/20 bg-surface-container-highest/20">
+<div class="relative w-full aspect-square mb-8 group overflow-hidden rounded-sm shadow-2xl shadow-black/60 border border-outline-variant/10">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC0DT1pJQYd9wyD1vsvWmzviI1hXXfqOWERGL2bt4jnhaqeFt1QYJHM7A4r_c9M8ToKmLkdovhpuocO68NATFkjPo6eRSTm9_IZcIcDS65Cp7DnRbnqfgpibXLp6OdPNE9J3O3gDuZuOllz_vFCJkj0Pt6dXTKuogtSFl9ufZ14W7Yqa6kXHeZdolv_xzCtDe-mqnGDBa0p30FqsP-b9pWtmgPJreB-BejURK8QaFegbnm4_81eQ4emk3rxLd-fUuR7YVILmyd03A" style=""/>
+<div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+<span class="material-symbols-outlined text-4xl text-white drop-shadow-lg" style="">fullscreen</span>
+</div>
+</div>
+<div class="w-full text-center mb-6">
+<h2 class="font-headline font-black text-2xl text-on-surface leading-tight tracking-tight uppercase" style="">Xerrox Isola</h2>
+<p class="font-label text-xs text-primary font-black mt-2 tracking-[0.3em] uppercase" style="">ALVA NOTO</p>
+<div class="inline-flex items-center gap-3 px-4 py-1.5 bg-black/40 mt-6 rounded-full border border-primary/20">
+<span class="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_#44E2CD]"></span>
+<span class="text-[10px] font-mono text-on-surface font-bold uppercase tracking-widest" style="">FLAC | 1411 KBPS</span>
+</div>
+</div>
+<div class="w-full space-y-4">
+<div class="flex justify-between text-[10px] font-mono text-on-surface-variant font-medium">
+<span class="" style="">04:12</span>
+<span class="text-secondary" style="">08:12</span>
+</div>
+<div class="h-1.5 w-full bg-surface-container-lowest rounded-full overflow-hidden border border-outline-variant/10">
+<div class="h-full bg-gradient-to-r from-primary via-secondary to-primary w-1/2 shadow-[0_0_12px_rgba(68,226,205,0.6)] animate-pulse"></div>
+</div>
+<div class="flex justify-center gap-10 mt-6">
+<button class="material-symbols-outlined text-on-surface-variant hover:text-primary transition-all text-2xl" style="">skip_previous</button>
+<button class="material-symbols-outlined text-on-surface text-5xl hover:scale-110 transition-transform active:scale-95" style="">pause_circle</button>
+<button class="material-symbols-outlined text-on-surface-variant hover:text-primary transition-all text-2xl" style="">skip_next</button>
+</div>
+</div>
+</div>
+<!-- Playlist Management Section -->
+<div class="flex-grow p-8 flex flex-col overflow-hidden bg-surface-container">
+<div class="flex gap-3 mb-8">
+<button class="flex-1 bg-surface-container-highest/60 text-on-surface border border-outline-variant/20 hover:border-primary py-2.5 px-3 flex items-center justify-center gap-3 transition-all group rounded-sm shadow-inner" style="">
+<span class="material-symbols-outlined text-sm group-hover:text-primary" style="">add</span>
+<span class="text-[10px] font-black uppercase tracking-[0.2em]" style="">New</span>
+</button>
+<button class="flex-1 bg-surface-container-highest/60 text-on-surface border border-outline-variant/20 hover:border-secondary py-2.5 px-3 flex items-center justify-center gap-3 transition-all group rounded-sm shadow-inner" style="">
+<span class="material-symbols-outlined text-sm group-hover:text-secondary" style="">file_upload</span>
+<span class="text-[10px] font-black uppercase tracking-[0.2em]" style="">Load</span>
+</button>
+</div>
+<div class="flex-grow flex flex-col overflow-hidden">
+<h3 class="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.25em] mb-6 flex items-center gap-3" style="">
+<span class="material-symbols-outlined text-sm text-secondary" style="">playlist_play</span>
+                    Recent Playlists
+                </h3>
+<div class="flex-grow technical-scroll overflow-y-auto space-y-2 pr-2">
+<div class="p-4 bg-primary/5 border-l-2 border-primary group cursor-pointer hover:bg-primary/10 transition-colors shadow-sm">
+<div class="text-xs font-black text-on-surface mb-1" style="">Midnight Focus</div>
+<div class="text-[9px] text-on-surface-variant uppercase font-mono tracking-tighter" style="">24 Tracks • 02:45:12 • 4.2GB</div>
+</div>
+<div class="p-4 bg-transparent border-l-2 border-transparent group cursor-pointer hover:bg-surface-container-highest/40 transition-colors">
+<div class="text-xs font-bold text-on-surface group-hover:text-primary mb-1" style="">Raster-Noton Essentials</div>
+<div class="text-[9px] text-on-surface-variant uppercase font-mono tracking-tighter" style="">112 Tracks • 14:22:00 • 18.5GB</div>
+</div>
+<div class="p-4 bg-transparent border-l-2 border-transparent group cursor-pointer hover:bg-surface-container-highest/40 transition-colors">
+<div class="text-xs font-bold text-on-surface group-hover:text-primary mb-1" style="">Deep Signal 04</div>
+<div class="text-[9px] text-on-surface-variant uppercase font-mono tracking-tighter" style="">12 Tracks • 01:12:00 • 1.1GB</div>
+</div>
+</div>
+</div>
+</div>
+</aside>
+</main>
+<!-- Transport/Status Bar -->
+<footer class="fixed bottom-0 left-0 w-full flex justify-around items-center px-12 z-50 bg-[#1C1B1B] h-20 border-t border-outline-variant/20 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+<div class="flex flex-col items-center text-[#44E2CD] hover:scale-105 transition-transform cursor-pointer group">
+<span class="material-symbols-outlined mb-1 text-2xl group-hover:drop-shadow-[0_0_8px_#44E2CD]" style="">play_circle</span>
+<span class="font-label text-[9px] font-black uppercase tracking-[0.25em]" style="">AUTO PLAY</span>
+</div>
+<div class="flex flex-col items-center text-[#CBC3D7] hover:text-[#D0BCFF] transition-all cursor-pointer group">
+<span class="material-symbols-outlined mb-1 text-2xl" style="">bar_chart</span>
+<span class="font-label text-[9px] font-black uppercase tracking-[0.25em]" style="">EQUALIZER</span>
+</div>
+<div class="flex flex-col items-center text-[#CBC3D7] hover:text-[#D0BCFF] transition-all cursor-pointer group">
+<span class="material-symbols-outlined mb-1 text-2xl" style="">info</span>
+<span class="font-label text-[9px] font-black uppercase tracking-[0.25em]" style="">TAG INFORMATION</span>
+</div>
+<div class="flex flex-col items-center text-[#CBC3D7] hover:text-[#D0BCFF] transition-all cursor-pointer group">
+<span class="material-symbols-outlined mb-1 text-2xl" style="">lan</span>
+<span class="font-label text-[9px] font-black uppercase tracking-[0.25em]" style="">SCAN DIRECTORIES</span>
+</div>
+</footer>
+</body></html>

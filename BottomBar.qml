@@ -1,0 +1,83 @@
+﻿import QtQuick
+
+// Bottom toolbar: Auto Play | Equalizer | Tag Information | Scan Directories
+Rectangle {
+    id: root
+    height: 56
+    color: Theme.surfaceContainerLow
+
+    // Emitted when the user clicks the SCAN DIRECTORIES button.
+    signal scanRequested()
+
+    // Set by Main.qml when a scan is running; animates the scan button.
+    property bool scanning: false
+
+    // Ghost top border
+    Rectangle {
+        anchors { left: parent.left; right: parent.right; top: parent.top }
+        height: 1
+        color: Theme.ov10
+    }
+
+    Row {
+        anchors.fill: parent
+
+        Repeater {
+            model: [
+                { label: "AUTO PLAY",       icon: "\u25B6", active: true  },
+                { label: "EQUALIZER",       icon: "\u2261", active: false },
+                { label: "TAG INFORMATION", icon: "\u24D8", active: false },
+                { label: "SCAN DIRECTORIES",icon: "\u29C9", active: false }
+            ]
+
+            delegate: Item {
+                width:  root.width / 4
+                height: root.height
+
+                readonly property bool isScanBtn: modelData.label === "SCAN DIRECTORIES"
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: bbHover.containsMouse ? Theme.surfaceContainerHigh : "transparent"
+                }
+
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 3
+
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: modelData.icon
+                        font.pixelSize: 16
+                        color: (isScanBtn && root.scanning)
+                               ? Theme.tertiary
+                               : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
+                    }
+
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: (isScanBtn && root.scanning) ? "SCANNING…" : modelData.label
+                        font.family: Theme.fontFamilyBody
+                        font.pixelSize:    Theme.labelXs
+                        font.weight:       Font.Medium
+                        font.letterSpacing: 1.0
+                        color: (isScanBtn && root.scanning)
+                               ? Theme.tertiary
+                               : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
+                    }
+                }
+
+                MouseArea {
+                    id: bbHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape:  Qt.PointingHandCursor
+                    onClicked: {
+                        if (isScanBtn && !root.scanning)
+                            root.scanRequested()
+                    }
+                }
+            }
+        }
+    }
+}

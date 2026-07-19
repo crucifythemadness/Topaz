@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run topaz (Qt Quick)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "C:/Qt/6.10.2/mingw_64/bin;C:/Qt/Tools/mingw1310_64/bin;${env:PATH}"
+        }
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "C:/Qt/Tools/mingw1310_64/bin/gdb.exe",
+      "preLaunchTask": "CMake: build"
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+#pragma once
+
+#include <QObject>
+#include <QQmlEngine>
+#include <QVariantList>
+#include <QVariantMap>
+
+// ── PlaylistManager ───────────────────────────────────────────────────────
+// Handles creation of XSPF (XML Shareable Playlist Format, version 1)
+// playlist files.
+//
+// Playlists are stored in:
+//   <AppConfigLocation>/playlists/<name>.xml
+//
+// Track locations in the XSPF file are written as absolute paths with
+// the Windows drive letter stripped (e.g. "C:/Music/foo.flac" →
+// "/Music/foo.flac") so playlists are portable across drive-letter changes.
+//
+// Instantiated in Main.qml:  PlaylistManager { id: playlistManager }
+class PlaylistManager : public QObject
+{
+    Q_OBJECT
+    QML_ELEMENT
+
+public:
+    explicit PlaylistManager(QObject *parent = nullptr);
+
+    // Returns the absolute path to the playlist directory (created on demand).
+    Q_INVOKABLE QString playlistDirectory() const;
+
+    // Returns true when a playlist with this name already exists.
+    Q_INVOKABLE bool playlistExists(const QString &name) const;
+
+    // Creates a new XSPF playlist.
+    // name   – file name without extension (leading/trailing whitespace trimmed)
+    // tracks – QVariantList of maps, each containing at minimum:
+    //            filePath (string), title (string), artist (string),
+    //            album (string), number (string/int), durationMs (int/qint64)
+    //
+    // Returns an empty string on success, or a human-readable error message.
+    Q_INVOKABLE QString createPlaylist(const QString &name,
+                                       const QVariantList &tracks);
+
+    // Appends one track to an existing playlist file.
+    // nameWithExt – file name including .xml extension (e.g. "GothicRock01.xml")
+    // track       – map with at least: filePath, title, artist/albumArtist, album,
+    //               number or trackNumber (int), durationMs (qint64)
+    // Returns true on success.
+    Q_INVOKABLE bool appendTrack(const QString &nameWithExt,
+                                  const QVariantMap &track);
+
+    // Removes the first track whose <location> matches filePath from the playlist.
+    // Returns true when a track was found and removed.
+    Q_INVOKABLE bool removeTrackByPath(const QString &nameWithExt,
+                                        const QString &filePath);
+
+    // Rewrites the entire playlist with the given track list.
+    // nameWithExt – file name including .xml extension.
+    // tracks      – QVariantList in the same format as createPlaylist / trackList().
+    // Returns true on success.  Use this after any reorder operation.
+    Q_INVOKABLE bool rewritePlaylist(const QString &nameWithExt,
+                                      const QVariantList &tracks);
+
+    // Loads an XSPF playlist file (accepts both a local path and a file:// URL).
+    // For each <track>, tries to resolve the stored relative location
+    // (no drive letter) by checking every mounted volume.  Tracks whose file
+    // cannot be found are silently skipped.
+    //
+    // Returns a QVariantMap with:
+    //   "fileName" – QString  base name + ".xml" (e.g. "GothicRock01.xml")
+    //   "tracks"   – QVariantList of resolved track maps suitable for
+    //                PlaybackEngine.addTracks();
+    //              each map contains: filePath, title, artist, albumArtist,
+    //                                 album, number, trackNumber, durationMs
+    Q_INVOKABLE QVariantMap loadPlaylist(const QString &filePath);
+
+private:
+    QByteArray buildXspf(const QString &title,
+                          const QVariantList &tracks) const;
+
+    // Strips Windows drive letter: "C:/Music/x.flac" → "/Music/x.flac"
+    static QString locationForPath(const QString &filePath);
+};
