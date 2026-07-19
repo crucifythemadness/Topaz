@@ -71,7 +71,7 @@ QVariant PlaybackEngine::data(const QModelIndex &index, int role) const
     case TrackNameRole:
         return t.title.isEmpty() ? t.fileName : t.title;
     case SubLabelRole: {
-        const QString artist = t.albumArtist.isEmpty() ? t.artist : t.albumArtist;
+        const QString artist = t.artist.isEmpty() ? t.albumArtist : t.artist;
         QString sub = artist.toUpper();
         if (!t.album.isEmpty()) sub += QStringLiteral(" \u2022 ") + t.album.toUpper();
         return sub;
@@ -140,7 +140,7 @@ QString PlaybackEngine::currentArtist() const
 {
     if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
     const TrackInfo &t = m_queue.at(m_currentIndex);
-    return t.albumArtist.isEmpty() ? t.artist : t.albumArtist;
+    return t.artist.isEmpty() ? t.albumArtist : t.artist;
 }
 
 QString PlaybackEngine::currentAlbum() const
@@ -261,6 +261,7 @@ void PlaybackEngine::removeAt(int idx)
             loadTrack(m_queue.size() - 1);
             m_player->play();
         } else {
+            clearCoverSource();
             emit currentIndexChanged();
             emit currentTrackChanged();
             emit isPlayingChanged();
@@ -357,6 +358,7 @@ void PlaybackEngine::clearQueue()
     if (m_queue.isEmpty()) return;
     m_player->stop();
     m_currentIndex = -1;
+    clearCoverSource();
     beginResetModel();
     m_queue.clear();
     endResetModel();
@@ -501,6 +503,14 @@ void PlaybackEngine::loadTrack(int idx)
 
     emit currentIndexChanged();
     emit currentTrackChanged();
+}
+
+void PlaybackEngine::clearCoverSource()
+{
+    m_coverWatcher.cancel();
+    if (m_largeCoverSource.isEmpty()) return;
+    m_largeCoverSource.clear();
+    emit currentLargeCoverSourceChanged();
 }
 
 void PlaybackEngine::advanceToNext()

@@ -375,8 +375,11 @@ queued-connection mechanism.
 | MP3 | ID3v2.2, ID3v2.3, ID3v2.4 | TIT2, TPE1, TPE2, TALB, TRCK, TCON, TLEN, TYER/TDRC, APIC |
 | FLAC | Vorbis Comment + STREAMINFO + PICTURE | TITLE, ARTIST, ALBUMARTIST, ALBUM, TRACKNUMBER, GENRE, DATE |
 
-**Duration estimation for MP3** (when TLEN frame is absent):
-1. Scan past ID3v2 tag to first MPEG sync word.
+**Bitrate and duration for MP3**: the first MPEG frame header (past the ID3v2 tag) is
+always scanned to determine bitrate, since ID3v2 has no dedicated bitrate frame. Duration
+is taken from the `TLEN` frame when present; otherwise it is estimated from the same
+frame header scan:
+1. Scan past ID3v2 tag to first MPEG sync word; read bitrate/sample-rate from the frame header.
 2. Check for Xing/Info VBR header → use `frame_count × samples_per_frame / sample_rate`.
 3. CBR fallback → `audio_bytes × 8 / bitrate`.
 
@@ -1011,7 +1014,7 @@ Pure mouse tracking avoids both issues: `onPositionChanged` fires reliably as lo
 |-------------------|--------|
 | Album art | `engine.currentLargeCoverSource` (full-res, loaded async); falls back to `engine.currentCoverSource` (160 px thumb) until ready |
 | Track title | `engine.currentTitle` |
-| Artist | `engine.currentArtist` (albumArtist with fallback to artist) |
+| Artist | `engine.currentArtist` (artist with fallback to albumArtist) |
 | Format badge | `engine.currentFormat` + `engine.currentBitrate` KBPS |
 | Elapsed time | `engine.positionString` ("M:SS") |
 | Total time | `engine.durationString` ("M:SS") |
@@ -1035,7 +1038,7 @@ It serves as **both the queue model** (rows = `TrackInfo` records) and the **pla
 | `positionString` | `QString` | `position` formatted as "M:SS" |
 | `durationString` | `QString` | `duration` formatted as "M:SS" |
 | `currentTitle` | `QString` | Title of the current track |
-| `currentArtist` | `QString` | albumArtist (falls back to artist) of the current track |
+| `currentArtist` | `QString` | artist (falls back to albumArtist) of the current track |
 | `currentAlbum` | `QString` | Album name of the current track |
 | `currentFormat` | `QString` | "FLAC" or "MP3" derived from file extension |
 | `currentBitrate` | `int` | kbps bitrate of the current track |
@@ -1069,7 +1072,7 @@ It serves as **both the queue model** (rows = `TrackInfo` records) and the **pla
 |-----------|------|---------|
 | `pos` | `QString` | Zero-padded queue position ("01", "02", …) |
 | `trackName` | `QString` | Track title (or file name if no title tag) |
-| `subLabel` | `QString` | "ALBUMARTIST • ALBUM" (uppercase) |
+| `subLabel` | `QString` | "ARTIST • ALBUM" (uppercase) |
 | `kbps` | `int` | Bitrate in kbps |
 | `playing` | `bool` | `true` for the currently playing row |
 | `durationStr` | `QString` | "M:SS" track duration |

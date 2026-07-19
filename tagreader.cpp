@@ -237,6 +237,8 @@ bool TagReader::readId3v2(QFile &f, TrackInfo &info,
 
 void TagReader::estimateMp3Duration(QFile &f, qint64 audioStart, TrackInfo &info)
 {
+    const bool needDuration = (info.duration == 0);
+
     f.seek(audioStart);
     const QByteArray buf = f.read(10240); // search window
 
@@ -276,6 +278,8 @@ void TagReader::estimateMp3Duration(QFile &f, qint64 audioStart, TrackInfo &info
     const int bitrate = isMpeg1 ? kBr1[brIdx] : kBr2[brIdx];
     if (bitrate == 0) return;
     info.bitrate = bitrate;
+
+    if (!needDuration) return; // TLEN frame already gave us an exact duration
 
     int sampleRate = 0;
     if (versionBits == 3)      sampleRate = kSr1[srIdx];
@@ -429,8 +433,7 @@ TrackInfo TagReader::read(const QString &filePath, bool generateCoverThumb)
     if (ext == "mp3") {
         qint64 id3End = 0;
         readId3v2(f, info, generateCoverThumb, id3End);
-        if (info.duration == 0)
-            estimateMp3Duration(f, id3End, info);
+        estimateMp3Duration(f, id3End, info); // always needed for bitrate, even when TLEN set duration
     } else if (ext == "flac") {
         readFlac(f, info, generateCoverThumb);
         // Approximate FLAC bitrate from file size + duration

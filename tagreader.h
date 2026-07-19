@@ -39,7 +39,10 @@ private:
 
     static bool readFlac(QFile &f, TrackInfo &info, bool generateCoverThumb);
 
-    // Estimate MP3 duration from MPEG frame header / Xing VBR header.
+    // Always determines bitrate from the first MPEG frame header (ID3v2 has no
+    // dedicated bitrate frame). Also fills in duration from the Xing/Info VBR
+    // header or a CBR estimate, but only when info.duration is not already known
+    // (e.g. from an ID3v2 TLEN frame read earlier).
     static void estimateMp3Duration(QFile &f, qint64 audioStart, TrackInfo &info);
 
     // Decode a 4-byte ID3v2 syncsafe integer (each byte uses 7 bits).

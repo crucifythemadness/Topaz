@@ -138,6 +138,7 @@ signals:
 private:
     void loadTrack(int index);
     void advanceToNext();
+    void clearCoverSource();
 
     static QString msToString(qint64 ms);
     static QString formatFromPath(const QString &path);
