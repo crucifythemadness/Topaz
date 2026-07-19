@@ -58,6 +58,11 @@ Item {
     property string selectedArtist:  ""
     property string selectedAlbum:   ""
 
+    // Emitted only when a genre is auto-selected as a result of GenreBar
+    // activation/deactivation (see _selectGenreExclusive()) — never for
+    // user-driven selection (tree clicks go through selectGenre() instead).
+    signal genreAutoSelected(string genre)
+
     // ── Genre Toggle Model ────────────────────────────────────────────────
     // Populated at runtime by rebuildGenreModel() from AppConfig.genres.
     property alias genreModel: _genreModel
@@ -70,9 +75,41 @@ Item {
     // ── Mutation Functions ────────────────────────────────────────────────
 
     function toggleGenre(index) {
-        const was = _genreModel.get(index).active
-        _genreModel.setProperty(index, "active", !was)
-        _rebuildActiveNames()
+        const entry      = _genreModel.get(index)
+        const name       = entry.name
+        const activating = !entry.active
+
+        if (activating) {
+            _genreModel.setProperty(index, "active", true)
+            _rebuildActiveNames()
+            _selectGenreExclusive(name)
+        } else {
+            // Capture this genre's position among the currently-active genres
+            // before removing it, so we can auto-select its nearest neighbour.
+            const oldActive = activeGenreNames
+            const pos = Math.max(0, oldActive.indexOf(name))
+
+            _genreModel.setProperty(index, "active", false)
+            _rebuildActiveNames()
+
+            if (activeGenreNames.length === 0) {
+                selectedGenre = ""
+            } else {
+                // Removing the genre at `pos` shifts everything after it down by
+                // one, so the genre that was next now sits at this same index;
+                // if this genre was last, clamp to the new last (previous) genre.
+                const neighborIdx = Math.min(pos, activeGenreNames.length - 1)
+                _selectGenreExclusive(activeGenreNames[neighborIdx])
+            }
+        }
+    }
+
+    // Selects exactly one genre, replacing any prior genre/artist/album selection.
+    function _selectGenreExclusive(name) {
+        selectedGenre  = name
+        selectedArtist = ""
+        selectedAlbum  = ""
+        genreAutoSelected(name)
     }
 
     function selectGenre(name) {
@@ -81,8 +118,21 @@ Item {
         selectedAlbum  = ""
     }
 
-    function selectArtist(name) {
-        selectedArtist = (selectedArtist === name) ? "" : name
+    function selectArtist(name, genre) {
+        const sameArtist = (selectedArtist === name)
+        const sameGenre  = (genre === undefined || genre === selectedGenre)
+        if (sameArtist && sameGenre) {
+            // Clicking the exact same artist row again — deselect.
+            selectedArtist = ""
+            selectedAlbum  = ""
+            return
+        }
+        // An artist can appear under more than one genre section if their tracks
+        // carry different genre tags — pre-select the row's actual genre so
+        // filteredAlbums() doesn't narrow to the wrong (empty-for-this-artist) genre.
+        if (genre !== undefined && genre !== selectedGenre)
+            selectedGenre = genre
+        selectedArtist = name
         selectedAlbum  = ""
     }
 
@@ -127,7 +177,6 @@ Item {
             if (_genreModel.get(i).active) names.push(_genreModel.get(i).name)
         }
         activeGenreNames = names
-        selectedGenre    = ""
         selectedArtist   = ""
         selectedAlbum    = ""
         _rebuildTree()

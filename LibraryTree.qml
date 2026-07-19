@@ -86,6 +86,23 @@ Rectangle {
         function onLibraryChanged() { root._refreshGenres() }
     }
 
+    // Scroll the tree to reveal a genre that was auto-selected (GenreBar toggle
+    // activation, or the neighbour-select on deactivation) — never fired for
+    // user-driven selection (manual tree clicks use lib.selectGenre() instead).
+    Connections {
+        target: lib
+        function onGenreAutoSelected(genre) {
+            Qt.callLater(function() {
+                for (let i = 0; i < root.flatRows.length; i++) {
+                    if (root.flatRows[i].type === 0 && root.flatRows[i].genre === genre) {
+                        treeList.positionViewAtIndex(i, ListView.Contain)
+                        break
+                    }
+                }
+            })
+        }
+    }
+
     function _toggleArtist(genre, artist) {
         _artistToggle = true
         var key  = genre + ":" + artist
@@ -94,7 +111,7 @@ Rectangle {
         copy[key] = !copy[key]
         expandedArtists = copy          // triggers onExpandedArtistsChanged -> _rebuildFlatList()
         _artistToggle = false
-        if (lib) lib.selectArtist(artist)
+        if (lib) lib.selectArtist(artist, genre)
     }
 
     function _selectGenre(genre) {

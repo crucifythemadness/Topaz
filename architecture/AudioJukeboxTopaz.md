@@ -53,7 +53,7 @@ Topaz is an audio jukebox which is a desktop app that can play audio files (*.fl
 
 1. User clicks a genre button (e.g. "Techno").
 2. `GenreBar` calls `lib.toggleGenre(index)`.
-3. `LibraryData.toggleGenre()` flips the `active` flag in `genreModel`, rebuilds `activeGenreNames`, and clears `selectedGenre` / `selectedArtist` / `selectedAlbum`.
+3. `LibraryData.toggleGenre()` flips the `active` flag in `genreModel` and rebuilds `activeGenreNames`. If the genre was just **activated**, it becomes the sole `selectedGenre` (replacing any prior selection). If it was just **deactivated**, the nearest remaining active genre is auto-selected instead — the one positionally after it, or if it was the last active genre, the one before it; if no active genres remain, `selectedGenre` is cleared. `selectedArtist`/`selectedAlbum` are cleared in both cases. When a genre is auto-selected this way, `LibraryData` emits `genreAutoSelected(genre)`, and `LibraryTree` scrolls that genre's header row into view via `positionViewAtIndex(..., ListView.Contain)`. This scroll-into-view only happens for auto-selection — manually clicking a genre, artist, or album row in the tree does not trigger it.
 4. `LibraryTree.onLibraryChanged` fires → tree renders only active-genre sections.
 5. `AlbumBrowser` receives `onActiveGenreNamesChanged` → schedules `_scheduleRefresh()` via `Qt.callLater` (deferred to the next event-loop tick so LibraryTree renders its frame first) → `currentAlbums = lib.filteredAlbums()` → `ListView` updates.
 6. `AlbumBrowser` subtitle updates to reflect the new filter path (e.g. `TECHNO`).
@@ -68,9 +68,10 @@ User clicks a genre header row in `LibraryTree`:
 
 ### Alternate: Artist drill-down
 
-After activating genres, the user clicks an artist in `LibraryTree`:
-- `LibraryTree` calls `lib.selectArtist(name)` and toggles local expand state.
-- `AlbumBrowser` receives `onSelectedArtistChanged` → `currentAlbums` narrows to that artist's albums only.
+After activating genres, the user clicks an artist row in `LibraryTree`:
+- `LibraryTree` calls `lib.selectArtist(name, genre)` (passing the genre section the row belongs to) and toggles local expand state.
+- `LibraryData.selectArtist()` pre-selects that `genre` if it differs from the current `selectedGenre` (an artist can appear under more than one genre section when their tracks carry different genre tags) — otherwise `AlbumBrowser` would narrow to the wrong genre and show no albums for that artist. Clicking the same artist row again (same name *and* same genre) deselects it.
+- `AlbumBrowser` receives `onSelectedArtistChanged` (and `onSelectedGenreChanged` if the genre changed) → `currentAlbums` narrows to that artist's albums only.
 
 ### Alternate: Album drill-down
 
