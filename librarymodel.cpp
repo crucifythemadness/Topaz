@@ -25,8 +25,14 @@ LibraryModel::LibraryModel(QObject *parent)
 LibraryModel::~LibraryModel()
 {
     if (m_scanThread && m_scanThread->isRunning()) {
+        if (m_scanWorker) m_scanWorker->cancelScan();
         m_scanThread->quit();
-        m_scanThread->wait(3000);
+        if (!m_scanThread->wait(3000)) {
+            // Scan didn't stop in time (e.g. unresponsive I/O). Detach instead of
+            // letting ~QObject delete a still-running QThread, which Qt treats as
+            // a fatal error — the OS reclaims the thread when the process exits.
+            m_scanThread->setParent(nullptr);
+        }
     }
 }
 

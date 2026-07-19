@@ -6,6 +6,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QVariantList>
+#include <atomic>
 
 class QFileSystemWatcher;
 class QTimer;
@@ -32,6 +33,13 @@ class LibraryScanner : public QObject
 public:
     explicit LibraryScanner(QObject *parent = nullptr);
     ~LibraryScanner() override;
+
+    // Thread-safe — callable from any thread (including from LibraryModel's
+    // destructor while fullScan()/statCheck() is running on the worker thread).
+    // Asks the running scan to stop at its next checkpoint instead of running
+    // to completion. Not a slot: a queued call would never be processed while
+    // the worker thread is busy inside a long-running scan loop.
+    void cancelScan() { m_cancelRequested.store(true, std::memory_order_relaxed); }
 
 public slots:
     // Called once when the thread starts – creates watcher + debounce timer.
@@ -76,4 +84,5 @@ private:
     QStringList         m_lastGenres;
     QVariantList        m_lastFolders;
     QList<TrackInfo>    m_lastCache;
+    std::atomic<bool>   m_cancelRequested{false};
 };

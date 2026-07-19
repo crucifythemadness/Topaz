@@ -77,6 +77,8 @@ void LibraryScanner::scanDirectory(
     const QFileInfoList entries = dir.entryInfoList(dirFilter);
 
     for (const QFileInfo &fi : entries) {
+        if (m_cancelRequested.load(std::memory_order_relaxed)) return;
+
         if (fi.isDir()) {
             if (recursive)
                 scanDirectory(fi.absoluteFilePath(), true,
@@ -142,6 +144,8 @@ void LibraryScanner::fullScan(QStringList  genres,
                                QVariantList folders,
                                QList<TrackInfo> existingCache)
 {
+    m_cancelRequested.store(false, std::memory_order_relaxed);
+
     m_lastGenres  = genres;
     m_lastFolders = folders;
     m_lastCache   = existingCache;
@@ -192,6 +196,7 @@ void LibraryScanner::fullScan(QStringList  genres,
     emit scanProgress(0, total);
 
     for (const QVariant &v : std::as_const(folders)) {
+        if (m_cancelRequested.load(std::memory_order_relaxed)) break;
         const QVariantMap m    = v.toMap();
         const QString     path = m[QStringLiteral("path")].toString();
         if (path.isEmpty()) continue;
@@ -202,6 +207,10 @@ void LibraryScanner::fullScan(QStringList  genres,
                       seenAlbums, result, done, total);
     }
 
+    // Shutting down mid-scan: skip writing a partial cache and don't bother
+    // signaling completion — the app is already tearing down.
+    if (m_cancelRequested.load(std::memory_order_relaxed)) return;
+
     LibraryCache::save(result);
     updateWatcher(rootDirs);
     emit scanCompleted(result);
@@ -211,6 +220,8 @@ void LibraryScanner::statCheck(QStringList  genres,
                                 QVariantList folders,
                                 QList<TrackInfo> existingCache)
 {
+    m_cancelRequested.store(false, std::memory_order_relaxed);
+
     m_lastGenres  = genres;
     m_lastFolders = folders;
     m_lastCache   = existingCache;
@@ -235,6 +246,8 @@ void LibraryScanner::statCheck(QStringList  genres,
     QSet<QString> stillPresentPaths;
 
     for (const TrackInfo &t : std::as_const(existingCache)) {
+        if (m_cancelRequested.load(std::memory_order_relaxed)) return;
+
         const QFileInfo fi(t.filePath);
         if (!fi.exists()) continue; // deleted
         if (!configuredGenresLower.contains(t.genre.trimmed().toLower())) continue;
@@ -271,6 +284,7 @@ void LibraryScanner::statCheck(QStringList  genres,
     const int total = done; // progress is approximate for stat-check
     QStringList rootDirs;
     for (const QVariant &v : std::as_const(folders)) {
+        if (m_cancelRequested.load(std::memory_order_relaxed)) break;
         const QVariantMap m    = v.toMap();
         const QString     path = m[QStringLiteral("path")].toString();
         if (path.isEmpty()) continue;
@@ -285,6 +299,11 @@ void LibraryScanner::statCheck(QStringList  genres,
                       existingIds, newFilesOnly, existingCacheMap,
                       seenAlbums, result, done, total);
     }
+
+    // Shutting down mid-scan: skip writing a partial cache and don't bother
+    // signaling completion — the app is already tearing down.
+    if (m_cancelRequested.load(std::memory_order_relaxed)) return;
+
     // Deduplicate (scanDirectory may encounter files already in result)
     QSet<QString> seen;
     QList<TrackInfo> deduped;

@@ -1303,5 +1303,34 @@ Only the found tracks are added; the missing ones are silently omitted.  The loa
 - `preventStealing: true` on the thumb's `MouseArea` keeps the `ListView`'s own flick gesture from stealing the drag, the same technique already used for the queue-reorder drag handle.
 - Mouse-wheel scrolling and click-drag on the list content itself are unaffected — this only adds a second way to scroll, via the thumb.
 - Row/track delegates in `LibraryTree`, `AlbumCard` (used by `AlbumBrowser`), and `PlaybackQueue` all reserve the rightmost 8 px for the scrollbar thumb's column — either by making the delegate itself narrower (`LibraryTree`, `width: treeList.width - 8`) or by trimming the row's click-catching `MouseArea` with `anchors.rightMargin: 8` (`AlbumCard`'s `trackMA`, `PlaybackQueue`'s `rowHover`) — so row interaction never competes with the scrollbar thumb for the same mouse press. Without this, a row's own `MouseArea` can win the press instead of the thumb (identical idle cursor on both makes this invisible until the user drags), reinterpreting the gesture as that row's own drag instead of a scroll. The scrollbar track `Rectangle` in each panel also sets `z: 2` as a defensive guarantee that it hit-tests above delegate content.
+
+---
+
+## UC-13 Cancel Ongoing Scan on Application Close
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Topaz cancels an in-progress library scan instead of crashing or hanging when the user closes the application while a scan is running. |
+| **Actor** | System |
+| **Precondition** | A `fullScan()` or `statCheck()` is actively running on the `LibraryScanner` worker thread. |
+| **Trigger** | User closes the application window (or the app otherwise quits) while `LibraryModel.scanning` is `true`. |
+
+### Normal Flow
+
+1. The application's normal shutdown path destroys the QML object tree, including `LibraryModel`.
+2. `LibraryModel::~LibraryModel()` detects the worker thread is still running and calls `LibraryScanner::cancelScan()` — a thread-safe, non-queued call that sets an atomic flag directly, without waiting for the worker's event loop.
+3. The scan loop inside `LibraryScanner::scanDirectory()` (and the cache-validation loop at the top of `statCheck()`) checks this flag once per file and returns as soon as it's set (checkpoint latency ≈ one file's tag-read), unwinding out of `fullScan()`/`statCheck()` without writing a partial result to `Topaz.library.json` and without emitting `scanCompleted()`.
+4. `LibraryModel` then calls `QThread::quit()` and waits (up to 3 s) for the now-unwound worker thread to exit its event loop.
+5. Once the thread has stopped, `LibraryModel`'s destructor completes and the application closes normally.
+
+### Alternate: worker doesn't stop within the wait timeout
+
+If the wait still times out (e.g. a single slow file read on unresponsive I/O), the destructor detaches the `QThread` (`setParent(nullptr)`) instead of allowing `~QObject` to delete a still-running thread, which Qt treats as a fatal error. The detached thread is reclaimed by the OS when the process exits.
+
+### Design notes
+
+- Cancellation uses a plain `std::atomic<bool>` (`LibraryScanner::m_cancelRequested`) polled by the worker loop, not a queued signal/slot — a queued call would never be processed while the worker thread is busy inside a long-running `fullScan()`/`statCheck()` call, since queued slots only run when that thread's event loop is free.
+- The flag is reset to `false` at the start of both `fullScan()` and `statCheck()`, so a cancellation triggered by one shutdown attempt doesn't permanently block a future scan.
+- This only guards application shutdown; it does not add a user-facing "cancel scan" control to the UI.
 - **Sync invariant preserved**: `setActivePlaylistName` is called *after* `addTracks`, so the batch `addTracks` call does not re-append the tracks to the file (the sync guard checks `m_activePlaylistName` which is still empty at that point).
 
