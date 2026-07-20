@@ -25,7 +25,7 @@ Popup {
 
     // ── Geometry ─────────────────────────────────────────────────────────
     anchors.centerIn: Overlay.overlay
-    width:  780
+    width:  920   // widened so genreManageGrid's cells grow ~20% for longer genre names
     height: 560
     padding: 0
 
@@ -197,53 +197,70 @@ Popup {
                             color: Theme.fgSurfaceVariant
                         }
 
-                        // Chip flow
-                        ScrollView {
+                        // Fixed no-scroll grid — sized to hold up to 30 genres
+                        // (6 columns × 5 rows), mirroring GenreBar's own
+                        // fixed-capacity "Grid 30" pattern.
+                        Grid {
+                            id: genreManageGrid
                             anchors.fill: parent
                             visible: root.appConfig !== null && root.appConfig.genres.length > 0
-                            clip: true
+                            clip: true              // defensive: beyond 30 genres, extra
+                                                     // rows clip rather than overflow —
+                                                     // same ceiling GenreBar accepts
+                            columns: 6
+                            rowSpacing:    8
+                            columnSpacing: 8
 
-                            Flow {
-                                width:   parent.width
-                                spacing: 6
+                            Repeater {
+                                model: root.appConfig ? root.appConfig.genres : []
 
-                                Repeater {
-                                    model: root.appConfig ? root.appConfig.genres : []
+                                delegate: Rectangle {
+                                    id: genreCell
+                                    width:  (genreManageGrid.width
+                                             - (genreManageGrid.columns - 1) * genreManageGrid.columnSpacing)
+                                            / genreManageGrid.columns
+                                    height: 48
+                                    radius: Theme.radiusSm
 
-                                    delegate: Rectangle {
-                                        width:  chipText.implicitWidth + 24
-                                        height: 32
+                                    readonly property bool isSelected:
+                                        root.selectedGenreIndex === index
+
+                                    color: isSelected
+                                           ? Theme.secondaryContainer
+                                           : cellHover.containsMouse
+                                             ? Theme.surfaceContainerHighest
+                                             : Theme.surfaceContainerHigh
+
+                                    // Hover glow — matches GenreBar's micro-slab rule
+                                    Rectangle {
+                                        anchors { left: parent.left; right: parent.right; top: parent.top }
+                                        height: 2
+                                        color: Theme.primary
+                                        visible: cellHover.containsMouse && !genreCell.isSelected
                                         radius: Theme.radiusSm
+                                    }
 
-                                        readonly property bool isSelected:
-                                            root.selectedGenreIndex === index
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: modelData.toUpperCase()
+                                        font.family:        Theme.fontFamilyBody
+                                        font.pixelSize:     Theme.labelMd
+                                        font.letterSpacing: 1.2
+                                        elide: Text.ElideRight
+                                        width: parent.width - 12
+                                        horizontalAlignment: Text.AlignHCenter
+                                        color: genreCell.isSelected
+                                               ? Theme.fgSecondaryContainer
+                                               : Theme.fgSurfaceVariant
+                                    }
 
-                                        color: isSelected
-                                               ? Theme.secondaryContainer
-                                               : chipHover.containsMouse
-                                                 ? Theme.surfaceContainerHighest
-                                                 : Theme.surfaceContainerHigh
-
-                                        Text {
-                                            id: chipText
-                                            anchors.centerIn: parent
-                                            text: modelData.toUpperCase()
-                                            font.family:        Theme.fontFamilyBody
-                                            font.pixelSize:     Theme.labelMd
-                                            font.letterSpacing: 1.2
-                                            color: parent.isSelected
-                                                   ? Theme.fgSecondaryContainer
-                                                   : Theme.fgSurfaceVariant
-                                        }
-
-                                        MouseArea {
-                                            id: chipHover
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape:  Qt.PointingHandCursor
-                                            onClicked: root.selectedGenreIndex =
-                                                (root.selectedGenreIndex === index) ? -1 : index
-                                        }
+                                    MouseArea {
+                                        id: cellHover
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape:  Qt.PointingHandCursor
+                                        onClicked: root.selectedGenreIndex =
+                                            (root.selectedGenreIndex === index) ? -1 : index
                                     }
                                 }
                             }

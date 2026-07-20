@@ -126,7 +126,7 @@ User clicks an album row in `LibraryTree`:
 
 ### Normal Flow — Delete selected genre
 
-1. User clicks a genre chip to select it (highlighted in `secondaryContainer` colour).
+1. User clicks a genre cell in the grid to select it (highlighted in `secondaryContainer` colour).
 2. User clicks **DELETE SELECTED**.
 3. `appConfig.removeGenreAt(index)` removes the entry, emits `genresChanged`, auto-saves.
 4. `LibraryData.rebuildGenreModel()` fires; the chip disappears from `GenreBar`.
@@ -143,6 +143,10 @@ User clicks an album row in `LibraryTree`:
 - Genre names are stored in their original casing and displayed upper-cased in `GenreBar`.
 - Maximum 30 genres are displayed in `GenreBar` (3 rows × 10 columns); additional genres are
   still stored but may not be visible until the layout is extended.
+- The GENRES tab in `SetupDialog` lays out configured genres in a fixed 6-column grid
+  (up to 5 rows = 30 cells) sized to always fit without a scrollbar, mirroring
+  `GenreBar`'s own fixed-grid pattern; genres beyond 30 remain stored but may not all
+  be visible, the same accepted ceiling as `GenreBar`.
 
 ---
 
