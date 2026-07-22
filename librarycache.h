@@ -25,7 +25,9 @@
 //       "bitrate":      320,
 //       "fileSize":     12345678,
 //       "lastModified": 1234567890123,
-//       "coverThumb":   "base64..."
+//       "coverThumb":   "base64...",
+//       "rating":       0,
+//       "ratingId":     "uuid-string"
 //     }, ...
 //   ]
 // }

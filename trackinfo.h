@@ -33,6 +33,25 @@ struct TrackInfo
     // Only populated for one representative track per (albumArtist, album) pair;
     // all other tracks in the same album store an empty string.
     QString coverThumb;
+
+    int    rating   = 0;     // user rating 1-10; 0 = not rated yet
+    QUuid  ratingId;         // deterministic identity for Topaz.rating.json persistence
+
+    // Deterministic (repeatable) UUIDv5 identity so ratings survive a full library
+    // rebuild/rescan. Recomputed by LibraryScanner whenever a track's tags are (re-)read;
+    // if albumArtist/artist/album/title change later, this — and the link to any existing
+    // rating — changes too, the same way every other derived track property already does.
+    static QUuid computeRatingId(const QString &albumArtist, const QString &artist,
+                                  const QString &album, const QString &title)
+    {
+        // Fixed, hardcoded namespace — must never change, or every existing ratingId
+        // would stop matching previously-persisted ratings.
+        static const QUuid kRatingNamespace(
+            QStringLiteral("{2f8e6a4c-0f1d-4a3b-9c2e-5b7d1a9e3f6b}"));
+        const QString key = albumArtist + QChar(';') + artist + QChar(';')
+                           + album + QChar(';') + title;
+        return QUuid::createUuidV5(kRatingNamespace, key.toUtf8());
+    }
 };
 
 Q_DECLARE_METATYPE(TrackInfo)

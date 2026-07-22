@@ -1,5 +1,6 @@
 #include "libraryscanner.h"
 #include "librarycache.h"
+#include "ratingcache.h"
 #include "tagreader.h"
 
 #include <QDir>
@@ -211,6 +212,16 @@ void LibraryScanner::fullScan(QStringList  genres,
     // signaling completion — the app is already tearing down.
     if (m_cancelRequested.load(std::memory_order_relaxed)) return;
 
+    // Backfill any missing ratingId (e.g. a Topaz.library.json predating this
+    // feature) and (re-)apply persisted ratings from Topaz.rating.json — the
+    // latter is always authoritative, so this also picks up external edits.
+    const QHash<QUuid, int> ratings = RatingCache::load();
+    for (TrackInfo &t : result) {
+        if (t.ratingId.isNull())
+            t.ratingId = TrackInfo::computeRatingId(t.albumArtist, t.artist, t.album, t.title);
+        t.rating = ratings.value(t.ratingId, 0);
+    }
+
     LibraryCache::save(result);
     updateWatcher(rootDirs);
     emit scanCompleted(result);
@@ -313,6 +324,16 @@ void LibraryScanner::statCheck(QStringList  genres,
             seen.insert(t.filePath);
             deduped.append(t);
         }
+    }
+
+    // Backfill any missing ratingId (e.g. a Topaz.library.json predating this
+    // feature) and (re-)apply persisted ratings from Topaz.rating.json — the
+    // latter is always authoritative, so this also picks up external edits.
+    const QHash<QUuid, int> ratings = RatingCache::load();
+    for (TrackInfo &t : deduped) {
+        if (t.ratingId.isNull())
+            t.ratingId = TrackInfo::computeRatingId(t.albumArtist, t.artist, t.album, t.title);
+        t.rating = ratings.value(t.ratingId, 0);
     }
 
     LibraryCache::save(deduped);

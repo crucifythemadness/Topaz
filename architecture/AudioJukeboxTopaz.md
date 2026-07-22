@@ -344,14 +344,14 @@ Topaz module
 ├── AlbumCard.qml       Single album card delegate (cover + track listing; single-track drag & drop to queue; no selection; no context menus)
 │                         property var engine  (optional; used for double-click add-to-queue and drag cursor override)
 ├── PlaybackQueue.qml   Queue panel  default width 374 px, user-resizable  (bound to PlaybackEngine model; DropArea; move/remove; shows activePlaylistName in header when set; shows LOCK PLAYLIST toggle when a playlist is active)
-├── NowPlaying.qml      Right panel  default width 359 px, user-resizable  (bound to PlaybackEngine + PlaylistManager: art + transport + progress + playlists)
+├── NowPlaying.qml      Right panel  default width 359 px, user-resizable  (bound to PlaybackEngine + PlaylistManager: art + transport + progress + playlists + 10-star rating row, see UC-14)
 |                         property playlistManager PlaylistManager
 |                         signal newPlaylistRequested()  <- "+ NEW" button click
 |                         FileDialog loadPlaylistDialog <- opens on LOAD; default folder = playlistDirectory(); filter *.xml
 |                         Playlist row 1: NEW | LOAD (clears active playlist first if one is loaded, then opens file dialog)
 |                         Playlist row 2: EXPORT (not yet wired) | REMOVE (active only when playlist loaded; calls engine.clearQueue())
 │                         signal newPlaylistRequested()  ← “+ NEW” button click
-└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property)
+└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates the AUTO PLAY entry's active visual state only, see UC-14)
 ```
 
 ## LibraryModel Component
@@ -407,6 +407,7 @@ changes (see `PlaybackEngine::currentLargeCoverSource`).
 | `scanning` | `true` while a scan is running |
 | `scanProgress` | 0–100 completion percentage |
 | `trackCount` | Number of tracks currently in the model |
+| `ratingsReady` | `true` once a scan (full or stat-check) has completed at least once in this session with rating enrichment applied (see UC-14). Gates the AUTO PLAY button in `BottomBar`; never reset back to `false`. |
 | `loadCacheAndStartStatCheck()` | Load cache instantly, then dispatch stat-check |
 | `startFullScan()` | Trigger a full rescan on the worker thread |
 | `genres()` | Distinct genre strings present in the library |
@@ -440,7 +441,9 @@ Stored alongside `Topaz.config` in `QStandardPaths::AppConfigLocation`.
       "bitrate":      1024,
       "fileSize":     54321678,
       "lastModified": 1718400000000,
-      "coverThumb":   "" 
+      "coverThumb":   "",
+      "rating":       0,
+      "ratingId":     "6f9619ff-8b86-d011-b42d-00c04fc964ff"
     }
   ]
 }
@@ -450,6 +453,31 @@ Stored alongside `Topaz.config` in `QStandardPaths::AppConfigLocation`.
 `(albumArtist, album)` pair; all other tracks have an empty string.
 An average JPEG thumbnail (160×160, quality 80) is ≈ 10 KB; Base64-encoded ≈ 14 KB.
 For 500 albums: ≈ 7 MB total cache size — well within acceptable range.
+
+### Rating cache format — `Topaz.rating.json`
+
+Stored alongside `Topaz.config`/`Topaz.library.json` in `QStandardPaths::AppConfigLocation`.
+Written and read by `RatingCache` (`ratingcache.h/cpp`), mirroring `LibraryCache`'s
+atomic tmp-then-rename save pattern. This file — not `Topaz.library.json` — is the
+authoritative store for user ratings, so ratings survive a full library rebuild
+(rescan). See UC-14 for the full read/write flow.
+
+```json
+{
+  "version": 1,
+  "ratings": [
+    {
+      "genre":    "Techno",
+      "ratingId": "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+      "rating":   8
+    }
+  ]
+}
+```
+
+Only rated tracks (`rating` 1–10) are ever written; unrated tracks (`rating` 0) never
+appear here. `ratingId` is the join key back to `TrackInfo.ratingId` (see
+`TrackInfo::computeRatingId()` in the class diagram below and UC-14).
 
 ### Data Flow: Library Scan
 
@@ -803,6 +831,9 @@ configurable via the app JSON config) will be introduced at that point.
       +qint64 fileSize
       +qint64 lastModified
       +QString coverThumb
+      +int rating
+      +QUuid ratingId
+      +computeRatingId(albumArtist, artist, album, title)$ QUuid
     }
 
     class TagReader {
@@ -813,6 +844,13 @@ configurable via the app JSON config) will be introduced at that point.
     class LibraryCache {
       +load() QList~TrackInfo~$
       +save(tracks) bool$
+      +cacheFilePath() QString$
+    }
+
+    class RatingCache {
+      +load() QHash~QUuid,int~$
+      +save(tracks) bool$
+      +setRating(genre, ratingId, rating) bool$
       +cacheFilePath() QString$
     }
 
@@ -829,6 +867,7 @@ configurable via the app JSON config) will be introduced at that point.
       +scanning bool
       +scanProgress int
       +trackCount int
+      +ratingsReady bool
       +loadCacheAndStartStatCheck()
       +startFullScan()
       +genres() QStringList
@@ -856,6 +895,7 @@ configurable via the app JSON config) will be introduced at that point.
     LibraryModel --> AppConfig      : reads genres+folders
     LibraryScanner --> TagReader    : calls read()
     LibraryScanner --> LibraryCache : calls save()
+    LibraryScanner --> RatingCache  : calls load() to enrich tracks
     TagReader ..> TrackInfo         : produces
     LibraryModel "1" *-- "0..*" TrackInfo : m_tracks
     PlaybackEngine "1" *-- "0..*" TrackInfo : m_queue
@@ -1021,6 +1061,7 @@ Pure mouse tracking avoids both issues: `onPositionChanged` fires reliably as lo
 | Track title | `engine.currentTitle` |
 | Artist | `engine.currentArtist` (artist with fallback to albumArtist) |
 | Format badge | `engine.currentFormat` + `engine.currentBitrate` KBPS |
+| Rating (stars) | `engine.currentRating` (0-10); set by clicking a star, calls `engine.setCurrentRating(n)`. Same row as the format badge — stars right-aligned, format badge left-aligned (see UC-14). Hidden entirely when no track is loaded (`NO TRACK` state). Filled stars use a hardcoded gold (`#FFD700`) — a deliberate, one-off exception to the theme palette, not a `Theme.*` token. |
 | Elapsed time | `engine.positionString` ("M:SS") |
 | Total time | `engine.durationString` ("M:SS") |
 | Progress ratio | `engine.position / engine.duration` |
@@ -1047,6 +1088,7 @@ It serves as **both the queue model** (rows = `TrackInfo` records) and the **pla
 | `currentAlbum` | `QString` | Album name of the current track |
 | `currentFormat` | `QString` | "FLAC" or "MP3" derived from file extension |
 | `currentBitrate` | `int` | kbps bitrate of the current track |
+| `currentRating` | `int` | Rating (0-10; 0 = unrated) of the current track. Resolved in `loadTrack()` via `TrackInfo::computeRatingId()` + `RatingCache::load()` — the single canonical point regardless of how the track reached the queue (see UC-14). |
 | `currentCoverSource` | `QString` | `data:image/jpeg;base64,…` cover thumbnail URL — 160×160 px, available immediately |  
 | `currentLargeCoverSource` | `QString` | Full-resolution cover as `data:image/jpeg;base64,…`, loaded asynchronously via `QtConcurrent::run` + `QFutureWatcher`. Empty until the background task completes; `NowPlaying.qml` falls back to `currentCoverSource` in the interim. |
 | `queueCount` | `int` | Number of tracks in the queue |
@@ -1062,6 +1104,7 @@ It serves as **both the queue model** (rows = `TrackInfo` records) and the **pla
 | `clearQueue()` | invokable | Stop playback, empty the queue, clear `activePlaylistName`, and reset `playlistLocked` to `false`. |
 | `setActivePlaylistName(name)` | invokable | Set the active playlist file name (e.g. `"GothicRock01.xml"`). Resets `playlistLocked` to `false`. Called from `NewPlaylistDialog` after successful creation, and from the load-playlist flow. |
 | `setPlaylistLocked(locked)` | invokable | Set the lock state. When unlocked (`false`), immediately calls `playlistManager.rewritePlaylist()` so the file reflects any changes made while locked. |
+| `setCurrentRating(rating)` | invokable | Set the current track's rating (1-10; no-op otherwise or if no track is loaded). Updates the queue entry and calls `RatingCache::setRating(genre, ratingId, rating)` to persist immediately. |
 | `trackList()` | invokable | Return all queued tracks as `QVariantList` of maps (`filePath`, `title`, `artist`, `albumArtist`, `album`, `trackNumber`, `durationMs`) — used by `PlaylistManager.createPlaylist()` |
 | `setDragCopyCursor()` | invokable | Calls `QGuiApplication::setOverrideCursor(Qt::DragCopyCursor)` — sets the system-wide drag cursor so no child `MouseArea` can override it. Called by `AlbumCard` the moment a drag gesture starts (> 8 px threshold). |
 | `restoreOverrideCursor()` | invokable | Calls `QGuiApplication::restoreOverrideCursor()` — restores the cursor to its previous state. Called by `AlbumCard` on `onReleased` when a drag ends. |
@@ -1098,9 +1141,16 @@ Each track map produced by `LibraryModel.filteredAlbums()` now contains:
   "artist":      "Artist Name",
   "albumArtist": "Album Artist",
   "album":       "Album Name",
+  "genre":       "Techno",
   "coverSource": "data:image/jpeg;base64,..."
 }
 ```
+
+`PlaylistManager.loadPlaylist()`'s track maps include the same `genre` field (read via
+`TagReader::read()`). `rating`/`ratingId` are deliberately **not** part of this map —
+`PlaybackEngine::loadTrack()` always (re-)resolves them from `Topaz.rating.json` via
+`TrackInfo::computeRatingId()`, the single canonical point regardless of how a track
+reached the queue (see UC-14).
 
 ---
 
@@ -1337,5 +1387,99 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
 - Cancellation uses a plain `std::atomic<bool>` (`LibraryScanner::m_cancelRequested`) polled by the worker loop, not a queued signal/slot — a queued call would never be processed while the worker thread is busy inside a long-running `fullScan()`/`statCheck()` call, since queued slots only run when that thread's event loop is free.
 - The flag is reset to `false` at the start of both `fullScan()` and `statCheck()`, so a cancellation triggered by one shutdown attempt doesn't permanently block a future scan.
 - This only guards application shutdown; it does not add a user-facing "cancel scan" control to the UI.
-- **Sync invariant preserved**: `setActivePlaylistName` is called *after* `addTracks`, so the batch `addTracks` call does not re-append the tracks to the file (the sync guard checks `m_activePlaylistName` which is still empty at that point).
+
+---
+
+## UC-14 Persist and Restore Title Ratings
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | User ratings for individual tracks (1–10) persist independently of the scanned library, so a full library rebuild (rescan) never loses them. |
+| **Actor** | System |
+| **Precondition** | A scan (full or stat-check) is running or has just completed. |
+| **Trigger** | `LibraryScanner::fullScan()`/`statCheck()` completing, or the user clicking a star in `NowPlaying`. |
+
+### Normal Flow — Enrich ratings during a scan
+
+1. `LibraryScanner` builds the final scanned track list as before (unchanged scanning
+   logic).
+2. `RatingCache::load()` reads `Topaz.rating.json` once into a `QHash<QUuid, int>`
+   (`ratingId` → `rating`).
+3. A single pass over the final track list:
+   a. If a track's `ratingId` is null (a brand-new/changed track just read by
+      `TagReader`, or a `Topaz.library.json` entry predating this feature), it is
+      computed via `TrackInfo::computeRatingId(albumArtist, artist, album, title)` — a
+      deterministic `QUuid::createUuidV5()` over a fixed, hardcoded namespace UUID and
+      the literal concatenation `albumArtist;artist;album;title`. The same tag values
+      always produce the same `ratingId`, so it survives a full library rebuild.
+   b. `track.rating` is (re-)set from the loaded ratings hash (`0` if not present) —
+      `Topaz.rating.json` is always authoritative, so this also picks up ratings edited
+      outside the running scan (e.g. a future maintenance task reconciling lost
+      ratings after a tag edit).
+4. `LibraryCache::save()` persists the enriched tracks (including `rating`/`ratingId`)
+   to `Topaz.library.json` as usual, so the next app startup's instant cache-display
+   step shows correct ratings immediately, without waiting for the background
+   stat-check to finish.
+5. `scanCompleted(tracks)` is emitted as usual.
+6. `LibraryModel::onScanCompleted()` sets `ratingsReady = true` (only the first time,
+   this session) after applying the enriched tracks.
+7. `Main.qml` binds `BottomBar.autoPlayReady: libraryModel.ratingsReady` — the AUTO PLAY
+   entry in `BottomBar` switches from its inactive (grey) to active (teal) visual state.
+
+### Normal Flow — Set a rating from NowPlaying
+
+1. `NowPlaying` shows a row of 10 star glyphs on the same line as the format/bitrate
+   badge (stars left-aligned, badge right-aligned), bound to `engine.currentRating`:
+   stars `0..currentRating-1` render filled (`Theme.secondary`), the rest unfilled
+   (`Theme.outlineVariant`, `Theme.fgSurfaceVariant` on hover).
+2. User clicks the *n*-th star (1-10). Its `MouseArea.onClicked` calls
+   `engine.setCurrentRating(n)`.
+3. `PlaybackEngine::setCurrentRating()` validates `n` is in `[1,10]` and a track is
+   loaded, computes `ratingId` if still null, sets `m_queue[m_currentIndex].rating = n`,
+   and calls `RatingCache::setRating(genre, ratingId, n)` — an **upsert** (update the
+   matching `ratingId` entry if present, else append) that reads, modifies, and
+   atomically rewrites `Topaz.rating.json`, leaving every other track's rating
+   untouched. This is distinct from `RatingCache::save()` (a full-list overwrite used
+   only by the scan-time bulk enrichment pass above).
+4. `currentRatingChanged()` fires; the star row updates immediately to show exactly `n`
+   filled stars.
+5. When `NowPlaying` starts a different track (`PlaybackEngine::loadTrack()`, triggered
+   by `playAt()`/`togglePlay()`/`next()`/`previous()`/`advanceToNext()` — every playback
+   path funnels through it), `ratingId` is computed if still null and `rating` is always
+   refreshed from `RatingCache::load()`, then `currentRatingChanged()` fires so the star
+   row reflects the new track's own rating. `clearQueue()` and `removeAt()`'s
+   empty-queue branch also emit `currentRatingChanged()`, resetting the row to unfilled
+   when nothing is loaded.
+
+### Design notes
+
+- **`Topaz.rating.json` is the sole authoritative source for `rating`** — not
+  `Topaz.library.json`. A full rebuild (deleting/regenerating `Topaz.library.json`) does
+  not lose ratings, because step 3 above re-applies them from `Topaz.rating.json` on
+  every scan, including the one immediately following a rebuild.
+- **`ratingId` stability depends on exact tag stability**: if `albumArtist`, `artist`,
+  `album`, or `title` change later (re-tagging), `computeRatingId()` produces a
+  different UUID and the link to any existing rating is lost — the same tradeoff every
+  other derived `TrackInfo` property already has with respect to file changes. A future
+  maintenance task is expected to reconcile orphaned ratings in `Topaz.rating.json`.
+- **Content-based identity caveat**: two distinct tracks with identical
+  albumArtist/artist/album/title (e.g. duplicate pressings) collide onto the same
+  `ratingId` and share a rating — an accepted trade-off of metadata-based identity.
+- **AUTO PLAY gating is visual-only**: `autoPlayReady` only changes the AUTO PLAY
+  entry's color state in `BottomBar` (same active/inactive mechanism already used for
+  the still-unimplemented EQUALIZER/TAG INFORMATION entries) — clicking it does nothing
+  yet. The AUTO PLAY *feature* itself (using ratings to drive playback selection) is
+  still future work; only rating display/entry (`NowPlaying`'s star row) is implemented.
+- **Two distinct persistence paths, one file**: `RatingCache::save()` (full-list
+  overwrite, scan-time bulk enrichment) and `RatingCache::setRating()` (single upsert,
+  interactive star click) both write `Topaz.rating.json` via the same private
+  `loadEntries()`/`saveEntries()` atomic tmp-then-rename helpers, but are not
+  mutex-protected against each other — a star click landing in the exact window of a
+  background scan's save is a theoretical, low-probability race (each individual write
+  is still atomic/non-corrupting; one write could just be overwritten by the other).
+  Consistent with the rest of this codebase, which doesn't lock file I/O across threads
+  elsewhere either (e.g. `LibraryCache::save()`); not engineered around here.
+- **Cancellation-safe**: if a scan is canceled mid-flight (see UC-13), the enrichment
+  pass — like `LibraryCache::save()` and `scanCompleted` — is skipped entirely, so
+  `ratingsReady` only ever becomes `true` after a scan that actually completed.
 

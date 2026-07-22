@@ -18,6 +18,8 @@ qt_add_executable(topaz
     tagreader.cpp
     librarycache.h
     librarycache.cpp
+    ratingcache.h
+    ratingcache.cpp
     libraryscanner.h
     libraryscanner.cpp
     librarymodel.h

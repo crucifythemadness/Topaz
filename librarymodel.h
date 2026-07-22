@@ -35,6 +35,7 @@ class LibraryModel : public QAbstractListModel
     Q_PROPERTY(bool        scanning   READ scanning   NOTIFY scanningChanged)
     Q_PROPERTY(int         scanProgress READ scanProgress NOTIFY scanProgressChanged)
     Q_PROPERTY(int         trackCount READ trackCount  NOTIFY trackCountChanged)
+    Q_PROPERTY(bool        ratingsReady READ ratingsReady NOTIFY ratingsReadyChanged)
 
 public:
     // ── Roles exposed to QML delegates ───────────────────────────────────
@@ -70,6 +71,9 @@ public:
     bool       scanning()     const { return m_scanning; }
     int        scanProgress() const { return m_scanProgress; }
     int        trackCount()   const { return m_tracks.size(); }
+    // True once a scan (full or stat-check) has completed at least once in this
+    // session with rating enrichment applied — gates the AUTO PLAY button.
+    bool       ratingsReady() const { return m_ratingsReady; }
     void       setAppConfig(AppConfig *cfg);
 
     // ── Invokable actions ─────────────────────────────────────────────────
@@ -116,6 +120,7 @@ signals:
     void scanningChanged();
     void scanProgressChanged();
     void trackCountChanged();
+    void ratingsReadyChanged();
 
     // Emitted after the model is populated (cache load or scan complete).
     // LibraryData.qml connects to this to rebuild its tree.
@@ -145,4 +150,5 @@ private:
     QThread          *m_scanThread   = nullptr;
     bool              m_scanning     = false;
     int               m_scanProgress = 0;
+    bool              m_ratingsReady = false;
 };

@@ -185,6 +185,13 @@ void LibraryModel::onScanCompleted(QList<TrackInfo> tracks)
     emit scanningChanged();
     emit scanProgressChanged();
     applyTracks(std::move(tracks));
+
+    // Every completed scan now applies rating enrichment (see LibraryScanner),
+    // so the first one to arrive in this session is when ratings become trustworthy.
+    if (!m_ratingsReady) {
+        m_ratingsReady = true;
+        emit ratingsReadyChanged();
+    }
 }
 
 void LibraryModel::applyTracks(QList<TrackInfo> &&tracks)
@@ -354,6 +361,7 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
             tm[QStringLiteral("artist")]      = t->artist;
             tm[QStringLiteral("albumArtist")] = t->albumArtist;
             tm[QStringLiteral("album")]       = t->album;
+            tm[QStringLiteral("genre")]       = t->genre;
             tm[QStringLiteral("coverSource")] = coverSrc; // set directly – no post-loop needed
             trackList.append(tm);
         }

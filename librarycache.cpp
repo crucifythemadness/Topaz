@@ -59,6 +59,8 @@ QList<TrackInfo> LibraryCache::load()
         t.fileSize     = static_cast<qint64>(o[QStringLiteral("fileSize")].toDouble());
         t.lastModified = static_cast<qint64>(o[QStringLiteral("lastModified")].toDouble());
         t.coverThumb   = o[QStringLiteral("coverThumb")].toString();
+        t.rating       = o[QStringLiteral("rating")].toInt();
+        t.ratingId     = QUuid::fromString(o[QStringLiteral("ratingId")].toString());
         tracks.append(t);
     }
     return tracks;
@@ -85,6 +87,8 @@ bool LibraryCache::save(const QList<TrackInfo> &tracks)
         o[QStringLiteral("fileSize")]     = static_cast<double>(t.fileSize);
         o[QStringLiteral("lastModified")] = static_cast<double>(t.lastModified);
         o[QStringLiteral("coverThumb")]   = t.coverThumb;
+        o[QStringLiteral("rating")]       = t.rating;
+        o[QStringLiteral("ratingId")]     = t.ratingId.toString(QUuid::WithoutBraces);
         arr.append(o);
     }
 

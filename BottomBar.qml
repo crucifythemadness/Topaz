@@ -12,6 +12,11 @@ Rectangle {
     // Set by Main.qml when a scan is running; animates the scan button.
     property bool scanning: false
 
+    // Set by Main.qml (bound to libraryModel.ratingsReady). AUTO PLAY only shows
+    // as active once a scan has completed with rating enrichment applied — the
+    // AUTO PLAY feature itself is not implemented yet, so clicking it does nothing.
+    property bool autoPlayReady: false
+
     // Ghost top border
     Rectangle {
         anchors { left: parent.left; right: parent.right; top: parent.top }
@@ -24,7 +29,7 @@ Rectangle {
 
         Repeater {
             model: [
-                { label: "AUTO PLAY",       icon: "\u25B6", active: true  },
+                { label: "AUTO PLAY",       icon: "\u25B6", active: root.autoPlayReady },
                 { label: "EQUALIZER",       icon: "\u2261", active: false },
                 { label: "TAG INFORMATION", icon: "\u24D8", active: false },
                 { label: "SCAN DIRECTORIES",icon: "\u29C9", active: false }

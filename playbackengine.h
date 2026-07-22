@@ -15,8 +15,11 @@
 //
 // Track maps accepted by addTrack / addTracks must contain at minimum:
 //   filePath (string), title (string), artist (string),
-//   albumArtist (string), album (string), bitrate (int),
+//   albumArtist (string), album (string), genre (string), bitrate (int),
 //   durationMs (int/qint64), coverSource (string — data: URL or empty).
+// rating/ratingId are deliberately NOT read from the map — loadTrack() always
+// (re-)resolves them from Topaz.rating.json via TrackInfo::computeRatingId(),
+// the single canonical point regardless of how a track reached the queue.
 //
 // Queue roles exported to QML match the role names expected by
 // PlaybackQueue.qml: pos, trackName, subLabel, kbps, playing.
@@ -36,6 +39,7 @@ class PlaybackEngine : public QAbstractListModel
     Q_PROPERTY(QString currentAlbum     READ currentAlbum     NOTIFY currentTrackChanged)
     Q_PROPERTY(QString currentFormat    READ currentFormat    NOTIFY currentTrackChanged)
     Q_PROPERTY(int     currentBitrate   READ currentBitrate   NOTIFY currentTrackChanged)
+    Q_PROPERTY(int     currentRating    READ currentRating    NOTIFY currentRatingChanged)
     Q_PROPERTY(QString currentCoverSource      READ currentCoverSource      NOTIFY currentTrackChanged)
     Q_PROPERTY(QString currentLargeCoverSource READ currentLargeCoverSource NOTIFY currentLargeCoverSourceChanged)
     Q_PROPERTY(int     queueCount             READ queueCount              NOTIFY queueCountChanged)
@@ -79,6 +83,7 @@ public:
     QString currentAlbum()      const;
     QString currentFormat()     const;
     int     currentBitrate()    const;
+    int     currentRating()     const;   // 0-10; 0 if no track loaded or unrated
     QString currentCoverSource()      const;
     QString currentLargeCoverSource()  const { return m_largeCoverSource; }
     int     queueCount()               const { return m_queue.size(); }
@@ -96,6 +101,11 @@ public:
     // Locks or unlocks playlist sync.  When unlocked, the XSPF is immediately
     // rewritten to reflect the current queue.
     Q_INVOKABLE void setPlaylistLocked(bool locked);
+
+    // Sets the rating (1-10) for the currently playing track and persists it
+    // immediately to Topaz.rating.json via RatingCache::setRating(). No-op if no
+    // track is loaded or the value is out of range.
+    Q_INVOKABLE void setCurrentRating(int rating);
 
     // ── Queue management (callable from QML) ──────────────────────────────
     Q_INVOKABLE void addTrack(const QVariantMap  &track);
@@ -129,6 +139,7 @@ signals:
     void positionChanged();
     void durationChanged();
     void currentTrackChanged();
+    void currentRatingChanged();
     void currentLargeCoverSourceChanged();
     void queueCountChanged();
     void activePlaylistNameChanged();

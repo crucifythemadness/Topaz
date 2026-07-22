@@ -143,6 +143,7 @@ ApplicationWindow {
         BottomBar {
             Layout.fillWidth: true
             scanning: libraryModel.scanning
+            autoPlayReady: libraryModel.ratingsReady
             onScanRequested: libraryModel.startFullScan()
         }
     }

@@ -128,35 +128,80 @@ Rectangle {
                     bottomPadding: 12
                 }
 
-                // Format badge
-                Rectangle {
+                // Format/bitrate badge (left) + rating stars (right) — same row
+                Item {
+                    width:  parent.width - 32
                     height: 26
-                    width:  formatLabel.implicitWidth + 20
-                    radius: Theme.radiusFull
-                    color:  Theme.surfaceContainerHigh
-                    visible: root.engine && root.engine.currentFormat.length > 0
 
+                    // Star rating — click star N to set the rating to N (1-10).
+                    // Persists immediately to Topaz.rating.json; refreshed whenever
+                    // NowPlaying starts a new track (see PlaybackEngine.currentRating).
                     Row {
-                        anchors.centerIn: parent
-                        spacing: 6
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                        spacing: 3
+                        // Only show a rating to give when a track is actually loaded.
+                        visible: root.engine && root.engine.currentTitle.length > 0
 
-                        Rectangle {
-                            width: 8; height: 8
-                            radius: 4
-                            color: Theme.secondary
-                            anchors.verticalCenter: parent.verticalCenter
+                        Repeater {
+                            model: 10
+
+                            delegate: Text {
+                                text: "★"   // ★
+                                font.pixelSize: 18
+
+                                readonly property bool filled:
+                                    root.engine && index < root.engine.currentRating
+
+                                // Gold is a deliberate, one-off break from the theme
+                                // palette — a rating star should shine like gold.
+                                color: filled              ? "#FFD700"
+                                     : starMA.containsMouse ? Qt.rgba(1, 0.843, 0, 0.45)
+                                     :                        Theme.outlineVariant
+
+                                MouseArea {
+                                    id: starMA
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape:  Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (root.engine) root.engine.setCurrentRating(index + 1)
+                                    }
+                                }
+                            }
                         }
-                        Text {
-                            id: formatLabel
-                            text: root.engine
-                                  ? (root.engine.currentFormat + "  |  "
-                                     + root.engine.currentBitrate + " KBPS")
-                                  : ""
-                            font.family:        Theme.fontFamilyMono
-                            font.pixelSize:     Theme.monoSm
-                            font.weight:        Font.Medium
-                            font.letterSpacing: 0.8
-                            color: Theme.fgSurface
+                    }
+
+                    // Format badge
+                    Rectangle {
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                        height: 26
+                        width:  formatLabel.implicitWidth + 20
+                        radius: Theme.radiusFull
+                        color:  Theme.surfaceContainerHigh
+                        visible: root.engine && root.engine.currentFormat.length > 0
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 6
+
+                            Rectangle {
+                                width: 8; height: 8
+                                radius: 4
+                                color: Theme.secondary
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                id: formatLabel
+                                text: root.engine
+                                      ? (root.engine.currentFormat + "  |  "
+                                         + root.engine.currentBitrate + " KBPS")
+                                      : ""
+                                font.family:        Theme.fontFamilyMono
+                                font.pixelSize:     Theme.monoSm
+                                font.weight:        Font.Medium
+                                font.letterSpacing: 0.8
+                                color: Theme.fgSurface
+                            }
                         }
                     }
                 }

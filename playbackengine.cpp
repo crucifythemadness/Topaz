@@ -1,4 +1,5 @@
 #include "playbackengine.h"
+#include "ratingcache.h"
 #include "tagreader.h"
 
 #include <QCursor>
@@ -161,6 +162,12 @@ int PlaybackEngine::currentBitrate() const
     return m_queue.at(m_currentIndex).bitrate;
 }
 
+int PlaybackEngine::currentRating() const
+{
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return 0;
+    return m_queue.at(m_currentIndex).rating;
+}
+
 QString PlaybackEngine::currentCoverSource() const
 {
     if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
@@ -181,6 +188,7 @@ TrackInfo PlaybackEngine::trackFromMap(const QVariantMap &map)
     t.albumArtist = map.value(QStringLiteral("albumArtist"),
                                map.value(QStringLiteral("artist"))).toString();
     t.album       = map.value(QStringLiteral("album")).toString();
+    t.genre       = map.value(QStringLiteral("genre")).toString();
     t.bitrate     = map.value(QStringLiteral("bitrate")).toInt();
     t.track       = map.value(QStringLiteral("number")).toString().toInt();
     t.duration    = map.value(QStringLiteral("durationMs")).toLongLong();
@@ -264,6 +272,7 @@ void PlaybackEngine::removeAt(int idx)
             clearCoverSource();
             emit currentIndexChanged();
             emit currentTrackChanged();
+            emit currentRatingChanged();
             emit isPlayingChanged();
         }
     } else if (idx < m_currentIndex) {
@@ -364,6 +373,7 @@ void PlaybackEngine::clearQueue()
     endResetModel();
     emit currentIndexChanged();
     emit currentTrackChanged();
+    emit currentRatingChanged();
     emit queueCountChanged();
     emit isPlayingChanged();
     if (!m_activePlaylistName.isEmpty()) {
@@ -397,6 +407,20 @@ void PlaybackEngine::setPlaylistLocked(bool locked)
     // that were made while locked.
     if (!locked && m_playlistManager && !m_activePlaylistName.isEmpty())
         m_playlistManager->rewritePlaylist(m_activePlaylistName, trackList());
+}
+
+void PlaybackEngine::setCurrentRating(int rating)
+{
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return;
+    if (rating < 1 || rating > 10) return;
+
+    TrackInfo &t = m_queue[m_currentIndex];
+    if (t.ratingId.isNull())
+        t.ratingId = TrackInfo::computeRatingId(t.albumArtist, t.artist, t.album, t.title);
+    t.rating = rating;
+
+    RatingCache::setRating(t.genre, t.ratingId, t.rating);
+    emit currentRatingChanged();
 }
 
 QVariantList PlaybackEngine::trackList() const
@@ -482,6 +506,17 @@ void PlaybackEngine::loadTrack(int idx)
     m_currentIndex = idx;
     m_player->setSource(QUrl::fromLocalFile(m_queue.at(idx).filePath));
 
+    // Resolve this track's rating identity/value now — the single canonical
+    // point every playback path (queue add, playlist load) funnels through —
+    // rather than trying to carry rating/ratingId through every map conversion.
+    {
+        TrackInfo &cur = m_queue[idx];
+        if (cur.ratingId.isNull())
+            cur.ratingId = TrackInfo::computeRatingId(cur.albumArtist, cur.artist,
+                                                        cur.album, cur.title);
+        cur.rating = RatingCache::load().value(cur.ratingId, 0);
+    }
+
     // Kick off async full-resolution cover load
     m_coverWatcher.cancel();
     m_largeCoverSource.clear();
@@ -503,6 +538,7 @@ void PlaybackEngine::loadTrack(int idx)
 
     emit currentIndexChanged();
     emit currentTrackChanged();
+    emit currentRatingChanged();
 }
 
 void PlaybackEngine::clearCoverSource()
