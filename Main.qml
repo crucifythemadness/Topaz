@@ -35,7 +35,7 @@ ApplicationWindow {
 
     // Audio playback engine — owns QMediaPlayer + queue model.
     // Passed as `engine` property to AlbumBrowser, PlaybackQueue, NowPlaying.
-    PlaybackEngine { id: engine; playlistManager: playlistManager }
+    PlaybackEngine { id: engine; playlistManager: playlistManager; appConfig: appConfig }
 
     // Playlist manager — handles XSPF file creation.
     PlaylistManager { id: playlistManager }

@@ -4,9 +4,10 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 
 // ── SetupDialog ──────────────────────────────────────────────────────────
-// Modal setup window with two tabs:
+// Modal setup window with three tabs:
 //   • GENRES        — add/delete genre names that drive GenreBar buttons
 //   • FILE MONITORING — add/delete monitored folders (with subfolders toggle)
+//   • CROSSFADE     — enable/disable crossfade and set its length (see UC-15)
 //
 // Usage in Main.qml:
 //   SetupDialog { id: setupDialog; appConfig: appConfig }
@@ -113,7 +114,7 @@ Popup {
                 spacing: 0
 
                 Repeater {
-                    model: ["GENRES", "FILE MONITORING"]
+                    model: ["GENRES", "FILE MONITORING", "CROSSFADE"]
 
                     delegate: Item {
                         width:  tabLabel.implicitWidth + 32
@@ -666,6 +667,168 @@ Popup {
                     }
                 }
             } // end FILE MONITORING panel
+
+            // ────────────────────────────────────────────────────────────
+            // PANEL 3 — CROSSFADE
+            // ────────────────────────────────────────────────────────────
+            Item {
+                anchors.fill: parent
+                visible: tabBar.currentTab === 2
+
+                ColumnLayout {
+                    anchors { fill: parent; margins: 24 }
+                    spacing: 40
+
+                    readonly property bool crossfadeOn:
+                        root.appConfig !== null && root.appConfig.crossfadeEnabled
+
+                    // ── Crossfade on/off row ──────────────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Crossfade"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Toggle switch — same visual pattern as PlaybackQueue's
+                        // LOCK PLAYLIST toggle, scaled up (48×24 / 18×18) for more
+                        // prominence in this dialog.
+                        Rectangle {
+                            id: crossfadeTrack
+
+                            readonly property bool crossfadeOn:
+                                root.appConfig !== null && root.appConfig.crossfadeEnabled
+
+                            width: 48; height: 24
+                            radius: 12
+                            color: crossfadeOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: crossfadeTrack.crossfadeOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setCrossfadeEnabled(
+                                            !root.appConfig.crossfadeEnabled)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Length row ─────────────────────────────────────
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        opacity: parent.crossfadeOn ? 1.0 : 0.35
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Length"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: crossfadeSlider.value.toFixed(1) + " s"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "2.0 s"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: crossfadeSlider
+                                Layout.fillWidth: true
+                                enabled: root.appConfig !== null
+                                         && root.appConfig.crossfadeEnabled
+                                from: 2.0
+                                to:   10.0
+                                stepSize: 0.5
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.crossfadeSeconds : 5.0
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setCrossfadeSeconds(value)
+                                }
+
+                                background: Rectangle {
+                                    x: crossfadeSlider.leftPadding
+                                    y: crossfadeSlider.topPadding
+                                       + crossfadeSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  crossfadeSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  crossfadeSlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: crossfadeSlider.leftPadding
+                                       + crossfadeSlider.visualPosition
+                                         * (crossfadeSlider.availableWidth - width)
+                                    y: crossfadeSlider.topPadding
+                                       + crossfadeSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "10.0 s"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }   // push content to top
+                }
+            } // end CROSSFADE panel
 
         } // content Item
     } // contentItem ColumnLayout

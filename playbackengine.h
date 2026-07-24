@@ -8,6 +8,9 @@
 #include <QMediaPlayer>
 #include <QAudioOutput>
 #include <QFutureWatcher>
+#include <QTimer>
+
+class AppConfig;
 
 // ── PlaybackEngine ────────────────────────────────────────────────────────
 // QAbstractListModel that IS the playback queue model.
@@ -23,6 +26,21 @@
 //
 // Queue roles exported to QML match the role names expected by
 // PlaybackQueue.qml: pos, trackName, subLabel, kbps, playing.
+//
+// ── Dual-deck crossfade ───────────────────────────────────────────────────
+// Two independent QMediaPlayer/QAudioOutput pairs ("decks") back playback so a
+// track can fade in on one deck while the previous track fades out on the
+// other — Qt Multimedia cannot play two sources from a single player. m_player
+// / m_audioOutput are alias pointers that always point at whichever deck is
+// m_activeDeck, so every pre-existing single-deck code path (position(),
+// duration(), seek(), etc.) keeps working unchanged; only the crossfade logic
+// itself (loadTrack()/startCrossfade()/onFadeTick()/cancelCrossfade()) needs
+// to reason about both decks explicitly. See UC-15 in the architecture doc.
+// Crossfade only engages when a transition's current AND next tracks both
+// have a duration longer than the configured crossfade length — a track
+// shorter than that can supply neither a valid fade-out nor fade-in window,
+// which is what makes short tracks (and the track immediately following one)
+// play as a plain hard cut.
 class PlaybackEngine : public QAbstractListModel
 {
     Q_OBJECT
@@ -46,6 +64,7 @@ class PlaybackEngine : public QAbstractListModel
     Q_PROPERTY(QString activePlaylistName     READ activePlaylistName      NOTIFY activePlaylistNameChanged)
     Q_PROPERTY(bool    playlistLocked          READ playlistLocked          WRITE setPlaylistLocked NOTIFY playlistLockedChanged)
     Q_PROPERTY(PlaylistManager* playlistManager READ playlistManager WRITE setPlaylistManager NOTIFY playlistManagerChanged)
+    Q_PROPERTY(AppConfig* appConfig READ appConfig WRITE setAppConfig NOTIFY appConfigChanged)
 
 public:
     enum QueueRole {
@@ -94,6 +113,15 @@ public:
         if (m_playlistManager == pm) return;
         m_playlistManager = pm;
         emit playlistManagerChanged();
+    }
+
+    // Bound from Main.qml. Crossfade settings are always read live from here
+    // (never cached), so a change in Setup takes effect on the next transition.
+    AppConfig* appConfig() const { return m_appConfig; }
+    void setAppConfig(AppConfig *cfg) {
+        if (m_appConfig == cfg) return;
+        m_appConfig = cfg;
+        emit appConfigChanged();
     }
 
     // Sets the active playlist name (called from QML after creating/loading a playlist).
@@ -145,11 +173,27 @@ signals:
     void activePlaylistNameChanged();
     void playlistLockedChanged();
     void playlistManagerChanged();
+    void appConfigChanged();
 
 private:
     void loadTrack(int index);
     void advanceToNext();
     void clearCoverSource();
+
+    // Metadata-only bookkeeping for "index becomes current": updates
+    // m_currentIndex, resolves rating/ratingId, kicks off the cover fetch,
+    // refreshes IsPlayingRole, emits the current* signals. Does NOT touch any
+    // player's source/playback state — used both by loadTrack() (hard cut) and
+    // by the crossfade midpoint (audio is already transitioning independently).
+    void switchCurrentIndexTo(int index);
+
+    // ── Crossfade ──────────────────────────────────────────────────────────
+    void startCrossfade();
+    void cancelCrossfade();
+    void onFadeTick();
+    // deckIndex-aware handlers shared by both decks' signal connections.
+    void onDeckPositionChanged(int deckIndex);
+    void onDeckMediaStatusChanged(int deckIndex, QMediaPlayer::MediaStatus status);
 
     static QString msToString(qint64 ms);
     static QString formatFromPath(const QString &path);
@@ -161,7 +205,26 @@ private:
     QString                   m_activePlaylistName;
     bool                      m_playlistLocked    = false;
     PlaylistManager          *m_playlistManager    = nullptr;
-    QMediaPlayer             *m_player           = nullptr;
-    QAudioOutput             *m_audioOutput      = nullptr;
+    AppConfig                 *m_appConfig          = nullptr;
+
+    // Dual-deck playback. m_player/m_audioOutput always alias
+    // m_players[m_activeDeck]/m_audioOutputs[m_activeDeck].
+    QMediaPlayer              *m_players[2]        = { nullptr, nullptr };
+    QAudioOutput               *m_audioOutputs[2]   = { nullptr, nullptr };
+    int                         m_activeDeck        = 0;
+    QMediaPlayer              *m_player            = nullptr;
+    QAudioOutput               *m_audioOutput       = nullptr;
+
+    bool    m_crossfading       = false;
+    bool    m_fadeMidpointFired = false;
+    int     m_fadeTargetIndex   = -1;
+    qint64  m_fadeElapsedMs     = 0;
+    QTimer *m_fadeTimer         = nullptr;
+    // Fixed for the duration of one fade (captured in startCrossfade()) so the
+    // volume ramp keeps targeting the same two decks regardless of when
+    // m_activeDeck itself gets swapped (at the midpoint — see onFadeTick()).
+    int     m_fadeOutDeck       = -1;
+    int     m_fadeInDeck        = -1;
+
     QFutureWatcher<QByteArray> m_coverWatcher;
 };

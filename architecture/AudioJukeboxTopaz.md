@@ -333,7 +333,7 @@ Topaz module
 │                         property AppConfig appConfig
 │                         property LibraryModel libraryModel
 ├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, LibraryModel, PlaybackEngine, PlaylistManager, SetupDialog, NewPlaylistDialog
-├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING)
+├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE, see UC-15)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
 ├── TopBar.qml          Header (logo | navigation tabs | icons + avatar)  height 64 px
@@ -540,7 +540,9 @@ LibraryScanner.statCheck() → same flow as startup step 2
 
 `AppConfig` is a C++ `QObject` subclass marked with `QML_ELEMENT`.  It is
 instantiated once in `Main.qml` (`AppConfig { id: appConfig }`) and passed by
-reference to `LibraryData` and `SetupDialog`.
+reference to `LibraryData`, `SetupDialog`, and `PlaybackEngine` (the latter reads
+`crossfadeEnabled`/`crossfadeSeconds` live — never cached — on every crossfade
+eligibility check; see UC-15).
 
 ### Responsibilities
 
@@ -579,7 +581,9 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     "windowHeight":       1080,
     "libraryTreeWidth":   286,
     "playbackQueueWidth": 374,
-    "nowPlayingWidth":    359
+    "nowPlayingWidth":    359,
+    "crossfadeEnabled":   false,
+    "crossfadeSeconds":   5.0
 }
 ```
 
@@ -595,6 +599,8 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
 | `clearFolders()` | Remove all folders; auto-saves. |
 | `setFolderSubfolders(index, flag)` | Toggle the includeSubfolders flag; auto-saves. |
 | `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. |
+| `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s CROSSFADE tab toggle (see UC-15). |
+| `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 10.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s CROSSFADE tab slider. |
 | `save()` | Persist current state to `Topaz.config` (called automatically by all mutators). |
 
 ## Data Flow: Genre Filter (GenreBar toggle)
@@ -881,13 +887,18 @@ configurable via the app JSON config) will be introduced at that point.
     class AppConfig {
       +genres QStringList
       +folders QVariantList
+      +crossfadeEnabled bool
+      +crossfadeSeconds double
       +addGenre(name)
       +removeGenreAt(index)
       +addFolder(path, subfolders)
       +removeFolderAt(index)
+      +setCrossfadeEnabled(enabled)
+      +setCrossfadeSeconds(seconds)
       +save()
       ~genresChanged()
       ~foldersChanged()
+      ~crossfadeChanged()
     }
 
     LibraryModel --> LibraryScanner : owns (worker thread)
@@ -899,8 +910,9 @@ configurable via the app JSON config) will be introduced at that point.
     TagReader ..> TrackInfo         : produces
     LibraryModel "1" *-- "0..*" TrackInfo : m_tracks
     PlaybackEngine "1" *-- "0..*" TrackInfo : m_queue
-    PlaybackEngine --> QMediaPlayer  : wraps
-    PlaybackEngine --> QAudioOutput  : wraps
+    PlaybackEngine --> QMediaPlayer  : wraps ×2 (dual-deck, see UC-15)
+    PlaybackEngine --> QAudioOutput  : wraps ×2 (dual-deck, see UC-15)
+    PlaybackEngine --> AppConfig     : reads crossfadeEnabled/crossfadeSeconds live
 ```
 
 ---
@@ -1061,7 +1073,7 @@ Pure mouse tracking avoids both issues: `onPositionChanged` fires reliably as lo
 | Track title | `engine.currentTitle` |
 | Artist | `engine.currentArtist` (artist with fallback to albumArtist) |
 | Format badge | `engine.currentFormat` + `engine.currentBitrate` KBPS |
-| Rating (stars) | `engine.currentRating` (0-10); set by clicking a star, calls `engine.setCurrentRating(n)`. Same row as the format badge — stars right-aligned, format badge left-aligned (see UC-14). Hidden entirely when no track is loaded (`NO TRACK` state). Filled stars use a hardcoded darker orange (`#CC5500`) — a deliberate, one-off exception to the theme palette, not a `Theme.*` token. |
+| Rating (stars) | `engine.currentRating` (0-10); set by clicking a star, calls `engine.setCurrentRating(n)`. Same row as the format badge — stars right-aligned, format badge left-aligned (see UC-14). Hidden entirely when no track is loaded (`NO TRACK` state). Filled stars use a hardcoded blue (`#00A6ED`) — a deliberate, one-off exception to the theme palette, not a `Theme.*` token. |
 | Elapsed time | `engine.positionString` ("M:SS") |
 | Total time | `engine.durationString` ("M:SS") |
 | Progress ratio | `engine.position / engine.duration` |
@@ -1071,7 +1083,19 @@ Pure mouse tracking avoids both issues: `onPositionChanged` fires reliably as lo
 ## PlaybackEngine Component
 
 `PlaybackEngine` is a C++ `QAbstractListModel` subclass marked `QML_ELEMENT`.
-It serves as **both the queue model** (rows = `TrackInfo` records) and the **playback controller** (owns `QMediaPlayer` + `QAudioOutput`).  The queue is the single source of truth; `PlaybackQueue.qml` binds its `ListView.model` directly to the engine instance.
+It serves as **both the queue model** (rows = `TrackInfo` records) and the **playback controller**.  The queue is the single source of truth; `PlaybackQueue.qml` binds its `ListView.model` directly to the engine instance.
+
+**Dual-deck playback (crossfade)**: rather than a single `QMediaPlayer`/`QAudioOutput`
+pair, `PlaybackEngine` owns two independent pairs (`m_players[2]`/`m_audioOutputs[2]`,
+"decks") because Qt Multimedia cannot play two sources from one player — a real
+crossfade needs the outgoing and incoming track playing simultaneously on separate
+players while their volumes ramp in opposite directions. `m_player`/`m_audioOutput`
+remain as member names but are now **alias pointers**, always equal to
+`m_players[m_activeDeck]`/`m_audioOutputs[m_activeDeck]`; every pre-existing
+single-deck code path (`position()`, `duration()`, `seek()`, etc.) is unchanged and
+simply operates on "whichever deck is active." Only the crossfade-specific code
+(`startCrossfade()`, `onFadeTick()`, `cancelCrossfade()`) reasons about both decks
+explicitly. See UC-15 for the full crossfade flow.
 
 ### Public API
 
@@ -1095,6 +1119,7 @@ It serves as **both the queue model** (rows = `TrackInfo` records) and the **pla
 | `activePlaylistName` | `QString` | File name (with `.xml` extension) of the playlist currently associated with the queue; empty when no playlist is active. Displayed in the `PlaybackQueue` header. Cleared automatically when the queue is cleared. |
 | `playlistLocked` | `bool` | When `true`, queue mutations (add, remove, move) do **not** update the XSPF file on disk. Default: `false`. Reset to `false` automatically when `activePlaylistName` changes or `clearQueue()` is called. When set from `true` → `false`, the XSPF is immediately rewritten with the current queue contents. |
 | `playlistManager` | `PlaylistManager*` | Reference to the `PlaylistManager` instance set from `Main.qml`. Used internally to sync the XSPF file when tracks are added, removed, or reordered. |
+| `appConfig` | `AppConfig*` | Reference to the `AppConfig` instance set from `Main.qml`. `crossfadeEnabled`/`crossfadeSeconds` are read live from it on every crossfade eligibility check (see UC-15) — never cached. |
 | `addTrack(map)` | invokable | Append a single track map to the queue. If `activePlaylistName` is set **and** `playlistLocked` is `false`, calls `playlistManager.appendTrack()` to persist the change. |
 | `addTracks(list)` | invokable | Batch-append a QVariantList of track maps. Calls `appendTrack` for each new entry when a playlist is active and not locked. |
 | `removeAt(index)` | invokable | Remove track at given queue index. Captures `filePath` before removal; calls `playlistManager.removeTrackByPath()` when a playlist is active and not locked. |
@@ -1482,4 +1507,112 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
 - **Cancellation-safe**: if a scan is canceled mid-flight (see UC-13), the enrichment
   pass — like `LibraryCache::save()` and `scanCompleted` — is skipped entirely, so
   `ratingsReady` only ever becomes `true` after a scan that actually completed.
+- **Crossfade interaction**: the "current track" bookkeeping described in step 5 above
+  (`ratingId`/`rating` resolution, `currentRatingChanged()`) lives in a shared method,
+  `PlaybackEngine::switchCurrentIndexTo()`. A hard-cut transition calls it from
+  `loadTrack()`; a crossfade transition calls it at the fade's midpoint instead, while
+  `loadTrack()` itself is not invoked — see UC-15.
 
+---
+
+## UC-15 Crossfade Between Tracks
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | The next track fades in while the current track fades out, instead of a hard cut — optional, configured in Setup. |
+| **Actor** | User (configuration), System (playback) |
+| **Precondition** | `AppConfig.crossfadeEnabled` is `true`; at least one more track follows the current one in the queue. |
+| **Trigger** | The active deck's playback position reaches `(duration − crossfadeSeconds)`. |
+
+### Normal Flow — Configure crossfade
+
+1. User opens **Setup → CROSSFADE**.
+2. User toggles the **Crossfade** switch (same visual pattern as `PlaybackQueue`'s LOCK
+   PLAYLIST toggle) → `appConfig.setCrossfadeEnabled(...)` → auto-saves to
+   `Topaz.config`. The **Length** row (label, value, slider, min/max) dims to 35%
+   opacity and the slider is disabled while crossfade is off.
+3. User drags the **Length** slider (`QtQuick.Controls.Slider`, `2.0`–`10.0` s,
+   `stepSize: 0.5`, restyled to match the theme). The live value is shown above the
+   slider (bound to the slider's own `value`, so it updates smoothly while dragging);
+   `"2.0 s"`/`"10.0 s"` labels flank the track as the min/max. `onMoved` (fires only on
+   user interaction, not programmatic changes) calls `appConfig.setCrossfadeSeconds(...)`,
+   which clamps to `[2.0, 10.0]`, snaps to the nearest `0.5`, and auto-saves.
+4. `PlaybackEngine` reads both settings live from `appConfig` on every eligibility
+   check (never cached), so a change takes effect starting with the very next
+   transition — no restart needed.
+
+### Normal Flow — Crossfade a transition
+
+1. On every `positionChanged` tick of the **active** deck, `PlaybackEngine` checks: is
+   crossfade enabled, is a next track queued, and — **the eligibility rule** — do
+   *both* the active track's live `QMediaPlayer::duration()` and the next track's tag
+   `TrackInfo.duration` exceed the configured crossfade length? If not, nothing
+   happens and the transition falls through to the existing hard-cut path
+   (`EndOfMedia` → `advanceToNext()` → `loadTrack()`).
+2. Once `position >= duration − crossfadeMs`, `startCrossfade()` captures
+   `m_fadeOutDeck = m_activeDeck` and `m_fadeInDeck = 1 - m_activeDeck` — fixed for
+   this fade's whole lifetime, independent of when the UI-facing `m_activeDeck` alias
+   itself later swaps (see step 4) — loads the next track into `m_fadeInDeck` at
+   volume `0`, starts it playing, and starts `m_fadeTimer` (~40 ms tick).
+3. Each tick (`onFadeTick()`) advances a simple elapsed-ms counter (not wall-clock —
+   stopping the `QTimer` freezes the fade exactly in place, which is what makes pause
+   trivial) and linearly sets `m_fadeOutDeck.volume = 1 − frac`,
+   `m_fadeInDeck.volume = frac`.
+4. At the **midpoint** (`frac >= 0.5`, fired once): `m_activeDeck` (and the `m_player`/
+   `m_audioOutput` alias pointers) swap to `m_fadeInDeck` **here**, not at
+   fade-completion — immediately followed by `switchCurrentIndexTo(nextIdx)`
+   (`m_currentIndex` advances, `rating`/`ratingId` resolve for the incoming track, the
+   cover fetch kicks off, `currentIndexChanged`/`currentTrackChanged`/
+   `currentRatingChanged` fire) and explicit `durationChanged()`/`positionChanged()`/
+   `isPlayingChanged()` emissions. This is the single point that satisfies "update
+   *everything* in `NowPlaying` — including the length label and play/pause icon, which
+   read through the now-swapped `m_player` alias — and `PlaybackQueue`'s highlighted
+   row in the middle of the crossfade." `PlaybackQueue`'s highlight comes from
+   `IsPlayingRole`, refreshed by the same `dataChanged` call inside
+   `switchCurrentIndexTo()`. Swapping the alias at the midpoint rather than
+   fade-completion also avoids a signal-ordering bug where stopping the outgoing deck
+   at fade-completion would otherwise fire a stale `isPlayingChanged()` from the
+   about-to-be-reassigned alias.
+5. At `frac >= 1.0`: the timer stops, `m_fadeOutDeck` (no longer `m_activeDeck` since
+   the swap already happened at the midpoint, so its `playbackStateChanged` is
+   correctly suppressed by the per-deck signal guards) is stopped and its volume reset
+   to `1.0` for reuse.
+
+### Alternate: track too short to crossfade
+
+The eligibility rule in step 1 above is the single mechanism behind all three cases the
+feature was specified with, with no extra state needed:
+- A track shorter than the crossfade length can never supply a valid fade-out **or**
+  fade-in window (the ramp would have to start before the track even began), so it's
+  excluded from either side of a transition automatically.
+- The very **first** track played in a session (`playAt()`/`togglePlay()` from an idle
+  queue/`addTrack()` auto-play) always goes through `loadTrack()` directly — the
+  crossfade machinery is never engaged for it, so it never fades in.
+- If the **next** track is too short, the current transition falls through to a hard
+  cut; since a hard-cut-into track was never crossfaded, the same rule means it also
+  can't crossfade *out* into whatever follows it — so the track *after* a short one
+  also starts with a hard cut, regardless of its own length.
+
+### Alternate: interrupted mid-crossfade
+
+`cancelCrossfade()` — stop the fade timer, stop the standby deck, reset both decks'
+volumes to `1.0` — runs before `loadTrack()`, `seek()`, and every queue-mutating method
+(`removeAt`, `clearQueue`, `moveUp`, `moveDown`, `moveTrack`). Any of these occurring
+mid-crossfade abandons the fade and snaps to a clean single-deck state rather than
+attempting to reconcile the interruption with an in-progress fade — a deliberate
+simplification, since this is a narrow, few-second window. `togglePlay()` pauses/resumes
+both decks together when `m_crossfading` is true, so a paused fade doesn't leave the
+standby deck silently continuing to ramp.
+
+### Design notes
+
+- **Why dual-deck**: `QMediaPlayer` cannot play two sources at once, so a real
+  crossfade requires two independent `QMediaPlayer`/`QAudioOutput` pairs. `m_player`/
+  `m_audioOutput` are kept as alias pointers to `m_players[m_activeDeck]`/
+  `m_audioOutputs[m_activeDeck]` specifically so every pre-existing single-deck code
+  path continues to work unchanged.
+- **Linear fade**: volumes are set directly from the elapsed fraction with no easing
+  curve, per the requirement.
+- **AUTO PLAY feature is unrelated**: this use case is purely a playback-transition
+  effect; it does not use track ratings and is independent of the AUTO PLAY button
+  discussed in UC-14.

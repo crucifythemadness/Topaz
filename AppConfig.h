@@ -12,7 +12,9 @@
 // Schema:
 //   {
 //     "genres":  [ "Techno", "IDM", ... ],
-//     "folders": [ { "path": "C:/Music", "includeSubfolders": true }, ... ]
+//     "folders": [ { "path": "C:/Music", "includeSubfolders": true }, ... ],
+//     "crossfadeEnabled": false,
+//     "crossfadeSeconds": 5.0
 //   }
 //
 // Instantiated in Main.qml as:  AppConfig { id: appConfig }
@@ -33,6 +35,10 @@ class AppConfig : public QObject
     Q_PROPERTY(int playbackQueueWidth READ playbackQueueWidth NOTIFY panelWidthsChanged)
     Q_PROPERTY(int nowPlayingWidth    READ nowPlayingWidth    NOTIFY panelWidthsChanged)
 
+    // ── Crossfade settings ──────────────────────────────────────────────
+    Q_PROPERTY(bool   crossfadeEnabled READ crossfadeEnabled NOTIFY crossfadeChanged)
+    Q_PROPERTY(double crossfadeSeconds READ crossfadeSeconds NOTIFY crossfadeChanged)
+
 public:
     explicit AppConfig(QObject *parent = nullptr);
 
@@ -44,6 +50,9 @@ public:
     int libraryTreeWidth()     const { return m_libraryTreeWidth;   }
     int playbackQueueWidth()   const { return m_playbackQueueWidth; }
     int nowPlayingWidth()      const { return m_nowPlayingWidth;    }
+
+    bool   crossfadeEnabled() const { return m_crossfadeEnabled; }
+    double crossfadeSeconds() const { return m_crossfadeSeconds; }
 
     // ── Genre operations ─────────────────────────────────────────────────
     Q_INVOKABLE void addGenre(const QString &name);
@@ -68,6 +77,11 @@ public:
                                 int playbackQueueWidth,
                                 int nowPlayingWidth);
 
+    // ── Crossfade operations ─────────────────────────────────────────────
+    Q_INVOKABLE void setCrossfadeEnabled(bool enabled);
+    // Clamped to [2.0, 10.0] and snapped to the nearest 0.5 s increment.
+    Q_INVOKABLE void setCrossfadeSeconds(double seconds);
+
     // ── Persistence ──────────────────────────────────────────────────────
     Q_INVOKABLE void save();
 
@@ -76,6 +90,7 @@ signals:
     void foldersChanged();
     void windowGeometryChanged();
     void panelWidthsChanged();
+    void crossfadeChanged();
 
 private:
     void    load();
@@ -90,4 +105,7 @@ private:
     int m_libraryTreeWidth   = 286;
     int m_playbackQueueWidth = 374;
     int m_nowPlayingWidth    = 359;
+
+    bool   m_crossfadeEnabled = false;
+    double m_crossfadeSeconds = 5.0;
 };

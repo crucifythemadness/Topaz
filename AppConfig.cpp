@@ -8,6 +8,7 @@
 #include <QJsonParseError>
 #include <QStandardPaths>
 #include <QUrl>
+#include <cmath>
 
 AppConfig::AppConfig(QObject *parent)
     : QObject(parent)
@@ -139,6 +140,26 @@ void AppConfig::saveLayout(int windowWidth, int windowHeight,
     save();
 }
 
+// ── Crossfade operations ──────────────────────────────────────────────────
+
+void AppConfig::setCrossfadeEnabled(bool enabled)
+{
+    if (m_crossfadeEnabled == enabled) return;
+    m_crossfadeEnabled = enabled;
+    emit crossfadeChanged();
+    save();
+}
+
+void AppConfig::setCrossfadeSeconds(double seconds)
+{
+    seconds = qBound(2.0, seconds, 10.0);
+    seconds = std::round(seconds * 2.0) / 2.0;   // snap to nearest 0.5 s
+    if (qFuzzyCompare(m_crossfadeSeconds, seconds)) return;
+    m_crossfadeSeconds = seconds;
+    emit crossfadeChanged();
+    save();
+}
+
 // ── Persistence ───────────────────────────────────────────────────────────
 
 void AppConfig::load()
@@ -177,6 +198,9 @@ void AppConfig::load()
     m_libraryTreeWidth   = root[QStringLiteral("libraryTreeWidth")].toInt(286);
     m_playbackQueueWidth = root[QStringLiteral("playbackQueueWidth")].toInt(374);
     m_nowPlayingWidth    = root[QStringLiteral("nowPlayingWidth")].toInt(359);
+
+    m_crossfadeEnabled = root[QStringLiteral("crossfadeEnabled")].toBool(false);
+    m_crossfadeSeconds = root[QStringLiteral("crossfadeSeconds")].toDouble(5.0);
 }
 
 void AppConfig::save()
@@ -203,6 +227,9 @@ void AppConfig::save()
     root[QStringLiteral("libraryTreeWidth")]   = m_libraryTreeWidth;
     root[QStringLiteral("playbackQueueWidth")] = m_playbackQueueWidth;
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;
+
+    root[QStringLiteral("crossfadeEnabled")] = m_crossfadeEnabled;
+    root[QStringLiteral("crossfadeSeconds")] = m_crossfadeSeconds;
 
     QFile f(configFilePath());
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))

@@ -1,4 +1,5 @@
 #include "playbackengine.h"
+#include "appconfig.h"
 #include "ratingcache.h"
 #include "tagreader.h"
 
@@ -12,32 +13,40 @@
 
 PlaybackEngine::PlaybackEngine(QObject *parent)
     : QAbstractListModel(parent)
-    , m_player(new QMediaPlayer(this))
-    , m_audioOutput(new QAudioOutput(this))
 {
-    m_player->setAudioOutput(m_audioOutput);
-    m_audioOutput->setVolume(1.0f);
+    for (int d = 0; d < 2; ++d) {
+        m_players[d]      = new QMediaPlayer(this);
+        m_audioOutputs[d] = new QAudioOutput(this);
+        m_players[d]->setAudioOutput(m_audioOutputs[d]);
+        m_audioOutputs[d]->setVolume(1.0f);
 
-    connect(m_player, &QMediaPlayer::positionChanged,
-            this, &PlaybackEngine::positionChanged);
+        connect(m_players[d], &QMediaPlayer::positionChanged,
+                this, [this, d](qint64) { onDeckPositionChanged(d); });
+        connect(m_players[d], &QMediaPlayer::durationChanged,
+                this, [this, d](qint64) {
+                    if (d == m_activeDeck) emit durationChanged();
+                });
+        connect(m_players[d], &QMediaPlayer::playbackStateChanged,
+                this, [this, d](QMediaPlayer::PlaybackState) {
+                    if (d != m_activeDeck) return;
+                    emit isPlayingChanged();
+                    if (m_currentIndex >= 0 && m_currentIndex < m_queue.size()) {
+                        const QModelIndex idx = index(m_currentIndex);
+                        emit dataChanged(idx, idx, { IsPlayingRole });
+                    }
+                });
+        connect(m_players[d], &QMediaPlayer::mediaStatusChanged,
+                this, [this, d](QMediaPlayer::MediaStatus status) {
+                    onDeckMediaStatusChanged(d, status);
+                });
+    }
 
-    connect(m_player, &QMediaPlayer::durationChanged,
-            this, &PlaybackEngine::durationChanged);
+    m_player      = m_players[m_activeDeck];
+    m_audioOutput = m_audioOutputs[m_activeDeck];
 
-    connect(m_player, &QMediaPlayer::playbackStateChanged,
-            this, [this](QMediaPlayer::PlaybackState) {
-                emit isPlayingChanged();
-                if (m_currentIndex >= 0 && m_currentIndex < m_queue.size()) {
-                    const QModelIndex idx = index(m_currentIndex);
-                    emit dataChanged(idx, idx, { IsPlayingRole });
-                }
-            });
-
-    connect(m_player, &QMediaPlayer::mediaStatusChanged,
-            this, [this](QMediaPlayer::MediaStatus status) {
-                if (status == QMediaPlayer::EndOfMedia)
-                    advanceToNext();
-            });
+    m_fadeTimer = new QTimer(this);
+    m_fadeTimer->setInterval(40); // ~25 volume updates/sec — smooth enough for a linear fade
+    connect(m_fadeTimer, &QTimer::timeout, this, &PlaybackEngine::onFadeTick);
 
     connect(&m_coverWatcher, &QFutureWatcher<QByteArray>::finished,
             this, [this]() {
@@ -74,7 +83,7 @@ QVariant PlaybackEngine::data(const QModelIndex &index, int role) const
     case SubLabelRole: {
         const QString artist = t.artist.isEmpty() ? t.albumArtist : t.artist;
         QString sub = artist.toUpper();
-        if (!t.album.isEmpty()) sub += QStringLiteral(" \u2022 ") + t.album.toUpper();
+        if (!t.album.isEmpty()) sub += QStringLiteral(" • ") + t.album.toUpper();
         return sub;
     }
     case ArtistRole:
@@ -247,6 +256,7 @@ void PlaybackEngine::addTracks(const QVariantList &trackList)
 void PlaybackEngine::removeAt(int idx)
 {
     if (idx < 0 || idx >= m_queue.size()) return;
+    cancelCrossfade();
     const bool wasPlaying = (idx == m_currentIndex);
     const QString removedPath = m_queue.at(idx).filePath;  // capture before removal
 
@@ -288,6 +298,7 @@ void PlaybackEngine::removeAt(int idx)
 void PlaybackEngine::moveUp(int idx)
 {
     if (idx <= 0 || idx >= m_queue.size()) return;
+    cancelCrossfade();
     if (!beginMoveRows({}, idx, idx, {}, idx - 1)) return;
     m_queue.move(idx, idx - 1);
     endMoveRows();
@@ -307,6 +318,7 @@ void PlaybackEngine::moveUp(int idx)
 void PlaybackEngine::moveDown(int idx)
 {
     if (idx < 0 || idx >= m_queue.size() - 1) return;
+    cancelCrossfade();
     if (!beginMoveRows({}, idx + 1, idx + 1, {}, idx)) return;
     m_queue.move(idx, idx + 1);
     endMoveRows();
@@ -329,6 +341,7 @@ void PlaybackEngine::moveTrack(int from, int to)
     if (from < 0 || from >= m_queue.size()) return;
     if (to   < 0 || to   >= m_queue.size()) return;
     if (from == m_currentIndex) return;   // playing track cannot be repositioned
+    cancelCrossfade();
 
     // beginMoveRows destination: row is inserted BEFORE this index.
     // If moving downward, destination = to + 1 (insert after target row).
@@ -365,6 +378,7 @@ void PlaybackEngine::moveTrack(int from, int to)
 void PlaybackEngine::clearQueue()
 {
     if (m_queue.isEmpty()) return;
+    cancelCrossfade();
     m_player->stop();
     m_currentIndex = -1;
     clearCoverSource();
@@ -466,10 +480,16 @@ void PlaybackEngine::togglePlay()
         m_player->play();
         return;
     }
-    if (m_player->playbackState() == QMediaPlayer::PlayingState)
+    const bool playing = (m_player->playbackState() == QMediaPlayer::PlayingState);
+    if (playing) {
         m_player->pause();
-    else
+        // Keep both decks in lockstep while a crossfade is in progress —
+        // otherwise the standby deck would keep fading in while paused.
+        if (m_crossfading) m_players[1 - m_activeDeck]->pause();
+    } else {
         m_player->play();
+        if (m_crossfading) m_players[1 - m_activeDeck]->play();
+    }
 }
 
 void PlaybackEngine::next()
@@ -492,8 +512,12 @@ void PlaybackEngine::previous()
 
 void PlaybackEngine::seek(qint64 ms)
 {
-    if (m_currentIndex >= 0)
-        m_player->setPosition(ms);
+    if (m_currentIndex < 0) return;
+    // A manual seek abandons any automatic crossfade in progress — reconciling
+    // a seek on the fading-out deck with the independently-playing standby
+    // deck isn't worth the complexity for what is a rare, few-second window.
+    cancelCrossfade();
+    m_player->setPosition(ms);
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────
@@ -502,13 +526,24 @@ void PlaybackEngine::loadTrack(int idx)
 {
     if (idx < 0 || idx >= m_queue.size()) return;
 
-    const int oldIndex = m_currentIndex;
-    m_currentIndex = idx;
+    cancelCrossfade();
+    m_audioOutput->setVolume(1.0f);   // in case a fade left this deck's volume < 1
     m_player->setSource(QUrl::fromLocalFile(m_queue.at(idx).filePath));
 
+    switchCurrentIndexTo(idx);
+}
+
+void PlaybackEngine::switchCurrentIndexTo(int idx)
+{
+    if (idx < 0 || idx >= m_queue.size()) return;
+
+    const int oldIndex = m_currentIndex;
+    m_currentIndex = idx;
+
     // Resolve this track's rating identity/value now — the single canonical
-    // point every playback path (queue add, playlist load) funnels through —
-    // rather than trying to carry rating/ratingId through every map conversion.
+    // point every playback path (queue add, playlist load, crossfade) funnels
+    // through — rather than trying to carry rating/ratingId through every map
+    // conversion.
     {
         TrackInfo &cur = m_queue[idx];
         if (cur.ratingId.isNull())
@@ -558,6 +593,110 @@ void PlaybackEngine::advanceToNext()
         // End of queue — stay on last track, stopped
         emit isPlayingChanged();
     }
+}
+
+// ── Crossfade ──────────────────────────────────────────────────────────────
+
+void PlaybackEngine::onDeckPositionChanged(int deckIndex)
+{
+    if (deckIndex == m_activeDeck)
+        emit positionChanged();
+
+    if (deckIndex != m_activeDeck || m_crossfading) return;
+    if (!m_appConfig || !m_appConfig->crossfadeEnabled()) return;
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size() - 1) return; // no next track
+
+    QMediaPlayer *active = m_players[m_activeDeck];
+    const qint64 dur = active->duration();
+    const qint64 pos = active->position();
+    if (dur <= 0) return;
+
+    const qint64 fadeMs = qint64(m_appConfig->crossfadeSeconds() * 1000);
+    const TrackInfo &next = m_queue.at(m_currentIndex + 1);
+
+    // Eligibility: both the current (live) and next (tag) duration must exceed
+    // the fade window, or neither a valid fade-out nor fade-in window exists.
+    if (dur <= fadeMs || next.duration <= fadeMs) return;
+
+    if (pos >= dur - fadeMs)
+        startCrossfade();
+}
+
+void PlaybackEngine::onDeckMediaStatusChanged(int deckIndex, QMediaPlayer::MediaStatus status)
+{
+    if (deckIndex != m_activeDeck || m_crossfading) return;
+    if (status == QMediaPlayer::EndOfMedia)
+        advanceToNext();
+}
+
+void PlaybackEngine::startCrossfade()
+{
+    const int nextIdx = m_currentIndex + 1;
+
+    // Fixed for this fade's whole lifetime — the volume ramp always targets
+    // these two decks, independent of when m_activeDeck itself gets swapped.
+    m_fadeOutDeck = m_activeDeck;
+    m_fadeInDeck  = 1 - m_activeDeck;
+
+    m_players[m_fadeInDeck]->setSource(QUrl::fromLocalFile(m_queue.at(nextIdx).filePath));
+    m_audioOutputs[m_fadeInDeck]->setVolume(0.0f);
+    m_players[m_fadeInDeck]->play();
+
+    m_crossfading       = true;
+    m_fadeMidpointFired = false;
+    m_fadeTargetIndex   = nextIdx;
+    m_fadeElapsedMs     = 0;
+    m_fadeTimer->start();
+}
+
+void PlaybackEngine::onFadeTick()
+{
+    if (!m_appConfig) { cancelCrossfade(); return; }
+
+    m_fadeElapsedMs += m_fadeTimer->interval();
+    const qint64 fadeMs = qMax<qint64>(1, qint64(m_appConfig->crossfadeSeconds() * 1000));
+    const double frac = qMin(1.0, double(m_fadeElapsedMs) / double(fadeMs));
+
+    m_audioOutputs[m_fadeOutDeck]->setVolume(float(1.0 - frac));
+    m_audioOutputs[m_fadeInDeck]->setVolume(float(frac));
+
+    if (!m_fadeMidpointFired && frac >= 0.5) {
+        m_fadeMidpointFired = true;
+
+        // Switch the UI-facing alias now too, so duration/position/isPlaying
+        // (progress bar, length label, play/pause icon) switch to the incoming
+        // track together with title/artist/cover/rating, all at the midpoint.
+        m_activeDeck  = m_fadeInDeck;
+        m_player      = m_players[m_activeDeck];
+        m_audioOutput = m_audioOutputs[m_activeDeck];
+
+        switchCurrentIndexTo(m_fadeTargetIndex);
+        emit durationChanged();
+        emit positionChanged();
+        emit isPlayingChanged();
+    }
+
+    if (frac >= 1.0) {
+        m_fadeTimer->stop();
+        // m_fadeOutDeck is no longer m_activeDeck (swapped at the midpoint above),
+        // so its playbackStateChanged from this stop() is correctly suppressed by
+        // the per-deck signal guards instead of stomping on isPlaying.
+        m_players[m_fadeOutDeck]->stop();
+        m_audioOutputs[m_fadeOutDeck]->setVolume(1.0f);   // reset for reuse
+        m_crossfading = false;
+    }
+}
+
+void PlaybackEngine::cancelCrossfade()
+{
+    if (!m_crossfading) return;
+    m_fadeTimer->stop();
+    const int standbyDeck = 1 - m_activeDeck;
+    m_players[standbyDeck]->stop();
+    m_audioOutputs[standbyDeck]->setVolume(1.0f);
+    m_audioOutputs[m_activeDeck]->setVolume(1.0f);
+    m_crossfading   = false;
+    m_fadeElapsedMs = 0;
 }
 
 QString PlaybackEngine::msToString(qint64 ms)
