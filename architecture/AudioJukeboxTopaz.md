@@ -1061,7 +1061,7 @@ Pure mouse tracking avoids both issues: `onPositionChanged` fires reliably as lo
 | Track title | `engine.currentTitle` |
 | Artist | `engine.currentArtist` (artist with fallback to albumArtist) |
 | Format badge | `engine.currentFormat` + `engine.currentBitrate` KBPS |
-| Rating (stars) | `engine.currentRating` (0-10); set by clicking a star, calls `engine.setCurrentRating(n)`. Same row as the format badge — stars right-aligned, format badge left-aligned (see UC-14). Hidden entirely when no track is loaded (`NO TRACK` state). Filled stars use a hardcoded gold (`#FFD700`) — a deliberate, one-off exception to the theme palette, not a `Theme.*` token. |
+| Rating (stars) | `engine.currentRating` (0-10); set by clicking a star, calls `engine.setCurrentRating(n)`. Same row as the format badge — stars right-aligned, format badge left-aligned (see UC-14). Hidden entirely when no track is loaded (`NO TRACK` state). Filled stars use a hardcoded darker orange (`#CC5500`) — a deliberate, one-off exception to the theme palette, not a `Theme.*` token. |
 | Elapsed time | `engine.positionString` ("M:SS") |
 | Total time | `engine.durationString` ("M:SS") |
 | Progress ratio | `engine.position / engine.duration` |

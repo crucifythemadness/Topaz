@@ -152,10 +152,10 @@ Rectangle {
                                 readonly property bool filled:
                                     root.engine && index < root.engine.currentRating
 
-                                // Gold is a deliberate, one-off break from the theme
-                                // palette — a rating star should shine like gold.
-                                color: filled              ? "#FFD700"
-                                     : starMA.containsMouse ? Qt.rgba(1, 0.843, 0, 0.45)
+                                // This orange is a deliberate, one-off break from the
+                                // theme palette for the rating stars.
+                                color: filled              ? "#CC5500"
+                                     : starMA.containsMouse ? Qt.rgba(0.8, 0.333, 0, 0.45)
                                      :                        Theme.outlineVariant
 
                                 MouseArea {
