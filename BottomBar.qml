@@ -13,9 +13,15 @@ Rectangle {
     property bool scanning: false
 
     // Set by Main.qml (bound to libraryModel.ratingsReady). AUTO PLAY only shows
-    // as active once a scan has completed with rating enrichment applied — the
-    // AUTO PLAY feature itself is not implemented yet, so clicking it does nothing.
+    // as ready (green) once a scan has completed with rating enrichment applied.
     property bool autoPlayReady: false
+
+    // Local toggle state — whether the user has clicked AUTO PLAY "on" (red) since
+    // it became ready. Intentionally not persisted: AUTO PLAY must never auto-start
+    // at app launch, so this always resets to false on a fresh BottomBar instance.
+    // The AUTO PLAY feature itself is not implemented yet, so this only drives the
+    // button's traffic-light color for now — no queue-filling behavior is triggered.
+    property bool autoPlayActive: false
 
     // Ghost top border
     Rectangle {
@@ -39,7 +45,18 @@ Rectangle {
                 width:  root.width / 4
                 height: root.height
 
-                readonly property bool isScanBtn: modelData.label === "SCAN DIRECTORIES"
+                readonly property bool isScanBtn:     modelData.label === "SCAN DIRECTORIES"
+                readonly property bool isAutoPlayBtn: modelData.label === "AUTO PLAY"
+
+                // Traffic-light color for AUTO PLAY (grey/green/red); every other
+                // button keeps its existing scanning/active/inactive coloring.
+                readonly property color btnColor:
+                    isAutoPlayBtn
+                        ? (!root.autoPlayReady ? Theme.fgSurfaceVariant
+                           : root.autoPlayActive ? "#FF1744" : "#00C853")
+                        : (isScanBtn && root.scanning)
+                            ? Theme.tertiary
+                            : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
 
                 Rectangle {
                     anchors.fill: parent
@@ -54,9 +71,7 @@ Rectangle {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: modelData.icon
                         font.pixelSize: 16
-                        color: (isScanBtn && root.scanning)
-                               ? Theme.tertiary
-                               : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
+                        color: btnColor
                     }
 
                     Text {
@@ -66,9 +81,7 @@ Rectangle {
                         font.pixelSize:    Theme.labelXs
                         font.weight:       Font.Medium
                         font.letterSpacing: 1.0
-                        color: (isScanBtn && root.scanning)
-                               ? Theme.tertiary
-                               : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
+                        color: btnColor
                     }
                 }
 
@@ -80,6 +93,8 @@ Rectangle {
                     onClicked: {
                         if (isScanBtn && !root.scanning)
                             root.scanRequested()
+                        else if (isAutoPlayBtn && root.autoPlayReady)
+                            root.autoPlayActive = !root.autoPlayActive
                     }
                 }
             }

@@ -4,10 +4,13 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 
 // ── SetupDialog ──────────────────────────────────────────────────────────
-// Modal setup window with three tabs:
+// Modal setup window with four tabs:
 //   • GENRES        — add/delete genre names that drive GenreBar buttons
 //   • FILE MONITORING — add/delete monitored folders (with subfolders toggle)
 //   • CROSSFADE     — enable/disable crossfade and set its length (see UC-15)
+//   • AUTO PLAY     — settings for the still-unimplemented AUTO PLAY feature:
+//                     Queue Horizon lookahead, Consider Genre, and Consider
+//                     Rating + Minimum Rating (see UC-14)
 //
 // Usage in Main.qml:
 //   SetupDialog { id: setupDialog; appConfig: appConfig }
@@ -27,7 +30,7 @@ Popup {
     // ── Geometry ─────────────────────────────────────────────────────────
     anchors.centerIn: Overlay.overlay
     width:  920   // widened so genreManageGrid's cells grow ~20% for longer genre names
-    height: 560
+    height: 680   // grown to fit the AUTO PLAY tab's 7th settings row (Title Adding)
     padding: 0
 
     modal: true
@@ -114,7 +117,7 @@ Popup {
                 spacing: 0
 
                 Repeater {
-                    model: ["GENRES", "FILE MONITORING", "CROSSFADE"]
+                    model: ["GENRES", "FILE MONITORING", "CROSSFADE", "AUTO PLAY"]
 
                     delegate: Item {
                         width:  tabLabel.implicitWidth + 32
@@ -693,6 +696,15 @@ Popup {
                             font.pixelSize: Theme.titleMd
                             font.weight:    Font.Bold
                             color: Theme.fgSurface
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text:    qsTr("Activate/Deactivate linear Fading-In/Fading-Out")
+                            }
                         }
 
                         Item { Layout.fillWidth: true }
@@ -734,6 +746,7 @@ Popup {
                     // ── Length row ─────────────────────────────────────
                     ColumnLayout {
                         Layout.fillWidth: true
+                        Layout.leftMargin: 24
                         spacing: 8
                         opacity: parent.crossfadeOn ? 1.0 : 0.35
 
@@ -742,9 +755,18 @@ Popup {
                             Text {
                                 text: "Length"
                                 font.family:    Theme.fontFamilyBody
-                                font.pixelSize: Theme.labelLg
+                                font.pixelSize: Theme.titleMd
                                 font.weight:    Font.Medium
                                 color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("Time duration of Fading-In the next Track whilst Fading-Out the actual Track")
+                                }
                             }
                             Item { Layout.fillWidth: true }
                             Text {
@@ -829,6 +851,508 @@ Popup {
                     Item { Layout.fillHeight: true }   // push content to top
                 }
             } // end CROSSFADE panel
+
+            // ────────────────────────────────────────────────────────────
+            // PANEL 4 — AUTO PLAY
+            // ────────────────────────────────────────────────────────────
+            Item {
+                anchors.fill: parent
+                visible: tabBar.currentTab === 3
+
+                ColumnLayout {
+                    anchors { fill: parent; margins: 24 }
+                    spacing: 40
+
+                    // ── Queue Horizon row ─────────────────────────────
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Queue Horizon"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("How many Tracks are pre-loaded with AUTO PLAY")
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(queueHorizonSlider.value) + " tracks"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "1"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: queueHorizonSlider
+                                Layout.fillWidth: true
+                                from: 1
+                                to:   15
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.autoPlayQueueHorizon : 5
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAutoPlayQueueHorizon(
+                                            Math.round(value))
+                                }
+
+                                background: Rectangle {
+                                    x: queueHorizonSlider.leftPadding
+                                    y: queueHorizonSlider.topPadding
+                                       + queueHorizonSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  queueHorizonSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  queueHorizonSlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: queueHorizonSlider.leftPadding
+                                       + queueHorizonSlider.visualPosition
+                                         * (queueHorizonSlider.availableWidth - width)
+                                    y: queueHorizonSlider.topPadding
+                                       + queueHorizonSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "15"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Title Adding row ──────────────────────────────
+                    // Polling interval AUTO PLAY will use to add one new track at
+                    // a time to the queue (see UC-14 design note).
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Title Adding"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("Interval until the next Track will be added")
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(titleAddingSlider.value) + " s"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "5 s"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: titleAddingSlider
+                                Layout.fillWidth: true
+                                from: 5
+                                to:   90
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.autoPlayTitleAddingIntervalSeconds : 30
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAutoPlayTitleAddingIntervalSeconds(
+                                            Math.round(value))
+                                }
+
+                                background: Rectangle {
+                                    x: titleAddingSlider.leftPadding
+                                    y: titleAddingSlider.topPadding
+                                       + titleAddingSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  titleAddingSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  titleAddingSlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: titleAddingSlider.leftPadding
+                                       + titleAddingSlider.visualPosition
+                                         * (titleAddingSlider.availableWidth - width)
+                                    y: titleAddingSlider.topPadding
+                                       + titleAddingSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "90 s"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Consider Genre row ────────────────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Consider Genre"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Toggle switch — same visual pattern as the CROSSFADE tab's
+                        // on/off toggle.
+                        Rectangle {
+                            id: considerGenreTrack
+
+                            readonly property bool considerGenreOn:
+                                root.appConfig !== null && root.appConfig.autoPlayConsiderGenre
+
+                            width: 48; height: 24
+                            radius: 12
+                            color: considerGenreOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: considerGenreTrack.considerGenreOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAutoPlayConsiderGenre(
+                                            !root.appConfig.autoPlayConsiderGenre)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Consider Rating row ───────────────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Consider Rating"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Toggle switch — same visual pattern as the CROSSFADE tab's
+                        // and Consider Genre's on/off toggle.
+                        Rectangle {
+                            id: considerRatingTrack
+
+                            readonly property bool considerRatingOn:
+                                root.appConfig !== null && root.appConfig.autoPlayConsiderRating
+
+                            width: 48; height: 24
+                            radius: 12
+                            color: considerRatingOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: considerRatingTrack.considerRatingOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAutoPlayConsiderRating(
+                                            !root.appConfig.autoPlayConsiderRating)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Minimum Rating row ─────────────────────────────
+                    // Enabled/visible-strength only while Consider Rating is on.
+                    // Stars mirror NowPlaying.qml's rating-star Repeater — same
+                    // glyph, size, and blue palette — but drive
+                    // appConfig.autoPlayMinimumRating instead of the currently
+                    // playing track's rating. A plain Item (not RowLayout) is used
+                    // so the star Row can be explicitly positioned against
+                    // queueHorizonSlider's right edge above — Layout-managed items
+                    // can't carry anchors, and Qt Quick anchors only work between
+                    // siblings/parent anyway (queueHorizonSlider is neither), hence
+                    // the explicit x binding below instead of anchors.right.
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.max(minRatingLabel.implicitHeight, 18)
+                        enabled: root.appConfig !== null && root.appConfig.autoPlayConsiderRating
+                        opacity: enabled ? 1.0 : 0.35
+
+                        Text {
+                            id: minRatingLabel
+                            anchors.left: parent.left
+                            anchors.leftMargin: 24
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Minimum Rating"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Medium
+                            color: Theme.fgSurface
+                        }
+
+                        Row {
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: queueHorizonSlider.x + queueHorizonSlider.width - width
+                            spacing: 3
+
+                            Repeater {
+                                model: 10
+
+                                delegate: Text {
+                                    text: "★"   // ★
+                                    font.pixelSize: 18
+
+                                    readonly property bool filled:
+                                        root.appConfig && index < root.appConfig.autoPlayMinimumRating
+
+                                    color: filled                    ? "#00A6ED"
+                                         : minRatingMA.containsMouse ? Qt.rgba(0, 0.651, 0.929, 0.45)
+                                         :                             Theme.outlineVariant
+
+                                    MouseArea {
+                                        id: minRatingMA
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape:  Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (root.appConfig)
+                                                root.appConfig.setAutoPlayMinimumRating(index + 1)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Allow Manual Modification row ─────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Allow Manual Modification"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Toggle switch — same visual pattern as the CROSSFADE tab's
+                        // and Consider Genre's on/off toggle.
+                        Rectangle {
+                            id: allowManualModificationTrack
+
+                            readonly property bool allowManualModificationOn:
+                                root.appConfig !== null && root.appConfig.autoPlayAllowManualModification
+
+                            width: 48; height: 24
+                            radius: 12
+                            color: allowManualModificationOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: allowManualModificationTrack.allowManualModificationOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAutoPlayAllowManualModification(
+                                            !root.appConfig.autoPlayAllowManualModification)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Play a Song row ────────────────────────────────
+                    // First radio-button control in the app: a single row of
+                    // mutually-exclusive song-repeat modes. Circle border/dot
+                    // colors match every other AUTO PLAY control's selected/
+                    // unselected pairing (Theme.secondary / Theme.outlineVariant).
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text {
+                            text: "Play a Title"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Grid {
+                            Layout.leftMargin: 24
+                            columns: 4
+                            rowSpacing:    12
+                            columnSpacing: 32
+
+                            Repeater {
+                                model: [
+                                    { value: "once",                  label: "Once" },
+                                    { value: "twice",                 label: "Twice" },
+                                    { value: "twiceIfNoneAvailable",  label: "Twice when no other available" },
+                                    { value: "several",               label: "Several times" }
+                                ]
+
+                                delegate: RowLayout {
+                                    spacing: 8
+
+                                    readonly property bool selected:
+                                        root.appConfig !== null
+                                        && root.appConfig.autoPlaySongRepeat === modelData.value
+
+                                    Rectangle {
+                                        width: 18; height: 18
+                                        radius: 9
+                                        color: "transparent"
+                                        border.width: 2
+                                        border.color: selected ? Theme.secondary : Theme.outlineVariant
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 10; height: 10
+                                            radius: 5
+                                            color: Theme.secondary
+                                            visible: selected
+                                        }
+                                    }
+
+                                    Text {
+                                        text: modelData.label
+                                        font.family:    Theme.fontFamilyBody
+                                        font.pixelSize: Theme.labelLg
+                                        color: Theme.fgSurface
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (root.appConfig)
+                                                root.appConfig.setAutoPlaySongRepeat(modelData.value)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }   // push content to top
+                }
+            } // end AUTO PLAY panel
 
         } // content Item
     } // contentItem ColumnLayout

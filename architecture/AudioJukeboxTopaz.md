@@ -333,7 +333,7 @@ Topaz module
 │                         property AppConfig appConfig
 │                         property LibraryModel libraryModel
 ├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, LibraryModel, PlaybackEngine, PlaylistManager, SetupDialog, NewPlaylistDialog
-├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE, see UC-15)
+├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY, see UC-15 / UC-14)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
 ├── TopBar.qml          Header (logo | navigation tabs | icons + avatar)  height 64 px
@@ -351,7 +351,7 @@ Topaz module
 |                         Playlist row 1: NEW | LOAD (clears active playlist first if one is loaded, then opens file dialog)
 |                         Playlist row 2: EXPORT (not yet wired) | REMOVE (active only when playlist loaded; calls engine.clearQueue())
 │                         signal newPlaylistRequested()  ← “+ NEW” button click
-└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates the AUTO PLAY entry's active visual state only, see UC-14)
+└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all; autoPlayActive property — local, not persisted, toggled on click, drives the AUTO PLAY entry's green/red traffic-light color, see UC-14)
 ```
 
 ## LibraryModel Component
@@ -582,10 +582,27 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     "libraryTreeWidth":   286,
     "playbackQueueWidth": 374,
     "nowPlayingWidth":    359,
-    "crossfadeEnabled":   false,
-    "crossfadeSeconds":   5.0
+    "crossfade": {
+        "enabled": false,
+        "seconds": 5.0
+    },
+    "autoPlay": {
+        "queueHorizon": 5,
+        "titleAddingIntervalSeconds": 30,
+        "considerGenre": false,
+        "considerRating": false,
+        "minimumRating": 5,
+        "allowManualModification": false,
+        "songRepeat": "once"
+    }
 }
 ```
+
+Settings are grouped into a nested object per `SetupDialog` tab (`crossfade`,
+`autoPlay`); genres/folders/window-layout stay flat at the top level. The
+`AppConfig` property/method names (`crossfadeEnabled`, `crossfadeSeconds`,
+`autoPlayQueueHorizon`, and their setters) are unchanged by this grouping — only the
+on-disk JSON shape differs.
 
 ### AppConfig public API
 
@@ -601,6 +618,13 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
 | `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. |
 | `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s CROSSFADE tab toggle (see UC-15). |
 | `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 10.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s CROSSFADE tab slider. |
+| `autoPlayQueueHorizon` / `setAutoPlayQueueHorizon(tracks)` | How many tracks the (still-unimplemented) AUTO PLAY feature should keep filled into `PlaybackQueue` as a lookahead (default `5`); clamped to `[1, 15]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Queue Horizon"); not yet consumed by any queue-filling logic (see UC-14). |
+| `autoPlayTitleAddingIntervalSeconds` / `setAutoPlayTitleAddingIntervalSeconds(seconds)` | Polling interval, in seconds, the (still-unimplemented) AUTO PLAY feature should use to add one new track at a time to the queue (default `30`); clamped to `[5, 90]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Title Adding"); not yet consumed by any poller (see UC-14). |
+| `autoPlayConsiderGenre` / `setAutoPlayConsiderGenre(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should factor genre into track selection (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Consider Genre"); not yet consumed by any selection logic (see UC-14). |
+| `autoPlayConsiderRating` / `setAutoPlayConsiderRating(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should factor title rating into track selection (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Consider Rating"); not yet consumed by any selection logic (see UC-14). |
+| `autoPlayMinimumRating` / `setAutoPlayMinimumRating(rating)` | Minimum title rating (1-10) the (still-unimplemented) AUTO PLAY feature should consider when `autoPlayConsiderRating` is on (default `5`); clamped to `[1, 10]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab star row ("Minimum Rating"), reusing the same star glyph/palette as `NowPlaying`'s rating row; not yet consumed by any selection logic (see UC-14). |
+| `autoPlayAllowManualModification` / `setAutoPlayAllowManualModification(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should allow the user to manually modify its auto-filled queue entries (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Allow Manual Modification"); not yet consumed by any queue-filling or editing logic (see UC-14). |
+| `autoPlaySongRepeat` / `setAutoPlaySongRepeat(mode)` | How many times AUTO PLAY should play a selected track before moving on (default `"once"`); one of `"once"`, `"twice"`, `"twiceIfNoneAvailable"`, `"several"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab radio group ("Play a Title") — the app's first radio-button control; not yet consumed by any selection logic (see UC-14). |
 | `save()` | Persist current state to `Topaz.config` (called automatically by all mutators). |
 
 ## Data Flow: Genre Filter (GenreBar toggle)
@@ -889,16 +913,37 @@ configurable via the app JSON config) will be introduced at that point.
       +folders QVariantList
       +crossfadeEnabled bool
       +crossfadeSeconds double
+      +autoPlayQueueHorizon int
+      +autoPlayTitleAddingIntervalSeconds int
+      +autoPlayConsiderGenre bool
+      +autoPlayConsiderRating bool
+      +autoPlayMinimumRating int
+      +autoPlayAllowManualModification bool
+      +autoPlaySongRepeat string
       +addGenre(name)
       +removeGenreAt(index)
       +addFolder(path, subfolders)
       +removeFolderAt(index)
       +setCrossfadeEnabled(enabled)
       +setCrossfadeSeconds(seconds)
+      +setAutoPlayQueueHorizon(tracks)
+      +setAutoPlayTitleAddingIntervalSeconds(seconds)
+      +setAutoPlayConsiderGenre(enabled)
+      +setAutoPlayConsiderRating(enabled)
+      +setAutoPlayMinimumRating(rating)
+      +setAutoPlayAllowManualModification(enabled)
+      +setAutoPlaySongRepeat(mode)
       +save()
       ~genresChanged()
       ~foldersChanged()
       ~crossfadeChanged()
+      ~autoPlayQueueHorizonChanged()
+      ~autoPlayTitleAddingIntervalSecondsChanged()
+      ~autoPlayConsiderGenreChanged()
+      ~autoPlayConsiderRatingChanged()
+      ~autoPlayMinimumRatingChanged()
+      ~autoPlayAllowManualModificationChanged()
+      ~autoPlaySongRepeatChanged()
     }
 
     LibraryModel --> LibraryScanner : owns (worker thread)
@@ -1449,7 +1494,8 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
 6. `LibraryModel::onScanCompleted()` sets `ratingsReady = true` (only the first time,
    this session) after applying the enriched tracks.
 7. `Main.qml` binds `BottomBar.autoPlayReady: libraryModel.ratingsReady` — the AUTO PLAY
-   entry in `BottomBar` switches from its inactive (grey) to active (teal) visual state.
+   entry in `BottomBar` switches from its not-ready (grey, unclickable) to ready
+   (green) traffic-light state, and becomes clickable.
 
 ### Normal Flow — Set a rating from NowPlaying
 
@@ -1490,11 +1536,41 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
 - **Content-based identity caveat**: two distinct tracks with identical
   albumArtist/artist/album/title (e.g. duplicate pressings) collide onto the same
   `ratingId` and share a rating — an accepted trade-off of metadata-based identity.
-- **AUTO PLAY gating is visual-only**: `autoPlayReady` only changes the AUTO PLAY
-  entry's color state in `BottomBar` (same active/inactive mechanism already used for
-  the still-unimplemented EQUALIZER/TAG INFORMATION entries) — clicking it does nothing
-  yet. The AUTO PLAY *feature* itself (using ratings to drive playback selection) is
-  still future work; only rating display/entry (`NowPlaying`'s star row) is implemented.
+- **AUTO PLAY button is a traffic-light toggle, still visual-only**: `BottomBar`'s AUTO
+  PLAY entry has three color states — grey (`Theme.fgSurfaceVariant`) while
+  `autoPlayReady` is `false` (before the first scan completes) and unclickable; green
+  (`#00C853`) once ready and not yet toggled on; red (`#FF1744`) after the user clicks
+  it. Clicking only toggles `BottomBar.autoPlayActive`, a local, session-only property
+  (not persisted — always resets to `false` on app launch, matching the "AUTO PLAY
+  must never auto-start" design rule) — it does not yet start any queue-filling
+  behavior. Neither color is a `Theme.*` token; like the rating stars' `#00A6ED`, they
+  are deliberate hardcoded one-offs chosen for a literal traffic-light metaphor. The
+  AUTO PLAY *feature* itself (using ratings/genre/polling to drive playback selection)
+  is still future work; only rating display/entry (`NowPlaying`'s star row) and this
+  button's visual state are implemented.
+- **AUTO PLAY configuration is being built ahead of the feature itself**: `SetupDialog`'s
+  AUTO PLAY tab holds `autoPlayQueueHorizon` (`AppConfig`, default `5`, range `[1, 15]`)
+  — how many tracks AUTO PLAY should keep filled into `PlaybackQueue` as a lookahead —
+  `autoPlayTitleAddingIntervalSeconds` (`AppConfig`, default `30`, range `[5, 90]`) —
+  the polling interval AUTO PLAY should use to add one new track at a time to the queue
+  (the agreed design is single-track-per-tick, never a batch fill, and AUTO PLAY itself
+  must never auto-start at app launch — the user always switches it on manually) —
+  `autoPlayConsiderGenre` (`AppConfig`, default `false`) — whether track selection
+  should factor in genre — and `autoPlayConsiderRating` / `autoPlayMinimumRating`
+  (`AppConfig`, defaults `false` / `5`, rating range `[1, 10]`) — whether track selection
+  should be filtered by title rating, and the minimum rating to require when it is. The
+  Minimum Rating star row reuses `NowPlaying`'s star glyph/size/palette but writes to
+  `AppConfig` instead of `PlaybackEngine.currentRating`. `autoPlayAllowManualModification`
+  (`AppConfig`, default `false`) — whether the user may manually edit AUTO PLAY's
+  auto-filled queue entries once the feature exists. `autoPlaySongRepeat` (`AppConfig`,
+  default `"once"`, one of `"once"`/`"twice"`/`"twiceIfNoneAvailable"`/`"several"`) —
+  how many times AUTO PLAY should repeat a selected track; set via `SetupDialog`'s
+  "Play a Title" radio group, the app's first radio-button control (four mutually
+  exclusive options on a single row, styled with the same
+  `Theme.secondary`/`Theme.outlineVariant` selected/unselected pairing used by every
+  other AUTO PLAY control). All seven are currently just persisted settings with no
+  consumer; no queue-filling, polling, genre-aware, rating-aware, manual-modification,
+  or repeat-count logic exists yet.
 - **Two distinct persistence paths, one file**: `RatingCache::save()` (full-list
   overwrite, scan-time bulk enrichment) and `RatingCache::setRating()` (single upsert,
   interactive star click) both write `Topaz.rating.json` via the same private

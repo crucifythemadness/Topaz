@@ -160,6 +160,72 @@ void AppConfig::setCrossfadeSeconds(double seconds)
     save();
 }
 
+// ── AUTO PLAY operations ──────────────────────────────────────────────────
+
+void AppConfig::setAutoPlayQueueHorizon(int tracks)
+{
+    tracks = qBound(1, tracks, 15);
+    if (m_autoPlayQueueHorizon == tracks) return;
+    m_autoPlayQueueHorizon = tracks;
+    emit autoPlayQueueHorizonChanged();
+    save();
+}
+
+void AppConfig::setAutoPlayTitleAddingIntervalSeconds(int seconds)
+{
+    seconds = qBound(5, seconds, 90);
+    if (m_autoPlayTitleAddingIntervalSeconds == seconds) return;
+    m_autoPlayTitleAddingIntervalSeconds = seconds;
+    emit autoPlayTitleAddingIntervalSecondsChanged();
+    save();
+}
+
+void AppConfig::setAutoPlayConsiderGenre(bool enabled)
+{
+    if (m_autoPlayConsiderGenre == enabled) return;
+    m_autoPlayConsiderGenre = enabled;
+    emit autoPlayConsiderGenreChanged();
+    save();
+}
+
+void AppConfig::setAutoPlayConsiderRating(bool enabled)
+{
+    if (m_autoPlayConsiderRating == enabled) return;
+    m_autoPlayConsiderRating = enabled;
+    emit autoPlayConsiderRatingChanged();
+    save();
+}
+
+void AppConfig::setAutoPlayMinimumRating(int rating)
+{
+    rating = qBound(1, rating, 10);
+    if (m_autoPlayMinimumRating == rating) return;
+    m_autoPlayMinimumRating = rating;
+    emit autoPlayMinimumRatingChanged();
+    save();
+}
+
+void AppConfig::setAutoPlayAllowManualModification(bool enabled)
+{
+    if (m_autoPlayAllowManualModification == enabled) return;
+    m_autoPlayAllowManualModification = enabled;
+    emit autoPlayAllowManualModificationChanged();
+    save();
+}
+
+void AppConfig::setAutoPlaySongRepeat(const QString &mode)
+{
+    static const QStringList kAllowed = {
+        QStringLiteral("once"), QStringLiteral("twice"),
+        QStringLiteral("twiceIfNoneAvailable"), QStringLiteral("several")
+    };
+    if (!kAllowed.contains(mode)) return;
+    if (m_autoPlaySongRepeat == mode) return;
+    m_autoPlaySongRepeat = mode;
+    emit autoPlaySongRepeatChanged();
+    save();
+}
+
 // ── Persistence ───────────────────────────────────────────────────────────
 
 void AppConfig::load()
@@ -199,8 +265,21 @@ void AppConfig::load()
     m_playbackQueueWidth = root[QStringLiteral("playbackQueueWidth")].toInt(374);
     m_nowPlayingWidth    = root[QStringLiteral("nowPlayingWidth")].toInt(359);
 
-    m_crossfadeEnabled = root[QStringLiteral("crossfadeEnabled")].toBool(false);
-    m_crossfadeSeconds = root[QStringLiteral("crossfadeSeconds")].toDouble(5.0);
+    const QJsonObject crossfade = root[QStringLiteral("crossfade")].toObject();
+    m_crossfadeEnabled = crossfade[QStringLiteral("enabled")].toBool(false);
+    m_crossfadeSeconds = crossfade[QStringLiteral("seconds")].toDouble(5.0);
+
+    const QJsonObject autoPlay = root[QStringLiteral("autoPlay")].toObject();
+    m_autoPlayQueueHorizon   = autoPlay[QStringLiteral("queueHorizon")].toInt(5);
+    m_autoPlayTitleAddingIntervalSeconds =
+        autoPlay[QStringLiteral("titleAddingIntervalSeconds")].toInt(30);
+    m_autoPlayConsiderGenre  = autoPlay[QStringLiteral("considerGenre")].toBool(false);
+    m_autoPlayConsiderRating = autoPlay[QStringLiteral("considerRating")].toBool(false);
+    m_autoPlayMinimumRating  = autoPlay[QStringLiteral("minimumRating")].toInt(5);
+    m_autoPlayAllowManualModification =
+        autoPlay[QStringLiteral("allowManualModification")].toBool(false);
+    m_autoPlaySongRepeat =
+        autoPlay[QStringLiteral("songRepeat")].toString(QStringLiteral("once"));
 }
 
 void AppConfig::save()
@@ -228,8 +307,20 @@ void AppConfig::save()
     root[QStringLiteral("playbackQueueWidth")] = m_playbackQueueWidth;
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;
 
-    root[QStringLiteral("crossfadeEnabled")] = m_crossfadeEnabled;
-    root[QStringLiteral("crossfadeSeconds")] = m_crossfadeSeconds;
+    QJsonObject crossfade;
+    crossfade[QStringLiteral("enabled")] = m_crossfadeEnabled;
+    crossfade[QStringLiteral("seconds")] = m_crossfadeSeconds;
+    root[QStringLiteral("crossfade")] = crossfade;
+
+    QJsonObject autoPlay;
+    autoPlay[QStringLiteral("queueHorizon")]   = m_autoPlayQueueHorizon;
+    autoPlay[QStringLiteral("titleAddingIntervalSeconds")] = m_autoPlayTitleAddingIntervalSeconds;
+    autoPlay[QStringLiteral("considerGenre")]  = m_autoPlayConsiderGenre;
+    autoPlay[QStringLiteral("considerRating")] = m_autoPlayConsiderRating;
+    autoPlay[QStringLiteral("minimumRating")]  = m_autoPlayMinimumRating;
+    autoPlay[QStringLiteral("allowManualModification")] = m_autoPlayAllowManualModification;
+    autoPlay[QStringLiteral("songRepeat")] = m_autoPlaySongRepeat;
+    root[QStringLiteral("autoPlay")] = autoPlay;
 
     QFile f(configFilePath());
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
