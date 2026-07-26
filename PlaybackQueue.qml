@@ -7,6 +7,10 @@ import QtQuick.Controls
 Rectangle {
     id: root
     property var engine: null
+    // Bound from Main.qml. Gates manual add/remove/reorder (autoPlay.manualQueueEditingAllowed)
+    // and the clear-queue button (autoPlay.queueClearAllowed) while an AUTO PLAY
+    // session is active — see UC-16 in the architecture doc.
+    property var autoPlay: null
     color: Theme.surfaceContainerLow
 
     // Ghost left border
@@ -119,19 +123,25 @@ Rectangle {
             }
         }
 
-        // Clear-queue button
+        // Clear-queue button \u2014 only usable outside an active AUTO PLAY session
+        // (MANUAL MODE); clearing during a session is always forbidden, even
+        // when Allow Manual Modification is on.
         Text {
+            readonly property bool clearAllowed: !root.autoPlay || root.autoPlay.queueClearAllowed
             anchors { right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
             text: "\u2715"
             font.pixelSize: Theme.labelLg
             color: clearHover.containsMouse ? Theme.fgSurface : Theme.fgSurfaceVariant
-            visible: root.engine && root.engine.queueCount > 0
+            visible: root.engine && root.engine.queueCount > 0 && clearAllowed
             MouseArea {
                 id: clearHover
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape:  Qt.PointingHandCursor
-                onClicked: { if (root.engine) root.engine.clearQueue() }
+                onClicked: {
+                    if (root.autoPlay) root.autoPlay.clearQueueAndHistory()
+                    else if (root.engine) root.engine.clearQueue()
+                }
             }
         }
     }
@@ -214,6 +224,12 @@ Rectangle {
                 width:  queueList.width
                 height: 68
 
+                // Whether add/remove/reorder is currently allowed — always
+                // true in MANUAL MODE (no AUTO PLAY session), otherwise
+                // follows AppConfig's Allow Manual Modification setting.
+                readonly property bool manualAllowed:
+                    !root.autoPlay || root.autoPlay.manualQueueEditingAllowed
+
                 // Dim this row while it is being dragged.
                 opacity: queueArea.reorderFrom === index ? 0.45 : 1.0
 
@@ -295,12 +311,13 @@ Rectangle {
                         }
                     }
 
-                // Move up/down buttons (hidden while playing)
+                // Move up/down buttons (hidden while playing or while manual
+                // queue editing isn't allowed)
                     Column {
                         width: 20
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 0
-                        visible: !model.playing
+                        visible: !model.playing && rowItem.manualAllowed
 
                         Text {
                             text: "\u2191"
@@ -337,9 +354,10 @@ Rectangle {
                         color: removeHover.containsMouse ? Theme.fgSurface : Theme.fgSurfaceVariant
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment:   Text.AlignVCenter
-                        visible: rowHover.containsMouse || removeHover.containsMouse
+                        visible: (rowHover.containsMouse || removeHover.containsMouse) && rowItem.manualAllowed
                         MouseArea {
                             id: removeHover; anchors.fill: parent
+                            enabled: rowItem.manualAllowed
                             hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: { if (root.engine) root.engine.removeAt(index) }
                         }
@@ -383,7 +401,7 @@ Rectangle {
                     width:  47      // matches the position-number column width
                     height: parent.height
                     z: 2
-                    visible: !model.playing
+                    visible: !model.playing && rowItem.manualAllowed
 
                     Text {
                         anchors.centerIn: parent
@@ -402,7 +420,7 @@ Rectangle {
                                      ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
                         onPressed: function(mouse) {
-                            if (!model.playing) {
+                            if (!model.playing && rowItem.manualAllowed) {
                                 queueArea.reorderFrom = index
                                 queueArea.reorderTo   = index
                             }
@@ -506,6 +524,7 @@ Rectangle {
         // ── Drop target (accepts drags from AlbumCard) ────────────────────
         DropArea {
             anchors.fill: parent
+            enabled: !root.autoPlay || root.autoPlay.manualQueueEditingAllowed
             keys: ["externalDrop"]   // only AlbumCard drags; ignores internal reorder
 
             // Highlight the panel during drag-over

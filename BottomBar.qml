@@ -16,12 +16,11 @@ Rectangle {
     // as ready (green) once a scan has completed with rating enrichment applied.
     property bool autoPlayReady: false
 
-    // Local toggle state — whether the user has clicked AUTO PLAY "on" (red) since
-    // it became ready. Intentionally not persisted: AUTO PLAY must never auto-start
-    // at app launch, so this always resets to false on a fresh BottomBar instance.
-    // The AUTO PLAY feature itself is not implemented yet, so this only drives the
-    // button's traffic-light color for now — no queue-filling behavior is triggered.
-    property bool autoPlayActive: false
+    // Bound from Main.qml — the real AUTO PLAY session/policy controller.
+    // root.autoPlay.active drives the button's red/green traffic-light state;
+    // clicking calls root.autoPlay.toggle(). Never persisted: AutoPlayController
+    // always starts inactive, so AUTO PLAY never auto-starts at app launch.
+    property var autoPlay: null
 
     // Ghost top border
     Rectangle {
@@ -53,7 +52,7 @@ Rectangle {
                 readonly property color btnColor:
                     isAutoPlayBtn
                         ? (!root.autoPlayReady ? Theme.fgSurfaceVariant
-                           : root.autoPlayActive ? "#FF1744" : "#00C853")
+                           : (root.autoPlay && root.autoPlay.active) ? "#FF1744" : "#00C853")
                         : (isScanBtn && root.scanning)
                             ? Theme.tertiary
                             : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
@@ -93,8 +92,8 @@ Rectangle {
                     onClicked: {
                         if (isScanBtn && !root.scanning)
                             root.scanRequested()
-                        else if (isAutoPlayBtn && root.autoPlayReady)
-                            root.autoPlayActive = !root.autoPlayActive
+                        else if (isAutoPlayBtn && root.autoPlayReady && root.autoPlay)
+                            root.autoPlay.toggle()
                     }
                 }
             }

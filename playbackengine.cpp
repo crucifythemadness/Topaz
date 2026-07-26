@@ -586,12 +586,16 @@ void PlaybackEngine::clearCoverSource()
 
 void PlaybackEngine::advanceToNext()
 {
+    if (m_currentIndex >= 0 && m_currentIndex < m_queue.size())
+        emit trackPlayedToCompletion(m_queue.at(m_currentIndex).filePath);
+
     if (m_currentIndex < m_queue.size() - 1) {
         loadTrack(m_currentIndex + 1);
         m_player->play();
     } else {
         // End of queue — stay on last track, stopped
         emit isPlayingChanged();
+        emit queueExhausted();
     }
 }
 
@@ -635,8 +639,9 @@ void PlaybackEngine::startCrossfade()
 
     // Fixed for this fade's whole lifetime — the volume ramp always targets
     // these two decks, independent of when m_activeDeck itself gets swapped.
-    m_fadeOutDeck = m_activeDeck;
-    m_fadeInDeck  = 1 - m_activeDeck;
+    m_fadeOutDeck  = m_activeDeck;
+    m_fadeInDeck   = 1 - m_activeDeck;
+    m_fadeOutIndex = m_currentIndex;
 
     m_players[m_fadeInDeck]->setSource(QUrl::fromLocalFile(m_queue.at(nextIdx).filePath));
     m_audioOutputs[m_fadeInDeck]->setVolume(0.0f);
@@ -684,6 +689,9 @@ void PlaybackEngine::onFadeTick()
         m_players[m_fadeOutDeck]->stop();
         m_audioOutputs[m_fadeOutDeck]->setVolume(1.0f);   // reset for reuse
         m_crossfading = false;
+
+        if (m_fadeOutIndex >= 0 && m_fadeOutIndex < m_queue.size())
+            emit trackPlayedToCompletion(m_queue.at(m_fadeOutIndex).filePath);
     }
 }
 

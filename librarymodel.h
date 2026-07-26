@@ -115,6 +115,19 @@ public:
     // One O(N_tracks) scan replaces N_genres + N_artists separate scans.
     Q_INVOKABLE QVariantList buildLibraryTree(const QStringList &activeGenres) const;
 
+    // AUTO PLAY candidate pool: tracks passing the genre+rating filters, each
+    // returned as a QVariantMap with (at least) filePath, title, artist,
+    // albumArtist, album, genre, durationMs, rating. Genre matching is
+    // case-insensitive/trimmed (same convention as filteredAlbums()/
+    // buildLibraryTree()). considerGenre=false skips genre filtering entirely;
+    // considerRating=false skips rating filtering (unrated tracks, rating==0,
+    // are naturally excluded whenever considerRating is true and minimumRating
+    // is clamped to [1,10] — no special-casing needed).
+    Q_INVOKABLE QVariantList autoPlayCandidatePool(const QStringList &activeGenres,
+                                                    bool considerGenre,
+                                                    bool considerRating,
+                                                    int  minimumRating) const;
+
 signals:
     void appConfigChanged();
     void scanningChanged();

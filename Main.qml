@@ -40,6 +40,16 @@ ApplicationWindow {
     // Playlist manager — handles XSPF file creation.
     PlaylistManager { id: playlistManager }
 
+    // AUTO PLAY session/policy controller — see UC-16 in the architecture doc.
+    // Passed as `autoPlay` property to BottomBar, AlbumBrowser, PlaybackQueue, NowPlaying.
+    AutoPlayController {
+        id: autoPlay
+        engine:           engine
+        libraryModel:     libraryModel
+        appConfig:        appConfig
+        activeGenreNames: lib.activeGenreNames
+    }
+
     // Setup dialog — opened by TopBar's gear icon
     SetupDialog {
         id:        setupDialog
@@ -119,6 +129,7 @@ ApplicationWindow {
                 SplitView.minimumWidth: 400
                 lib: lib
                 engine: engine
+                autoPlay: autoPlay
             }
 
             PlaybackQueue {
@@ -126,6 +137,7 @@ ApplicationWindow {
                 SplitView.preferredWidth: appConfig.playbackQueueWidth
                 SplitView.minimumWidth:   240
                 engine: engine
+                autoPlay: autoPlay
                 onWidthChanged: saveLayoutTimer.restart()
             }
 
@@ -135,6 +147,7 @@ ApplicationWindow {
                 SplitView.minimumWidth:   280
                 engine:          engine
                 playlistManager: playlistManager
+                autoPlay:        autoPlay
                 onWidthChanged: saveLayoutTimer.restart()
                 onNewPlaylistRequested: newPlaylistDialog.open()
             }
@@ -144,6 +157,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             scanning: libraryModel.scanning
             autoPlayReady: libraryModel.ratingsReady
+            autoPlay: autoPlay
             onScanRequested: libraryModel.startFullScan()
         }
     }

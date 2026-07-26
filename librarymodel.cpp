@@ -379,6 +379,58 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
     return result;
 }
 
+QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres,
+                                                  bool considerGenre,
+                                                  bool considerRating,
+                                                  int  minimumRating) const
+{
+    QSet<QString> activeGenresLower;
+    if (considerGenre) {
+        activeGenresLower.reserve(activeGenres.size());
+        for (const QString &g : activeGenres)
+            activeGenresLower.insert(g.trimmed().toLower());
+    }
+
+    // Cover thumbnails are only stored on one representative track per album
+    // (see TrackInfo comment) — build the per-album lookup once, same
+    // convention as filteredAlbums(), to avoid an O(N_tracks) rescan per
+    // candidate below.
+    QHash<QString, QString> albumCoverThumb;
+    for (const TrackInfo &t : std::as_const(m_tracks)) {
+        if (t.coverThumb.isEmpty()) continue;
+        const QString key = t.albumArtist.toLower() + QChar('|') + t.album.toLower();
+        if (!albumCoverThumb.contains(key))
+            albumCoverThumb.insert(key, t.coverThumb);
+    }
+
+    QVariantList result;
+    for (const TrackInfo &t : std::as_const(m_tracks)) {
+        if (considerGenre && !activeGenresLower.contains(t.genre.trimmed().toLower()))
+            continue;
+        if (considerRating && t.rating < minimumRating)
+            continue;
+
+        const QString key = t.albumArtist.toLower() + QChar('|') + t.album.toLower();
+        const QString cover = albumCoverThumb.value(key);
+
+        QVariantMap tm;
+        tm[QStringLiteral("filePath")]    = t.filePath;
+        tm[QStringLiteral("title")]       = t.title;
+        tm[QStringLiteral("artist")]      = t.artist;
+        tm[QStringLiteral("albumArtist")] = t.albumArtist;
+        tm[QStringLiteral("album")]       = t.album;
+        tm[QStringLiteral("genre")]       = t.genre;
+        tm[QStringLiteral("durationMs")]  = static_cast<qlonglong>(t.duration);
+        tm[QStringLiteral("bitrate")]     = t.bitrate;
+        tm[QStringLiteral("rating")]      = t.rating;
+        tm[QStringLiteral("coverSource")] = cover.isEmpty()
+            ? QString()
+            : QStringLiteral("data:image/jpeg;base64,") + cover;
+        result.append(tm);
+    }
+    return result;
+}
+
 QString LibraryModel::coverThumbForAlbum(const QString &album,
                                           const QString &albumArtist) const
 {

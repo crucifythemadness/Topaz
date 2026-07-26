@@ -340,18 +340,21 @@ Topaz module
 │                         signal settingsRequested()  ← gear icon click
 ├── GenreBar.qml        3 × 10 genre toggle grid  (reads lib.genreModel, calls lib.toggleGenre)
 ├── LibraryTree.qml     Left sidebar  default width 286 px, user-resizable  (flat virtualised ListView; flatRows JS array; no nested Repeaters)
-├── AlbumBrowser.qml    Center album list  flex-grow (absorbs all surplus width from window resize or panel drag)  (calls lib.filteredAlbums() via Qt.callLater; no engine prop)
+├── AlbumBrowser.qml    Center album list  flex-grow (absorbs all surplus width from window resize or panel drag)  (calls lib.filteredAlbums() via Qt.callLater; property autoPlay forwarded to each AlbumCard, see UC-16)
 ├── AlbumCard.qml       Single album card delegate (cover + track listing; single-track drag & drop to queue; no selection; no context menus)
 │                         property var engine  (optional; used for double-click add-to-queue and drag cursor override)
+│                         property var autoPlay  (optional; gates double-click add via autoPlay.manualQueueEditingAllowed, see UC-16)
 ├── PlaybackQueue.qml   Queue panel  default width 374 px, user-resizable  (bound to PlaybackEngine model; DropArea; move/remove; shows activePlaylistName in header when set; shows LOCK PLAYLIST toggle when a playlist is active)
+│                         property var autoPlay  (gates clear/remove/move/reorder/drop via autoPlay.manualQueueEditingAllowed + autoPlay.queueClearAllowed; clear button routes through autoPlay.clearQueueAndHistory(), see UC-16)
 ├── NowPlaying.qml      Right panel  default width 359 px, user-resizable  (bound to PlaybackEngine + PlaylistManager: art + transport + progress + playlists + 10-star rating row, see UC-14)
 |                         property playlistManager PlaylistManager
+|                         property var autoPlay  (gates playlist-load add + LOAD/REMOVE's implicit clear, see UC-16)
 |                         signal newPlaylistRequested()  <- "+ NEW" button click
 |                         FileDialog loadPlaylistDialog <- opens on LOAD; default folder = playlistDirectory(); filter *.xml
-|                         Playlist row 1: NEW | LOAD (clears active playlist first if one is loaded, then opens file dialog)
-|                         Playlist row 2: EXPORT (not yet wired) | REMOVE (active only when playlist loaded; calls engine.clearQueue())
+|                         Playlist row 1: NEW | LOAD (clears active playlist first if one is loaded and allowed, then opens file dialog)
+|                         Playlist row 2: EXPORT (not yet wired) | REMOVE (active only when playlist loaded AND queue-clear is allowed; routes through autoPlay.clearQueueAndHistory())
 │                         signal newPlaylistRequested()  ← “+ NEW” button click
-└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all; autoPlayActive property — local, not persisted, toggled on click, drives the AUTO PLAY entry's green/red traffic-light color, see UC-14)
+└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all; autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16)
 ```
 
 ## LibraryModel Component
@@ -905,6 +908,7 @@ configurable via the app JSON config) will be introduced at that point.
       +albumsForArtist(artist, genre) QStringList
       +filteredAlbums(activeGenres, artist, album) QVariantList
       +buildLibraryTree(activeGenres) QVariantList
+      +autoPlayCandidatePool(activeGenres, considerGenre, considerRating, minimumRating) QVariantList
       ~libraryRefreshed()
     }
 
@@ -946,6 +950,22 @@ configurable via the app JSON config) will be introduced at that point.
       ~autoPlaySongRepeatChanged()
     }
 
+    class AutoPlayController {
+      +engine PlaybackEngine
+      +libraryModel LibraryModel
+      +appConfig AppConfig
+      +activeGenreNames QStringList
+      +active bool
+      +manualQueueEditingAllowed bool
+      +queueClearAllowed bool
+      +toggle()
+      +clearQueueAndHistory()
+      ~activeChanged()
+      ~manualQueueEditingAllowedChanged()
+      ~queueClearAllowedChanged()
+      ~starved()
+    }
+
     LibraryModel --> LibraryScanner : owns (worker thread)
     LibraryModel --> LibraryCache   : calls load/save
     LibraryModel --> AppConfig      : reads genres+folders
@@ -958,6 +978,9 @@ configurable via the app JSON config) will be introduced at that point.
     PlaybackEngine --> QMediaPlayer  : wraps ×2 (dual-deck, see UC-15)
     PlaybackEngine --> QAudioOutput  : wraps ×2 (dual-deck, see UC-15)
     PlaybackEngine --> AppConfig     : reads crossfadeEnabled/crossfadeSeconds live
+    AutoPlayController --> PlaybackEngine : addTrack/playAt/trackList/clearQueue; listens trackPlayedToCompletion + queueExhausted (see UC-16)
+    AutoPlayController --> LibraryModel   : calls autoPlayCandidatePool() (see UC-16)
+    AutoPlayController --> AppConfig      : reads all autoPlay* settings live (see UC-16)
 ```
 
 ---
@@ -1536,41 +1559,25 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
 - **Content-based identity caveat**: two distinct tracks with identical
   albumArtist/artist/album/title (e.g. duplicate pressings) collide onto the same
   `ratingId` and share a rating — an accepted trade-off of metadata-based identity.
-- **AUTO PLAY button is a traffic-light toggle, still visual-only**: `BottomBar`'s AUTO
+- **AUTO PLAY button is a traffic-light toggle, now fully wired**: `BottomBar`'s AUTO
   PLAY entry has three color states — grey (`Theme.fgSurfaceVariant`) while
   `autoPlayReady` is `false` (before the first scan completes) and unclickable; green
-  (`#00C853`) once ready and not yet toggled on; red (`#FF1744`) after the user clicks
-  it. Clicking only toggles `BottomBar.autoPlayActive`, a local, session-only property
-  (not persisted — always resets to `false` on app launch, matching the "AUTO PLAY
-  must never auto-start" design rule) — it does not yet start any queue-filling
-  behavior. Neither color is a `Theme.*` token; like the rating stars' `#00A6ED`, they
-  are deliberate hardcoded one-offs chosen for a literal traffic-light metaphor. The
-  AUTO PLAY *feature* itself (using ratings/genre/polling to drive playback selection)
-  is still future work; only rating display/entry (`NowPlaying`'s star row) and this
-  button's visual state are implemented.
-- **AUTO PLAY configuration is being built ahead of the feature itself**: `SetupDialog`'s
-  AUTO PLAY tab holds `autoPlayQueueHorizon` (`AppConfig`, default `5`, range `[1, 15]`)
-  — how many tracks AUTO PLAY should keep filled into `PlaybackQueue` as a lookahead —
-  `autoPlayTitleAddingIntervalSeconds` (`AppConfig`, default `30`, range `[5, 90]`) —
-  the polling interval AUTO PLAY should use to add one new track at a time to the queue
-  (the agreed design is single-track-per-tick, never a batch fill, and AUTO PLAY itself
-  must never auto-start at app launch — the user always switches it on manually) —
-  `autoPlayConsiderGenre` (`AppConfig`, default `false`) — whether track selection
-  should factor in genre — and `autoPlayConsiderRating` / `autoPlayMinimumRating`
-  (`AppConfig`, defaults `false` / `5`, rating range `[1, 10]`) — whether track selection
-  should be filtered by title rating, and the minimum rating to require when it is. The
-  Minimum Rating star row reuses `NowPlaying`'s star glyph/size/palette but writes to
-  `AppConfig` instead of `PlaybackEngine.currentRating`. `autoPlayAllowManualModification`
-  (`AppConfig`, default `false`) — whether the user may manually edit AUTO PLAY's
-  auto-filled queue entries once the feature exists. `autoPlaySongRepeat` (`AppConfig`,
-  default `"once"`, one of `"once"`/`"twice"`/`"twiceIfNoneAvailable"`/`"several"`) —
-  how many times AUTO PLAY should repeat a selected track; set via `SetupDialog`'s
-  "Play a Title" radio group, the app's first radio-button control (four mutually
-  exclusive options on a single row, styled with the same
-  `Theme.secondary`/`Theme.outlineVariant` selected/unselected pairing used by every
-  other AUTO PLAY control). All seven are currently just persisted settings with no
-  consumer; no queue-filling, polling, genre-aware, rating-aware, manual-modification,
-  or repeat-count logic exists yet.
+  (`#00C853`) once ready and `autoPlay.active` is `false`; red (`#FF1744`) while
+  `autoPlay.active` is `true`. Clicking calls `AutoPlayController::toggle()` — a real
+  session start/stop, not just a color flip. Neither color is a `Theme.*` token; like
+  the rating stars' `#00A6ED`, they are deliberate hardcoded one-offs chosen for a
+  literal traffic-light metaphor. See UC-16 for the full session lifecycle, candidate
+  selection algorithm, and manual-editing gating rules.
+- **AUTO PLAY configuration is fully consumed by `AutoPlayController`** (see UC-16):
+  `autoPlayQueueHorizon` (`AppConfig`, default `5`, range `[1, 15]`) is the tracks-ahead
+  target the polling timer fills toward; `autoPlayTitleAddingIntervalSeconds`
+  (`AppConfig`, default `30`, range `[5, 90]`) is that timer's interval, restarted live
+  on change; `autoPlayConsiderGenre`/`autoPlayConsiderRating`/`autoPlayMinimumRating`
+  filter `LibraryModel::autoPlayCandidatePool()`'s results; `autoPlaySongRepeat` governs
+  the in-memory play-history filter; `autoPlayAllowManualModification` drives
+  `AutoPlayController::manualQueueEditingAllowed`. All read live on every candidate
+  pick / gating check — no caching, so a mid-session change always takes effect on the
+  very next evaluation.
 - **Two distinct persistence paths, one file**: `RatingCache::save()` (full-list
   overwrite, scan-time bulk enrichment) and `RatingCache::setRating()` (single upsert,
   interactive star click) both write `Topaz.rating.json` via the same private
@@ -1691,4 +1698,173 @@ standby deck silently continuing to ramp.
   curve, per the requirement.
 - **AUTO PLAY feature is unrelated**: this use case is purely a playback-transition
   effect; it does not use track ratings and is independent of the AUTO PLAY button
-  discussed in UC-14.
+  discussed in UC-14/UC-16.
+
+---
+
+## UC-16 AUTO PLAY Session
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | While active, AUTO PLAY keeps the queue filled to `Queue Horizon` by polling every `Title Adding` seconds and adding one library track at a time, chosen by the Consider Genre / Consider Rating / Play a Title filters. |
+| **Actor** | User (start/stop, config changes), System (candidate selection, polling, gating) |
+| **Precondition** | `libraryModel.ratingsReady` is `true` (a scan has completed at least once). |
+| **Trigger** | User clicks the AUTO PLAY footer button. |
+
+`AutoPlayController` (`autoplaycontroller.h/.cpp`, `QML_ELEMENT`) owns this entire use
+case. It depends on `PlaybackEngine`, `LibraryModel`, and `AppConfig` — none of those
+three classes have any knowledge of `AutoPlayController`, keeping `PlaybackEngine` a
+pure playback engine and `LibraryModel` a pure library index. Instantiated once in
+`Main.qml`, bound to `activeGenreNames: lib.activeGenreNames` (the same source GenreBar
+itself reads) and forwarded as `autoPlay` to `BottomBar`, `AlbumBrowser`→`AlbumCard`,
+`PlaybackQueue`, and `NowPlaying`.
+
+### Normal Flow — Start a session
+
+1. User clicks AUTO PLAY (only clickable once green — `autoPlayReady` is `true`).
+   `BottomBar` calls `autoPlay.toggle()` → `start()`.
+2. `start()` clears the in-memory play-history (`QHash<QString /*filePath*/, int>
+   m_playCounts`) — a fresh history every session.
+3. If the queue is empty, `pickNextCandidate()` (below) selects one track and
+   `PlaybackEngine::addTrack()` adds it — `addTrack`'s existing auto-play-when-empty
+   behavior starts it playing immediately, satisfying "add the first track immediately
+   and play it" with no `PlaybackEngine` changes. If no candidate exists at all (the
+   library has nothing matching the current filters), `start()` returns without
+   activating — the button stays green.
+4. Otherwise (queue already has content), `m_active` becomes `true` and the poll timer
+   starts at the configured interval — no immediate top-up; the first addition beyond
+   an empty-queue kickstart always happens on the first tick (see below).
+5. `activeChanged()`/`manualQueueEditingAllowedChanged()`/`queueClearAllowedChanged()`
+   fire — `BottomBar` turns red; the queue's clear button and (unless Allow Manual
+   Modification is on) add/remove/reorder controls become disabled.
+
+### Normal Flow — Polling top-up
+
+1. Every `autoPlayTitleAddingIntervalSeconds` seconds, `onPollTick()` calls
+   `maybeFillHorizon()`.
+2. `maybeFillHorizon()` computes **tracks-ahead** as `queueCount() - currentIndex() -
+   1` — not raw `queueCount()`, since the queue never shrinks on natural playback
+   (only manual `removeAt`/`clearQueue` do; already-played rows stay in `m_queue`
+   forever). If tracks-ahead `>= autoPlayQueueHorizon`, nothing happens this tick —
+   "wait for the next possible Title Adding."
+3. Otherwise `pickNextCandidate()` selects one track and `addTrack()`s it — never more
+   than one per tick, by construction (every top-up beyond the initial kickstart is
+   gated behind this single per-tick call, not a loop).
+4. If no candidate exists, the session **starves**: `stop(true)` — see below.
+5. A mid-session change to `autoPlayTitleAddingIntervalSeconds` restarts the timer
+   immediately (`QTimer::start(ms)` both changes the interval and resets the
+   countdown) via a direct connection to `AppConfig::autoPlayTitleAddingIntervalSecondsChanged`,
+   so a slider drag takes effect on the very next wait, not the current one.
+
+### Normal Flow — Candidate selection (`pickNextCandidate()`)
+
+1. `LibraryModel::autoPlayCandidatePool(activeGenreNames, considerGenre,
+   considerRating, minimumRating)` returns every library track passing the genre
+   filter (skipped entirely if Consider Genre is off) and the rating filter (skipped
+   if Consider Rating is off; unrated tracks, `rating == 0`, are naturally excluded
+   whenever it's on, since `minimumRating` is clamped to `[1, 10]`).
+2. Each candidate's **effective occurrence count** is computed as completed plays
+   (`m_playCounts`, updated only via `trackPlayedToCompletion` — see below) **plus**
+   however many times its `filePath` appears in `engine.trackList()` from
+   `currentIndex()` onward (the currently-playing row itself, and everything still
+   queued ahead of it — each such occurrence represents a play that either is
+   happening right now or is guaranteed to happen once reached). This single unified
+   count is what stops `"once"` from re-selecting the track that's playing at this
+   very moment (it has 0 completed plays but 1 queue occurrence) as well as anything
+   already sitting unplayed further ahead — there is no separate hard "already
+   queued" exclusion; both cases fall out of the same formula.
+3. The pool is filtered by `autoPlaySongRepeat` against each candidate's effective
+   count: `"once"` keeps count `== 0`; `"twice"` keeps count `< 2` (so a track playing
+   once right now, effective count `1`, can still be queued for its second and final
+   play); `"twiceIfNoneAvailable"` prefers count `== 0`, falling back to count `== 1`
+   only when zero count-`0` tracks remain (never count `>= 2`); `"several"` applies no
+   cap at all — unaffected by queue occurrences, a track can be queued repeatedly
+   regardless of how many copies are already playing/queued/completed.
+4. If nothing remains, no candidate (starvation or a quiet no-op, depending on caller).
+5. Otherwise one track is chosen uniformly at random
+   (`QRandomGenerator::global()->bounded(n)`). **Every** track-adding path — the
+   initial empty-queue kickstart, each poll-tick top-up, and stall recovery (below) —
+   calls this same function, so selection is always random, never deterministic or
+   library-ordered, and no two sessions play back the same running order.
+
+### Normal Flow — Recording play-history
+
+`PlaybackEngine::trackPlayedToCompletion(filePath)` is a new signal, emitted **only**
+on natural completion — never on manual `next()`/`previous()`, which are a separate
+code path that never touches it:
+- In `advanceToNext()` (reached only via `onDeckMediaStatusChanged()`'s
+  `QMediaPlayer::EndOfMedia` branch), emitted for the track at `currentIndex` just
+  before advancing.
+- In `onFadeTick()`'s fade-completion branch (`frac >= 1.0`), emitted for the
+  **outgoing** track — captured as `m_fadeOutIndex` in `startCrossfade()`, since
+  `currentIndex` has already swapped to the incoming track by the midpoint.
+
+`AutoPlayController::onTrackPlayedToCompletion()` increments `m_playCounts[filePath]`
+unconditionally (whether or not a session is currently active — harmless, since
+`start()` always resets the map anyway).
+
+### Alternate: playback stalls at end of queue
+
+`advanceToNext()`'s existing "no next track" branch (queue exhausted) now also emits a
+new `PlaybackEngine::queueExhausted()` signal — needed because neither
+`queueCountChanged` nor `currentIndexChanged` fires in that branch, so nothing would
+otherwise notice playback has silently stopped. `AutoPlayController::onQueueExhausted()`
+reacts immediately (not on the next poll tick, since music has already stopped):
+`pickNextCandidate()`, and if found, `addTrack()` followed by an explicit `playAt()` on
+the new index; if not found, `stop(true)`.
+
+### Alternate: starvation
+
+Whenever `pickNextCandidate()` returns nothing during an active session (a poll tick's
+top-up, or stall recovery), `stop(true)` runs: the poll timer stops, `m_active` becomes
+`false`, and the three gating/active signals fire. `BottomBar` turns green again purely
+as a consequence of `activeChanged()` — no separate "reset" step needed. A `starved()`
+signal fires alongside (not currently connected to anything visible — a hook for a
+possible future toast). Per the current design, nothing more sophisticated happens on
+starvation: AUTO PLAY simply stops and MANUAL MODE resumes.
+
+### Alternate: manual queue editing during a session
+
+Two independent gating properties on `AutoPlayController`, read by every relevant QML
+control:
+```cpp
+bool manualQueueEditingAllowed() const {
+    return !m_active || (m_appConfig && m_appConfig->autoPlayAllowManualModification());
+}
+bool queueClearAllowed() const { return !m_active; }
+```
+`manualQueueEditingAllowed` governs add/remove/reorder (`PlaybackQueue`'s move-up/down,
+remove, drag-reorder, and album-drop `DropArea`; `AlbumCard`'s double-click add;
+`NowPlaying`'s playlist-load add) — always `true` outside a session (MANUAL MODE),
+otherwise following `autoPlayAllowManualModification`. `queueClearAllowed` governs the
+queue's CLEAR button and `NowPlaying`'s LOAD (its implicit pre-clear)/REMOVE buttons —
+**always** `false` during an active session regardless of `autoPlayAllowManualModification`,
+matching "it is forbidden for the user to clear the whole queue during a session; this
+is just allowed in MANUAL MODE." Every clear site routes through
+`AutoPlayController::clearQueueAndHistory()` instead of calling
+`engine.clearQueue()` directly, so `m_playCounts` always resets in lockstep with the
+queue — including "restarting the next AUTO PLAY session does the same [reset]," since
+`start()` also unconditionally clears it.
+
+Deliberately, these gates are QML-layer only — not additionally re-checked inside
+`PlaybackEngine`'s own invokables. The controller itself must call `addTrack`/etc.
+unconditionally while `m_active` is `true` (that's the whole polling mechanism), so a
+blanket engine-side guard would also block the controller's own legitimate calls
+without a bypass parameter threaded through every call site. A single correctly-derived
+gate applied consistently at every QML entry point is simpler and sufficient.
+
+### Design notes
+
+- **Strict one-track-per-tick, no catch-up bursts**: after the initial empty-queue
+  kickstart, every further addition — whether topping up toward the horizon or
+  reacting to the user having manually removed several tracks mid-session — happens
+  only on the poll timer's own cadence. There is no reactive "top up immediately when
+  the queue shrinks" path; a session that's well under horizon simply climbs back up
+  one track per tick, matching the spec's literal "add ONE track after this certain
+  amount of time" framing rather than trying to catch up faster.
+- **Why a new class instead of extending `PlaybackEngine`**: `PlaybackEngine` is
+  already large (dual-deck crossfade, queue model, transport). AUTO PLAY's policy
+  (filtering, history, starvation, gating) has nothing to do with `QMediaPlayer`, so it
+  lives in its own class that calls `PlaybackEngine`'s existing invokables rather than
+  growing inside it.
+

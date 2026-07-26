@@ -8,6 +8,10 @@ Rectangle {
     id: root
     property var engine: null
     property var playlistManager: null
+    // Bound from Main.qml. Gates playlist load/remove while an AUTO PLAY
+    // session forbids manual modification/clearing — see UC-16 in the
+    // architecture doc.
+    property var autoPlay: null
     color: Theme.surfaceContainerLow
 
     signal newPlaylistRequested()
@@ -20,6 +24,7 @@ Rectangle {
         fileMode: FileDialog.OpenFile
         onAccepted: {
             if (!root.playlistManager || !root.engine) return
+            if (root.autoPlay && !root.autoPlay.manualQueueEditingAllowed) return
             const result = root.playlistManager.loadPlaylist(
                                loadPlaylistDialog.selectedFile.toString())
             const tracks = result.tracks
@@ -450,8 +455,12 @@ Rectangle {
                             id: loadHover; anchors.fill: parent
                             hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (root.engine && root.engine.activePlaylistName !== "")
-                                    root.engine.clearQueue()
+                                if (root.autoPlay && !root.autoPlay.manualQueueEditingAllowed) return
+                                const clearAllowed = !root.autoPlay || root.autoPlay.queueClearAllowed
+                                if (root.engine && root.engine.activePlaylistName !== "" && clearAllowed) {
+                                    if (root.autoPlay) root.autoPlay.clearQueueAndHistory()
+                                    else root.engine.clearQueue()
+                                }
                                 if (root.playlistManager)
                                     loadPlaylistDialog.currentFolder =
                                         "file:///" + root.playlistManager.playlistDirectory()
@@ -510,6 +519,7 @@ Rectangle {
 
                         readonly property bool active:
                             root.engine !== null && root.engine.activePlaylistName !== ""
+                            && (!root.autoPlay || root.autoPlay.queueClearAllowed)
 
                         color:  active && removePlaylistHover.containsMouse
                                 ? Theme.surfaceContainerHigh : Theme.surfaceContainer
@@ -542,8 +552,9 @@ Rectangle {
                             cursorShape: removePlaylistBtn.active
                                          ? Qt.PointingHandCursor : Qt.ArrowCursor
                             onClicked: {
-                                if (removePlaylistBtn.active && root.engine)
-                                    root.engine.clearQueue()
+                                if (!removePlaylistBtn.active) return
+                                if (root.autoPlay) root.autoPlay.clearQueueAndHistory()
+                                else if (root.engine) root.engine.clearQueue()
                             }
 
                             ToolTip.visible: containsMouse && removePlaylistBtn.active

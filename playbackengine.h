@@ -175,6 +175,15 @@ signals:
     void playlistManagerChanged();
     void appConfigChanged();
 
+    // Emitted only on NATURAL track completion (reaching end-of-media, whether
+    // via a hard cut or a crossfade), never on manual next()/previous() — the
+    // signal AutoPlayController uses to build its "already played" history.
+    void trackPlayedToCompletion(const QString &filePath);
+    // Emitted when playback stalls at the end of the queue (advanceToNext()
+    // has no next track to load) — nothing else notifies of this state, since
+    // neither queueCountChanged nor currentIndexChanged fires in that branch.
+    void queueExhausted();
+
 private:
     void loadTrack(int index);
     void advanceToNext();
@@ -225,6 +234,10 @@ private:
     // m_activeDeck itself gets swapped (at the midpoint — see onFadeTick()).
     int     m_fadeOutDeck       = -1;
     int     m_fadeInDeck        = -1;
+    // Captured at startCrossfade() time — the outgoing track's queue index,
+    // needed by trackPlayedToCompletion() at fade-completion since m_currentIndex
+    // has already swapped to the incoming track by the midpoint.
+    int     m_fadeOutIndex      = -1;
 
     QFutureWatcher<QByteArray> m_coverWatcher;
 };

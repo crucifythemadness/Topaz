@@ -7,6 +7,9 @@ Rectangle {
     id: root
     property var lib: null
     property var engine: null
+    // Bound from Main.qml; forwarded to each AlbumCard delegate so double-click
+    // add can be gated by autoPlay.manualQueueEditingAllowed.
+    property var autoPlay: null
     color: Theme.surface
 
     // ── Filtered album list ───────────────────────────────────────────────
@@ -80,6 +83,7 @@ Rectangle {
             coverSource: modelData.coverSource ?? ""
             tracks:      modelData.tracks
             engine:      root.engine
+            autoPlay:    root.autoPlay
         }
 
         // Empty state

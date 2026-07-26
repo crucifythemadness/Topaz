@@ -28,6 +28,8 @@ qt_add_executable(topaz
     playbackengine.cpp
     playlistmanager.h
     playlistmanager.cpp
+    autoplaycontroller.h
+    autoplaycontroller.cpp
     app.rc
 )
 

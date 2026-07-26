@@ -27,6 +27,9 @@ Rectangle {
     property url    coverSource: ""
     property var    tracks:      []
     property var    engine:      null   // optional - used for double-click add to queue
+    // Bound from AlbumBrowser; gates double-click add while an AUTO PLAY
+    // session forbids manual modification.
+    property var    autoPlay:    null
 
     implicitHeight: cardRow.implicitHeight + 40
     color: cardHoverHandler.hovered ? Theme.surfaceContainer : Theme.surfaceContainerLow
@@ -229,7 +232,8 @@ Rectangle {
                             }
 
                             onDoubleClicked: function(mouse) {
-                                if (root.engine)
+                                var allowed = !root.autoPlay || root.autoPlay.manualQueueEditingAllowed
+                                if (root.engine && allowed)
                                     root.engine.addTracks([modelData])
                             }
                         }
