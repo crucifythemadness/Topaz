@@ -289,6 +289,7 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
         QString              albumArtist;
         QString              album;
         QString              coverThumb;
+        int                  year = 0;
         QList<const TrackInfo *> tracks;
     };
 
@@ -306,18 +307,24 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
             keyToIndex.insert(key, albumAccum.size());
             albumAccum.append({ t.albumArtist, t.album,
                                 t.coverThumb,            // grab first cover seen
+                                t.year,                  // grab first non-zero year seen
                                 { &t } });
         } else {
             AlbumAccum &aa = albumAccum[it.value()];
             if (aa.coverThumb.isEmpty() && !t.coverThumb.isEmpty())
                 aa.coverThumb = t.coverThumb;
+            if (aa.year == 0 && t.year != 0)
+                aa.year = t.year;
             aa.tracks.append(&t);
         }
     }
 
     if (albumAccum.isEmpty()) return {};
 
-    // ── Sort albums: albumArtist then album title (case-insensitive) ──────
+    // ── Sort albums: albumArtist asc, then year desc, then album title asc
+    // (case-insensitive) ────────────────────────────────────────────────────
+    // Albums with no year tag (year == 0) naturally sort last within their
+    // artist group — no special-casing needed.
     QList<int> sortedIdx(albumAccum.size());
     std::iota(sortedIdx.begin(), sortedIdx.end(), 0);
     std::sort(sortedIdx.begin(), sortedIdx.end(),
@@ -325,8 +332,9 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
                   const AlbumAccum &aa = albumAccum[a];
                   const AlbumAccum &bb = albumAccum[b];
                   int c = aa.albumArtist.compare(bb.albumArtist, Qt::CaseInsensitive);
-                  return c != 0 ? c < 0
-                                : aa.album.compare(bb.album, Qt::CaseInsensitive) < 0;
+                  if (c != 0) return c < 0;
+                  if (aa.year != bb.year) return aa.year > bb.year;
+                  return aa.album.compare(bb.album, Qt::CaseInsensitive) < 0;
               });
 
     // ── Build result ──────────────────────────────────────────────────────
@@ -372,6 +380,7 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
         album[QStringLiteral("artistLabel")] = aa.albumArtist;
         album[QStringLiteral("isActive")]    = (si == 0);
         album[QStringLiteral("coverSource")] = coverSrc;
+        album[QStringLiteral("year")]        = aa.year;
         album[QStringLiteral("tracks")]      = trackList;
         result.append(album);
     }

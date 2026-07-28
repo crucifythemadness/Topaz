@@ -58,6 +58,11 @@ class AutoPlayController : public QObject
     // Whether the queue's CLEAR button may be used — always false during an
     // active session regardless of manualQueueEditingAllowed, true otherwise.
     Q_PROPERTY(bool queueClearAllowed READ queueClearAllowed NOTIFY queueClearAllowedChanged)
+    // Whether the genre criterion for starting a session is satisfied: always
+    // true when Consider Genre is off; otherwise requires at least one active
+    // genre. Gates BottomBar's AUTO PLAY button (grey when false) in addition
+    // to the existing autoPlayReady/ratingsReady gate.
+    Q_PROPERTY(bool genreRequirementMet READ genreRequirementMet NOTIFY genreRequirementMetChanged)
 
 public:
     explicit AutoPlayController(QObject *parent = nullptr);
@@ -70,6 +75,7 @@ public:
     bool active() const { return m_active; }
     bool manualQueueEditingAllowed() const;
     bool queueClearAllowed() const { return !m_active; }
+    bool genreRequirementMet() const;
 
     void setEngine(PlaybackEngine *engine);
     void setLibraryModel(LibraryModel *model);
@@ -93,6 +99,7 @@ signals:
     void activeChanged();
     void manualQueueEditingAllowedChanged();
     void queueClearAllowedChanged();
+    void genreRequirementMetChanged();
     // Emitted only when a session stops because no eligible track could be
     // found (as opposed to the user clicking the button off themselves).
     void starved();

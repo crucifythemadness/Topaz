@@ -341,9 +341,10 @@ Topaz module
 ├── GenreBar.qml        3 × 10 genre toggle grid  (reads lib.genreModel, calls lib.toggleGenre)
 ├── LibraryTree.qml     Left sidebar  default width 286 px, user-resizable  (flat virtualised ListView; flatRows JS array; no nested Repeaters)
 ├── AlbumBrowser.qml    Center album list  flex-grow (absorbs all surplus width from window resize or panel drag)  (calls lib.filteredAlbums() via Qt.callLater; property autoPlay forwarded to each AlbumCard, see UC-16)
-├── AlbumCard.qml       Single album card delegate (cover + track listing; single-track drag & drop to queue; no selection; no context menus)
+├── AlbumCard.qml       Single album card delegate (cover + year label + track listing; single-track drag & drop to queue; no selection; no context menus)
 │                         property var engine  (optional; used for double-click add-to-queue and drag cursor override)
 │                         property var autoPlay  (optional; gates double-click add via autoPlay.manualQueueEditingAllowed, see UC-16)
+│                         property int albumYear  (0 = unknown, hides the label; left-aligned under the cover, Theme.labelMd, literal white)
 ├── PlaybackQueue.qml   Queue panel  default width 374 px, user-resizable  (bound to PlaybackEngine model; DropArea; move/remove; shows activePlaylistName in header when set; shows LOCK PLAYLIST toggle when a playlist is active)
 │                         property var autoPlay  (gates clear/remove/move/reorder/drop via autoPlay.manualQueueEditingAllowed + autoPlay.queueClearAllowed; clear button routes through autoPlay.clearQueueAndHistory(), see UC-16)
 ├── NowPlaying.qml      Right panel  default width 359 px, user-resizable  (bound to PlaybackEngine + PlaylistManager: art + transport + progress + playlists + 10-star rating row, see UC-14)
@@ -416,7 +417,7 @@ changes (see `PlaybackEngine::currentLargeCoverSource`).
 | `genres()` | Distinct genre strings present in the library |
 | `artistsForGenre(genre)` | Album artists for a genre, sorted |
 | `albumsForArtist(artist, genre)` | Album titles for an artist, sorted |
-| `filteredAlbums(activeGenres, selectedArtist, selectedAlbum)` | Album display objects for AlbumBrowser. **Single O(N_tracks) pass** using `QHash` to group tracks by `(albumArtist\|album)` key; cover thumb collected in the same pass; no per-album full rescan. Replaces the former O(N_tracks × N_albums) three-pass algorithm. |
+| `filteredAlbums(activeGenres, selectedArtist, selectedAlbum)` | Album display objects for AlbumBrowser. **Single O(N_tracks) pass** using `QHash` to group tracks by `(albumArtist\|album)` key; cover thumb and year (first non-zero seen per album, same defensive pattern as the cover thumb) collected in the same pass; no per-album full rescan. Replaces the former O(N_tracks × N_albums) three-pass algorithm. Result sorted by albumArtist ascending, then year descending, then albumTitle ascending (case-insensitive); unknown-year albums (`year == 0`) sort last within their artist group. |
 | `buildLibraryTree(activeGenres)` | **Single-pass** tree builder: returns `[ { genre, artists: [ { name, albums: [{title}] } ] } ]` for `LibraryData._rebuildTree()`. One O(N_tracks) scan replaces the former N_genres + N_artists separate full-list scans. |
 | `coverThumbForAlbum(album, albumArtist)` | Base64 thumbnail for an album |
 | `libraryRefreshed()` signal | Emitted after cache load or scan complete |
@@ -958,11 +959,13 @@ configurable via the app JSON config) will be introduced at that point.
       +active bool
       +manualQueueEditingAllowed bool
       +queueClearAllowed bool
+      +genreRequirementMet bool
       +toggle()
       +clearQueueAndHistory()
       ~activeChanged()
       ~manualQueueEditingAllowedChanged()
       ~queueClearAllowedChanged()
+      ~genreRequirementMetChanged()
       ~starved()
     }
 
@@ -1094,6 +1097,22 @@ Pure mouse tracking avoids both issues: `onPositionChanged` fires reliably as lo
 - **`preventStealing: true`**: prevents the `ListView`'s flick handler from stealing the press from `dragHandleMA`.
 - **Playing row excluded**: `dragHandle.visible: !model.playing`, mirroring the constraint on `moveUp`/`moveDown`.
 - **Single insert bar**: one shared `Rectangle` (z:10) in `queueArea` replaces per-delegate DropArea highlighting. Positioning is computed from `reorderTo * 68 - queueList.contentY`, which is always in the correct view-space coordinate.
+
+### Position numbers stay consistent across every queue mutation
+
+`PosRole` (the "#" column, `model.pos`) is derived purely from each row's index
+(`index.row() + 1` in `PlaybackEngine::data()`) — there is no stored track number.
+Because it's index-derived, `beginRemoveRows`/`endRemoveRows`/`beginMoveRows`/
+`endMoveRows` alone are **not** sufficient to make it re-render correctly: those calls
+only tell the view a row was removed/moved, not that role data changed for the rows
+that shifted into new positions as a result, so every queue-mutating method must
+explicitly `emit dataChanged(..., { PosRole })` for the affected range.
+`moveUp`/`moveDown`/`moveTrack` already do this for the rows between the old and new
+position. `removeAt()` does it unconditionally for every row from the removal point
+to the end of the queue, regardless of whether the removed track was before, at
+(currently playing), or after `m_currentIndex` — all three cases previously needed
+this, but only the "before" case had it, leaving stale numbers after removing the
+current track or a track further ahead in the queue.
 
 ---
 
@@ -1721,22 +1740,39 @@ itself reads) and forwarded as `autoPlay` to `BottomBar`, `AlbumBrowser`→`Albu
 
 ### Normal Flow — Start a session
 
-1. User clicks AUTO PLAY (only clickable once green — `autoPlayReady` is `true`).
-   `BottomBar` calls `autoPlay.toggle()` → `start()`.
-2. `start()` clears the in-memory play-history (`QHash<QString /*filePath*/, int>
+1. User clicks AUTO PLAY. The button is only clickable/green once **both**
+   `autoPlayReady` (`libraryModel.ratingsReady`) is `true` **and**
+   `autoPlay.genreRequirementMet` is `true` — the latter is always `true` when
+   `autoPlayConsiderGenre` is off, otherwise it requires
+   `activeGenreNames` (bound from `lib.activeGenreNames`) to be non-empty, since with
+   Consider Genre on and zero active genres AUTO PLAY could never find a single
+   eligible candidate. `BottomBar` combines both into a local `autoPlayGated`
+   property for its color and click-handler. `start()` re-checks
+   `genreRequirementMet()` itself (defense in depth) before doing anything else, so
+   it refuses to start regardless of how `toggle()` was invoked.
+2. `BottomBar` calls `autoPlay.toggle()` → `start()`.
+3. `start()` clears the in-memory play-history (`QHash<QString /*filePath*/, int>
    m_playCounts`) — a fresh history every session.
-3. If the queue is empty, `pickNextCandidate()` (below) selects one track and
+4. If the queue is empty, `pickNextCandidate()` (below) selects one track and
    `PlaybackEngine::addTrack()` adds it — `addTrack`'s existing auto-play-when-empty
    behavior starts it playing immediately, satisfying "add the first track immediately
    and play it" with no `PlaybackEngine` changes. If no candidate exists at all (the
    library has nothing matching the current filters), `start()` returns without
    activating — the button stays green.
-4. Otherwise (queue already has content), `m_active` becomes `true` and the poll timer
+5. Otherwise (queue already has content), `m_active` becomes `true` and the poll timer
    starts at the configured interval — no immediate top-up; the first addition beyond
    an empty-queue kickstart always happens on the first tick (see below).
-5. `activeChanged()`/`manualQueueEditingAllowedChanged()`/`queueClearAllowedChanged()`
+6. `activeChanged()`/`manualQueueEditingAllowedChanged()`/`queueClearAllowedChanged()`
    fire — `BottomBar` turns red; the queue's clear button and (unless Allow Manual
    Modification is on) add/remove/reorder controls become disabled.
+
+**No separate mid-session force-stop is needed if genres are cleared while a session
+is running**: `autoPlayCandidatePool()` with `considerGenre=true` and an empty
+`activeGenres` list matches nothing (every track's genre-membership test against an
+empty set is false), so `pickNextCandidate()` already returns no candidate and the
+existing starvation path (`stop(true)`, below) fires the next time the controller
+needs to add a track — the genre-requirement gate only needs to guard *starting* a
+session, not react to it changing mid-session.
 
 ### Normal Flow — Polling top-up
 

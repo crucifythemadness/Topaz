@@ -81,6 +81,7 @@ Rectangle {
             artistLabel: modelData.artistLabel
             isActive:    modelData.isActive
             coverSource: modelData.coverSource ?? ""
+            albumYear:   modelData.year ?? 0
             tracks:      modelData.tracks
             engine:      root.engine
             autoPlay:    root.autoPlay

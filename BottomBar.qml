@@ -47,11 +47,18 @@ Rectangle {
                 readonly property bool isScanBtn:     modelData.label === "SCAN DIRECTORIES"
                 readonly property bool isAutoPlayBtn: modelData.label === "AUTO PLAY"
 
+                // AUTO PLAY is only ready once the library scan has completed
+                // AND (when Consider Genre is on) at least one genre is active
+                // — with Consider Genre on and zero active genres, AUTO PLAY
+                // could never find a single eligible candidate.
+                readonly property bool autoPlayGated:
+                    root.autoPlayReady && (!root.autoPlay || root.autoPlay.genreRequirementMet)
+
                 // Traffic-light color for AUTO PLAY (grey/green/red); every other
                 // button keeps its existing scanning/active/inactive coloring.
                 readonly property color btnColor:
                     isAutoPlayBtn
-                        ? (!root.autoPlayReady ? Theme.fgSurfaceVariant
+                        ? (!autoPlayGated ? Theme.fgSurfaceVariant
                            : (root.autoPlay && root.autoPlay.active) ? "#FF1744" : "#00C853")
                         : (isScanBtn && root.scanning)
                             ? Theme.tertiary
@@ -92,7 +99,7 @@ Rectangle {
                     onClicked: {
                         if (isScanBtn && !root.scanning)
                             root.scanRequested()
-                        else if (isAutoPlayBtn && root.autoPlayReady && root.autoPlay)
+                        else if (isAutoPlayBtn && autoPlayGated && root.autoPlay)
                             root.autoPlay.toggle()
                     }
                 }

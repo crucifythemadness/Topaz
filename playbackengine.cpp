@@ -288,7 +288,14 @@ void PlaybackEngine::removeAt(int idx)
     } else if (idx < m_currentIndex) {
         m_currentIndex--;
         emit currentIndexChanged();
-        // Refresh position numbers of all rows from idx onwards
+    }
+
+    // Position numbers (#, "pos" role) are derived from each row's index, so
+    // every row from the removal point onward needs a refresh regardless of
+    // which branch above ran — beginRemoveRows/endRemoveRows only tells the
+    // view a row disappeared, it doesn't imply role data changed for rows
+    // that shifted into new positions.
+    if (idx < m_queue.size()) {
         const QModelIndex from = index(idx);
         const QModelIndex last = index(m_queue.size() - 1);
         emit dataChanged(from, last, { PosRole });

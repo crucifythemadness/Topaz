@@ -98,8 +98,10 @@ public:
 
     // Returns a QVariantList of album objects compatible with AlbumBrowser /
     // AlbumCard.  Each element is a QVariantMap:
-    //   { albumTitle, albumArtist, artistLabel, isActive, coverThumb, tracks }
+    //   { albumTitle, albumArtist, artistLabel, isActive, coverSource, year, tracks }
     // where tracks is a QVariantList of { number, title, duration, filePath }.
+    // Sorted by albumArtist ascending, then year descending, then albumTitle
+    // ascending (case-insensitive); year 0 (unknown) sorts last per artist.
     Q_INVOKABLE QVariantList filteredAlbums(const QStringList &activeGenres,
                                              const QString     &selectedArtist,
                                              const QString     &selectedAlbum) const;

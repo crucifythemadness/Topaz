@@ -5,6 +5,7 @@
 //   albumTitle    - string
 //   artistLabel   - string
 //   isActive      - bool   (true = primary left-accent border)
+//   albumYear     - int    (0 = unknown; year label under the cover hidden)
 //   tracks        - list<{ number, title, duration, durationMs, bitrate,
 //                          filePath, artist, albumArtist, album, coverSource }>
 //   coverSource   - url    (empty = show placeholder)
@@ -25,6 +26,7 @@ Rectangle {
     property string artistLabel: ""
     property bool   isActive:    false
     property url    coverSource: ""
+    property int    albumYear:   0   // 0 = unknown; year label hidden
     property var    tracks:      []
     property var    engine:      null   // optional - used for double-click add to queue
     // Bound from AlbumBrowser; gates double-click add while an AUTO PLAY
@@ -56,32 +58,46 @@ Rectangle {
         }
         spacing: 24
 
-        // Cover art
-        Item {
-            width:  160
-            height: 160
-            clip:   true
+        // Cover art + year (year sized/positioned to match PlaybackQueue's
+        // "TRACK" column header: Theme.labelMd, left-aligned).
+        Column {
+            width: 160
+            spacing: 4
 
-            Rectangle {
-                anchors.fill: parent
-                radius: Theme.radiusSm
-                gradient: Gradient {
-                    orientation: Gradient.Diagonal
-                    GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
-                    GradientStop { position: 1.0; color: Theme.surfaceBright }
+            Item {
+                width:  160
+                height: 160
+                clip:   true
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radiusSm
+                    gradient: Gradient {
+                        orientation: Gradient.Diagonal
+                        GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
+                        GradientStop { position: 1.0; color: Theme.surfaceBright }
+                    }
+                    visible: coverImg.status !== Image.Ready
                 }
-                visible: coverImg.status !== Image.Ready
+
+                Image {
+                    id: coverImg
+                    anchors.fill: parent
+                    source: root.coverSource
+                    sourceSize.width:  160
+                    sourceSize.height: 160
+                    fillMode:          Image.PreserveAspectCrop
+                    asynchronous:      true
+                    layer.enabled: true
+                }
             }
 
-            Image {
-                id: coverImg
-                anchors.fill: parent
-                source: root.coverSource
-                sourceSize.width:  160
-                sourceSize.height: 160
-                fillMode:          Image.PreserveAspectCrop
-                asynchronous:      true
-                layer.enabled: true
+            Text {
+                width: 160
+                text: root.albumYear > 0 ? String(root.albumYear) : ""
+                font.family:    Theme.fontFamilyBody
+                font.pixelSize: Theme.labelMd
+                color: "white"   // deliberate literal white, not a Theme.* token
             }
         }
 

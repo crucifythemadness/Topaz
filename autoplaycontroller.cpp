@@ -17,6 +17,12 @@ bool AutoPlayController::manualQueueEditingAllowed() const
     return !m_active || (m_appConfig && m_appConfig->autoPlayAllowManualModification());
 }
 
+bool AutoPlayController::genreRequirementMet() const
+{
+    if (!m_appConfig || !m_appConfig->autoPlayConsiderGenre()) return true;
+    return !m_activeGenreNames.isEmpty();
+}
+
 void AutoPlayController::setEngine(PlaybackEngine *engine)
 {
     if (m_engine == engine) return;
@@ -51,9 +57,12 @@ void AutoPlayController::setAppConfig(AppConfig *cfg)
                 this, [this]() { if (m_active) restartPollTimerFromConfig(); });
         connect(m_appConfig, &AppConfig::autoPlayAllowManualModificationChanged,
                 this, &AutoPlayController::manualQueueEditingAllowedChanged);
+        connect(m_appConfig, &AppConfig::autoPlayConsiderGenreChanged,
+                this, &AutoPlayController::genreRequirementMetChanged);
     }
     emit appConfigChanged();
     emit manualQueueEditingAllowedChanged();
+    emit genreRequirementMetChanged();
 }
 
 void AutoPlayController::setActiveGenreNames(const QStringList &names)
@@ -61,6 +70,7 @@ void AutoPlayController::setActiveGenreNames(const QStringList &names)
     if (m_activeGenreNames == names) return;
     m_activeGenreNames = names;
     emit activeGenreNamesChanged();
+    emit genreRequirementMetChanged();
 }
 
 void AutoPlayController::toggle()
@@ -78,6 +88,7 @@ void AutoPlayController::clearQueueAndHistory()
 void AutoPlayController::start()
 {
     if (m_active || !m_engine || !m_appConfig || !m_libraryModel) return;
+    if (!genreRequirementMet()) return;
 
     m_playCounts.clear();   // fresh history for this session
 
