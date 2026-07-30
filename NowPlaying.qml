@@ -335,7 +335,10 @@ Rectangle {
                         MouseArea {
                             id: prevHover; anchors.fill: parent
                             hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: { if (root.engine) root.engine.previous() }
+                            onClicked: {
+                                var navAllowed = !root.autoPlay || root.autoPlay.trackNavigationAllowed
+                                if (root.engine && navAllowed) root.engine.previous()
+                            }
                         }
                     }
 
@@ -357,7 +360,10 @@ Rectangle {
                         MouseArea {
                             id: playHover; anchors.fill: parent
                             hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: { if (root.engine) root.engine.togglePlay() }
+                            onClicked: {
+                                var playAllowed = !root.autoPlay || root.autoPlay.playPauseAllowed
+                                if (root.engine && playAllowed) root.engine.togglePlay()
+                            }
                         }
                     }
 
@@ -370,7 +376,10 @@ Rectangle {
                         MouseArea {
                             id: nextHover; anchors.fill: parent
                             hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: { if (root.engine) root.engine.next() }
+                            onClicked: {
+                                var navAllowed = !root.autoPlay || root.autoPlay.trackNavigationAllowed
+                                if (root.engine && navAllowed) root.engine.next()
+                            }
                         }
                     }
                 }

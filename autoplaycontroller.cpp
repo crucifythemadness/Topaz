@@ -4,12 +4,41 @@
 #include "playbackengine.h"
 
 #include <QRandomGenerator>
+#include <QApplication>
+#include <QStyle>
 
 AutoPlayController::AutoPlayController(QObject *parent)
     : QObject(parent)
 {
     m_pollTimer = new QTimer(this);
     connect(m_pollTimer, &QTimer::timeout, this, &AutoPlayController::onPollTick);
+
+    // Checked once here (not re-checked per notification): tray availability
+    // doesn't change during a run in any way this app needs to react to.
+    m_trayAvailable = QSystemTrayIcon::isSystemTrayAvailable();
+    if (m_trayAvailable) {
+        // app.ico is bundled via CMakeLists.txt's qt_add_qml_module RESOURCES
+        // app.ico, which places it under the module's plain URI prefix
+        // (/Topaz/) — a different, simpler prefix than QML_FILES get
+        // (:/qt/qml/Topaz/), confirmed from the generated
+        // build/.qt/rcc/topaz_raw_res_0.qrc.
+        QIcon icon(QStringLiteral(":/Topaz/app.ico"));
+        if (icon.isNull()) {
+            // Defensive fallback so a future resource-path mistake degrades
+            // to "wrong-looking icon" rather than silently killing the tray
+            // icon (and with it every notification) again.
+            icon = QApplication::style()->standardIcon(QStyle::SP_MediaPlay);
+        }
+        m_trayIcon = new QSystemTrayIcon(icon, this);
+        m_trayIcon->setToolTip(QStringLiteral("Topaz"));
+        m_trayIcon->show();
+    }
+}
+
+void AutoPlayController::showTrayMessage(const QString &title, const QString &message)
+{
+    if (!m_trayAvailable || !m_trayIcon) return;
+    m_trayIcon->showMessage(title, message, QSystemTrayIcon::Information, 5000);
 }
 
 bool AutoPlayController::manualQueueEditingAllowed() const
@@ -21,6 +50,21 @@ bool AutoPlayController::genreRequirementMet() const
 {
     if (!m_appConfig || !m_appConfig->autoPlayConsiderGenre()) return true;
     return !m_activeGenreNames.isEmpty();
+}
+
+bool AutoPlayController::playPauseAllowed() const
+{
+    if (!m_active || manualQueueEditingAllowed()) return true;
+    if (!m_appConfig) return false;
+    const QString mode = m_appConfig->autoPlayTransportAccess();
+    return mode == QStringLiteral("playPause") || mode == QStringLiteral("playPauseAndSelect");
+}
+
+bool AutoPlayController::trackNavigationAllowed() const
+{
+    if (!m_active || manualQueueEditingAllowed()) return true;
+    if (!m_appConfig) return false;
+    return m_appConfig->autoPlayTransportAccess() == QStringLiteral("playPauseAndSelect");
 }
 
 void AutoPlayController::setEngine(PlaybackEngine *engine)
@@ -57,12 +101,22 @@ void AutoPlayController::setAppConfig(AppConfig *cfg)
                 this, [this]() { if (m_active) restartPollTimerFromConfig(); });
         connect(m_appConfig, &AppConfig::autoPlayAllowManualModificationChanged,
                 this, &AutoPlayController::manualQueueEditingAllowedChanged);
+        connect(m_appConfig, &AppConfig::autoPlayAllowManualModificationChanged,
+                this, &AutoPlayController::playPauseAllowedChanged);
+        connect(m_appConfig, &AppConfig::autoPlayAllowManualModificationChanged,
+                this, &AutoPlayController::trackNavigationAllowedChanged);
         connect(m_appConfig, &AppConfig::autoPlayConsiderGenreChanged,
                 this, &AutoPlayController::genreRequirementMetChanged);
+        connect(m_appConfig, &AppConfig::autoPlayTransportAccessChanged,
+                this, &AutoPlayController::playPauseAllowedChanged);
+        connect(m_appConfig, &AppConfig::autoPlayTransportAccessChanged,
+                this, &AutoPlayController::trackNavigationAllowedChanged);
     }
     emit appConfigChanged();
     emit manualQueueEditingAllowedChanged();
     emit genreRequirementMetChanged();
+    emit playPauseAllowedChanged();
+    emit trackNavigationAllowedChanged();
 }
 
 void AutoPlayController::setActiveGenreNames(const QStringList &names)
@@ -102,6 +156,9 @@ void AutoPlayController::start()
     emit activeChanged();
     emit manualQueueEditingAllowedChanged();
     emit queueClearAllowedChanged();
+    emit playPauseAllowedChanged();
+    emit trackNavigationAllowedChanged();
+    showTrayMessage(QStringLiteral("AUTO PLAY"), QStringLiteral("Activated"));
 
     restartPollTimerFromConfig();
 }
@@ -114,7 +171,15 @@ void AutoPlayController::stop(bool starved)
     emit activeChanged();
     emit manualQueueEditingAllowedChanged();
     emit queueClearAllowedChanged();
-    if (starved) emit this->starved();
+    emit playPauseAllowedChanged();
+    emit trackNavigationAllowedChanged();
+    if (starved) {
+        emit this->starved();
+        showTrayMessage(QStringLiteral("AUTO PLAY starvation"),
+                         QStringLiteral("There are no more suitable tracks available"));
+    } else {
+        showTrayMessage(QStringLiteral("AUTO PLAY"), QStringLiteral("Deactivated"));
+    }
 }
 
 void AutoPlayController::restartPollTimerFromConfig()

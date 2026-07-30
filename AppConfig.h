@@ -17,9 +17,12 @@
 //     "autoPlay":  { "queueHorizon": 5, "titleAddingIntervalSeconds": 30,
 //                    "considerGenre": false,
 //                    "considerRating": false, "minimumRating": 5,
-//                    "allowManualModification": false, "songRepeat": "once" }
+//                    "allowManualModification": false, "songRepeat": "once",
+//                    "transportAccess": "nothing" }
 //   }
 // autoPlaySongRepeat allowed values: "once", "twice", "twiceIfNoneAvailable", "several".
+// autoPlayTransportAccess allowed values: "nothing", "playPause", "playPauseAndSelect"
+// (only consulted while autoPlayAllowManualModification is false).
 // Settings are grouped into a nested object per SetupDialog tab (crossfade, autoPlay);
 // genres/folders/window-layout stay flat at the top level.
 //
@@ -53,6 +56,7 @@ class AppConfig : public QObject
     Q_PROPERTY(int  autoPlayMinimumRating            READ autoPlayMinimumRating            NOTIFY autoPlayMinimumRatingChanged)
     Q_PROPERTY(bool autoPlayAllowManualModification  READ autoPlayAllowManualModification  NOTIFY autoPlayAllowManualModificationChanged)
     Q_PROPERTY(QString autoPlaySongRepeat            READ autoPlaySongRepeat               NOTIFY autoPlaySongRepeatChanged)
+    Q_PROPERTY(QString autoPlayTransportAccess       READ autoPlayTransportAccess          NOTIFY autoPlayTransportAccessChanged)
 
 public:
     explicit AppConfig(QObject *parent = nullptr);
@@ -76,6 +80,7 @@ public:
     int  autoPlayMinimumRating()           const { return m_autoPlayMinimumRating;           }
     bool autoPlayAllowManualModification() const { return m_autoPlayAllowManualModification; }
     QString autoPlaySongRepeat()           const { return m_autoPlaySongRepeat;              }
+    QString autoPlayTransportAccess()      const { return m_autoPlayTransportAccess;         }
 
     // ── Genre operations ─────────────────────────────────────────────────
     Q_INVOKABLE void addGenre(const QString &name);
@@ -118,6 +123,9 @@ public:
     // Ignored (no-op) unless mode is one of: "once", "twice",
     // "twiceIfNoneAvailable", "several".
     Q_INVOKABLE void setAutoPlaySongRepeat(const QString &mode);
+    // Ignored (no-op) unless mode is one of: "nothing", "playPause",
+    // "playPauseAndSelect".
+    Q_INVOKABLE void setAutoPlayTransportAccess(const QString &mode);
 
     // ── Persistence ──────────────────────────────────────────────────────
     Q_INVOKABLE void save();
@@ -135,6 +143,7 @@ signals:
     void autoPlayMinimumRatingChanged();
     void autoPlayAllowManualModificationChanged();
     void autoPlaySongRepeatChanged();
+    void autoPlayTransportAccessChanged();
 
 private:
     void    load();
@@ -160,4 +169,5 @@ private:
     int  m_autoPlayMinimumRating            = 5;
     bool m_autoPlayAllowManualModification  = false;
     QString m_autoPlaySongRepeat            = QStringLiteral("once");
+    QString m_autoPlayTransportAccess       = QStringLiteral("nothing");
 };

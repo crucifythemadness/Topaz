@@ -211,6 +211,26 @@ Rectangle {
             top: colHeaders.bottom; bottom: parent.bottom
         }
 
+        // Scrolls so the currently-playing row is the first visible one,
+        // revealing as many upcoming tracks below it as the panel can hold —
+        // already-played rows scroll out of view above. Only acts when the
+        // queue actually overflows the panel (a scrollbar would be showing);
+        // applies regardless of AUTO PLAY/MANUAL MODE. Triggered on every
+        // add/remove (see the Connections block on queueCountChanged below).
+        function autoScrollToCurrent() {
+            if (!root.engine) return
+            if (queueList.contentHeight <= queueList.height) return
+            const curIdx = root.engine.currentIndex
+            if (curIdx < 0) return
+            const maxY = Math.max(0, queueList.contentHeight - queueList.height)
+            queueList.contentY = Math.min(curIdx * 68, maxY)   // 68 = row height (see delegate)
+        }
+
+        Connections {
+            target: root.engine
+            function onQueueCountChanged() { Qt.callLater(queueArea.autoScrollToCurrent) }
+        }
+
         ListView {
             id: queueList
             anchors.fill: parent
@@ -384,7 +404,8 @@ Rectangle {
                     hoverEnabled: true
                     cursorShape:  Qt.PointingHandCursor
                     onClicked: {
-                        if (root.engine && !model.playing)
+                        var navAllowed = !root.autoPlay || root.autoPlay.trackNavigationAllowed
+                        if (root.engine && !model.playing && navAllowed)
                             root.engine.playAt(index)
                     }
                 }

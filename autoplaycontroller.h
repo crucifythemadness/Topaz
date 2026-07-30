@@ -12,6 +12,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QTimer>
+#include <QSystemTrayIcon>
 
 // Full headers (not forward declarations) are required here, not just for our
 // own Q_PROPERTY pointer types: Qt6's Q_PROPERTY(SomeClass* ...) requires
@@ -63,6 +64,17 @@ class AutoPlayController : public QObject
     // genre. Gates BottomBar's AUTO PLAY button (grey when false) in addition
     // to the existing autoPlayReady/ratingsReady gate.
     Q_PROPERTY(bool genreRequirementMet READ genreRequirementMet NOTIFY genreRequirementMetChanged)
+    // Whether NowPlaying's Play/Pause button may be used. Always true outside
+    // an active session or when Allow Manual Modification is on; during a
+    // restricted session, follows AppConfig::autoPlayTransportAccess (true
+    // for "playPause"/"playPauseAndSelect").
+    Q_PROPERTY(bool playPauseAllowed READ playPauseAllowed NOTIFY playPauseAllowedChanged)
+    // Whether the user may select a different track — a PlaybackQueue row
+    // click, or NowPlaying's Previous/Next buttons. Always true outside an
+    // active session or when Allow Manual Modification is on; during a
+    // restricted session, true only for autoPlayTransportAccess ==
+    // "playPauseAndSelect" (a superset of playPauseAllowed).
+    Q_PROPERTY(bool trackNavigationAllowed READ trackNavigationAllowed NOTIFY trackNavigationAllowedChanged)
 
 public:
     explicit AutoPlayController(QObject *parent = nullptr);
@@ -76,6 +88,8 @@ public:
     bool manualQueueEditingAllowed() const;
     bool queueClearAllowed() const { return !m_active; }
     bool genreRequirementMet() const;
+    bool playPauseAllowed() const;
+    bool trackNavigationAllowed() const;
 
     void setEngine(PlaybackEngine *engine);
     void setLibraryModel(LibraryModel *model);
@@ -100,6 +114,8 @@ signals:
     void manualQueueEditingAllowedChanged();
     void queueClearAllowedChanged();
     void genreRequirementMetChanged();
+    void playPauseAllowedChanged();
+    void trackNavigationAllowedChanged();
     // Emitted only when a session stops because no eligible track could be
     // found (as opposed to the user clicking the button off themselves).
     void starved();
@@ -123,6 +139,11 @@ private:
     // Genre/rating/repeat-mode/already-queued filtering; returns an empty
     // map if nothing qualifies. Random selection among whatever remains.
     QVariantMap pickNextCandidate() const;
+    // Desktop (system-tray) notification for the 3 AUTO PLAY lifecycle
+    // moments (activated / deactivated / starved). No-op when the platform
+    // has no system tray (m_trayAvailable false) or m_trayIcon couldn't be
+    // created.
+    void showTrayMessage(const QString &title, const QString &message);
 
     PlaybackEngine *m_engine       = nullptr;
     LibraryModel   *m_libraryModel = nullptr;
@@ -134,4 +155,11 @@ private:
 
     // filePath -> number of times fully played to completion this session.
     QHash<QString, int> m_playCounts;
+
+    // Owned directly here rather than in a separate notifier class — a
+    // pragmatic choice for 3 short notifications tightly bound to this
+    // class's own start()/stop() transitions. isSystemTrayAvailable() is
+    // checked once at construction (see .cpp for rationale).
+    QSystemTrayIcon *m_trayIcon      = nullptr;
+    bool             m_trayAvailable = false;
 };

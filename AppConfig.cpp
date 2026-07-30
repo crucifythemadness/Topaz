@@ -226,6 +226,19 @@ void AppConfig::setAutoPlaySongRepeat(const QString &mode)
     save();
 }
 
+void AppConfig::setAutoPlayTransportAccess(const QString &mode)
+{
+    static const QStringList kAllowed = {
+        QStringLiteral("nothing"), QStringLiteral("playPause"),
+        QStringLiteral("playPauseAndSelect")
+    };
+    if (!kAllowed.contains(mode)) return;
+    if (m_autoPlayTransportAccess == mode) return;
+    m_autoPlayTransportAccess = mode;
+    emit autoPlayTransportAccessChanged();
+    save();
+}
+
 // ── Persistence ───────────────────────────────────────────────────────────
 
 void AppConfig::load()
@@ -280,6 +293,8 @@ void AppConfig::load()
         autoPlay[QStringLiteral("allowManualModification")].toBool(false);
     m_autoPlaySongRepeat =
         autoPlay[QStringLiteral("songRepeat")].toString(QStringLiteral("once"));
+    m_autoPlayTransportAccess =
+        autoPlay[QStringLiteral("transportAccess")].toString(QStringLiteral("nothing"));
 }
 
 void AppConfig::save()
@@ -320,6 +335,7 @@ void AppConfig::save()
     autoPlay[QStringLiteral("minimumRating")]  = m_autoPlayMinimumRating;
     autoPlay[QStringLiteral("allowManualModification")] = m_autoPlayAllowManualModification;
     autoPlay[QStringLiteral("songRepeat")] = m_autoPlaySongRepeat;
+    autoPlay[QStringLiteral("transportAccess")] = m_autoPlayTransportAccess;
     root[QStringLiteral("autoPlay")] = autoPlay;
 
     QFile f(configFilePath());

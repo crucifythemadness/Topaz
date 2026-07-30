@@ -5,7 +5,7 @@ project(Topaz VERSION 0.1 LANGUAGES CXX RC)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Quick QuickControls2 QuickDialogs2 Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Quick QuickControls2 QuickDialogs2 Multimedia Widgets)
 
 qt_standard_project_setup()
 
@@ -56,6 +56,8 @@ qt_add_qml_module(topaz
         SetupDialog.qml
         NewPlaylistDialog.qml
         MessageBox.qml
+    RESOURCES
+        app.ico
 )
 
 set_target_properties(topaz PROPERTIES
@@ -64,7 +66,7 @@ set_target_properties(topaz PROPERTIES
 )
 
 target_link_libraries(topaz
-    PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Multimedia Qt6::Concurrent
+    PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Multimedia Qt6::Concurrent Qt6::Widgets
 )
 
 include(GNUInstallDirs)

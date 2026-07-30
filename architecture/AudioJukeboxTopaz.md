@@ -346,10 +346,11 @@ Topaz module
 │                         property var autoPlay  (optional; gates double-click add via autoPlay.manualQueueEditingAllowed, see UC-16)
 │                         property int albumYear  (0 = unknown, hides the label; left-aligned under the cover, Theme.labelMd, literal white)
 ├── PlaybackQueue.qml   Queue panel  default width 374 px, user-resizable  (bound to PlaybackEngine model; DropArea; move/remove; shows activePlaylistName in header when set; shows LOCK PLAYLIST toggle when a playlist is active)
-│                         property var autoPlay  (gates clear/remove/move/reorder/drop via autoPlay.manualQueueEditingAllowed + autoPlay.queueClearAllowed; clear button routes through autoPlay.clearQueueAndHistory(), see UC-16)
+│                         Auto-scrolls to keep the current track topmost (and upcoming tracks visible below it) on every add/remove, whenever the queue overflows the panel — independent of AUTO PLAY/MANUAL MODE, see UC-11
+│                         property var autoPlay  (gates clear/remove/move/reorder/drop via autoPlay.manualQueueEditingAllowed + autoPlay.queueClearAllowed; row click (select another track) via autoPlay.trackNavigationAllowed; clear button routes through autoPlay.clearQueueAndHistory(), see UC-16)
 ├── NowPlaying.qml      Right panel  default width 359 px, user-resizable  (bound to PlaybackEngine + PlaylistManager: art + transport + progress + playlists + 10-star rating row, see UC-14)
 |                         property playlistManager PlaylistManager
-|                         property var autoPlay  (gates playlist-load add + LOAD/REMOVE's implicit clear, see UC-16)
+|                         property var autoPlay  (gates playlist-load add + LOAD/REMOVE's implicit clear; Play/Pause via autoPlay.playPauseAllowed; Previous/Next via autoPlay.trackNavigationAllowed, see UC-16)
 |                         signal newPlaylistRequested()  <- "+ NEW" button click
 |                         FileDialog loadPlaylistDialog <- opens on LOAD; default folder = playlistDirectory(); filter *.xml
 |                         Playlist row 1: NEW | LOAD (clears active playlist first if one is loaded and allowed, then opens file dialog)
@@ -597,7 +598,8 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
         "considerRating": false,
         "minimumRating": 5,
         "allowManualModification": false,
-        "songRepeat": "once"
+        "songRepeat": "once",
+        "transportAccess": "nothing"
     }
 }
 ```
@@ -629,6 +631,7 @@ on-disk JSON shape differs.
 | `autoPlayMinimumRating` / `setAutoPlayMinimumRating(rating)` | Minimum title rating (1-10) the (still-unimplemented) AUTO PLAY feature should consider when `autoPlayConsiderRating` is on (default `5`); clamped to `[1, 10]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab star row ("Minimum Rating"), reusing the same star glyph/palette as `NowPlaying`'s rating row; not yet consumed by any selection logic (see UC-14). |
 | `autoPlayAllowManualModification` / `setAutoPlayAllowManualModification(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should allow the user to manually modify its auto-filled queue entries (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Allow Manual Modification"); not yet consumed by any queue-filling or editing logic (see UC-14). |
 | `autoPlaySongRepeat` / `setAutoPlaySongRepeat(mode)` | How many times AUTO PLAY should play a selected track before moving on (default `"once"`); one of `"once"`, `"twice"`, `"twiceIfNoneAvailable"`, `"several"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab radio group ("Play a Title") — the app's first radio-button control; not yet consumed by any selection logic (see UC-14). |
+| `autoPlayTransportAccess` / `setAutoPlayTransportAccess(mode)` | How much manual transport control remains available during an active AUTO PLAY session while `autoPlayAllowManualModification` is off (default `"nothing"`); one of `"nothing"`, `"playPause"`, `"playPauseAndSelect"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab "Exceptions" radio group, indented under and only interactive while Allow Manual Modification is off. Consumed by `AutoPlayController::playPauseAllowed()`/`trackNavigationAllowed()` (see UC-16). |
 | `save()` | Persist current state to `Topaz.config` (called automatically by all mutators). |
 
 ## Data Flow: Genre Filter (GenreBar toggle)
@@ -925,6 +928,7 @@ configurable via the app JSON config) will be introduced at that point.
       +autoPlayMinimumRating int
       +autoPlayAllowManualModification bool
       +autoPlaySongRepeat string
+      +autoPlayTransportAccess string
       +addGenre(name)
       +removeGenreAt(index)
       +addFolder(path, subfolders)
@@ -938,6 +942,7 @@ configurable via the app JSON config) will be introduced at that point.
       +setAutoPlayMinimumRating(rating)
       +setAutoPlayAllowManualModification(enabled)
       +setAutoPlaySongRepeat(mode)
+      +setAutoPlayTransportAccess(mode)
       +save()
       ~genresChanged()
       ~foldersChanged()
@@ -949,6 +954,7 @@ configurable via the app JSON config) will be introduced at that point.
       ~autoPlayMinimumRatingChanged()
       ~autoPlayAllowManualModificationChanged()
       ~autoPlaySongRepeatChanged()
+      ~autoPlayTransportAccessChanged()
     }
 
     class AutoPlayController {
@@ -960,12 +966,16 @@ configurable via the app JSON config) will be introduced at that point.
       +manualQueueEditingAllowed bool
       +queueClearAllowed bool
       +genreRequirementMet bool
+      +playPauseAllowed bool
+      +trackNavigationAllowed bool
       +toggle()
       +clearQueueAndHistory()
       ~activeChanged()
       ~manualQueueEditingAllowedChanged()
       ~queueClearAllowedChanged()
       ~genreRequirementMetChanged()
+      ~playPauseAllowedChanged()
+      ~trackNavigationAllowedChanged()
       ~starved()
     }
 
@@ -1113,6 +1123,22 @@ to the end of the queue, regardless of whether the removed track was before, at
 (currently playing), or after `m_currentIndex` — all three cases previously needed
 this, but only the "before" case had it, leaving stale numbers after removing the
 current track or a track further ahead in the queue.
+
+### Auto-scroll to keep the current + upcoming tracks visible
+
+`queueArea.autoScrollToCurrent()` (`PlaybackQueue.qml`) runs on every
+`PlaybackEngine::queueCountChanged` (via a `Connections` block, deferred one tick with
+`Qt.callLater` so `queueList.contentHeight` already reflects the new row count) —
+i.e. on every add (`addTrack`/`addTracks`) and every remove (`removeAt`/`clearQueue`),
+from any source. It sets `queueList.contentY = currentIndex * 68` (clamped to the
+content's end), pinning the currently-playing row to the top of the visible viewport —
+already-played rows scroll out of view above it, and as many upcoming/queued tracks as
+the panel's height can hold become visible below. It's a no-op whenever the queue
+doesn't overflow the panel (`contentHeight <= height`, no scrollbar showing), so a
+short queue is never force-scrolled. This behavior is **independent of AUTO PLAY vs.
+MANUAL MODE** — it reacts purely to queue-length changes, regardless of what triggered
+them. It does *not* re-trigger on ordinary playback advancing to the next track alone
+(no count change) — only on an actual add/remove.
 
 ---
 
@@ -1855,19 +1881,87 @@ Whenever `pickNextCandidate()` returns nothing during an active session (a poll 
 top-up, or stall recovery), `stop(true)` runs: the poll timer stops, `m_active` becomes
 `false`, and the three gating/active signals fire. `BottomBar` turns green again purely
 as a consequence of `activeChanged()` — no separate "reset" step needed. A `starved()`
-signal fires alongside (not currently connected to anything visible — a hook for a
-possible future toast). Per the current design, nothing more sophisticated happens on
+signal fires alongside, and a system-tray notification is shown (see "Desktop
+notifications" below). Per the current design, nothing more sophisticated happens on
 starvation: AUTO PLAY simply stops and MANUAL MODE resumes.
+
+### Desktop notifications
+
+`AutoPlayController` shows a Windows system-tray notification
+(`QSystemTrayIcon::showMessage()`) at its three lifecycle moments — each already has an
+exact, unambiguous call site, so no extra signals/state were needed beyond what
+starvation detection already tracks:
+- **Activated** — in `start()`, right after `m_active = true`. Title `"AUTO PLAY"`,
+  message `"Activated"`.
+- **Manually deactivated** — in `stop(bool starved)`'s `starved == false` branch (the
+  user clicked the button off). Title `"AUTO PLAY"`, message `"Deactivated"`.
+- **Starvation** — in `stop(bool starved)`'s `starved == true` branch, alongside the
+  existing `starved()` signal. Title `"AUTO PLAY starvation"`, message `"There are no
+  more suitable tracks available"`.
+
+`QSystemTrayIcon::isSystemTrayAvailable()` is checked once at construction
+(`m_trayAvailable`) — every `showTrayMessage()` call is a no-op when it's `false` or the
+platform's tray icon couldn't be created. The tray icon itself is created (using
+`app.ico`, bundled into the QML module's resources via `qt_add_qml_module`'s
+`RESOURCES app.ico`) and shown for the app's entire lifetime — required because Windows
+balloon/toast notifications anchor to a visible tray icon; there's no way to pop one
+without a persistent icon present.
+
+**Resource path gotcha**: files listed under `qt_add_qml_module`'s `RESOURCES` keyword
+(plain, non-QML files) land under the module's bare URI prefix, `:/Topaz/app.ico` —
+**not** `:/qt/qml/Topaz/app.ico`, which is only the prefix for `QML_FILES` entries (per
+the QTP0001 default-prefix CMake warning, easy to mistakenly assume applies to
+`RESOURCES` too). Confirmed by inspecting the generated
+`build/.qt/rcc/topaz_raw_res_0.qrc`. Getting this wrong silently yields a null `QIcon`,
+which is exactly what happened the first time this was implemented: the tray icon
+never actually registered with the Windows shell, so no notification ever appeared. A
+defensive fallback (`QApplication::style()->standardIcon(QStyle::SP_MediaPlay)` if the
+loaded icon is null) now guards against the same class of mistake recurring silently.
+
+**Known limitation — no notifications while fullscreen**: `showTrayMessage()`
+notifications don't appear while Topaz is in `Window.FullScreen` mode (auto-triggered
+for exact-match screen resolutions, or via F11 — see `Main.qml`). This is Windows'
+Focus Assist automatic rule "When using an app in full screen mode," which suppresses
+toast/balloon notifications for any true fullscreen window at the OS level, by design
+(so games/movies aren't interrupted) — not a defect in Topaz's `QSystemTrayIcon` usage,
+which behaves identically in fullscreen and windowed mode. A code-side workaround
+(replacing true OS fullscreen with a borderless-maximized window, hoping Windows no
+longer classifies it as "fullscreen" for this purpose) was considered and explicitly
+declined: its effectiveness is unverified, and it would touch the existing tuned
+auto-fullscreen/F11 behavior for uncertain benefit. Anyone who wants notifications
+while Topaz is fullscreen can disable this via Windows Settings → Focus assist →
+Automatic rules → turn off (or exempt Topaz from) "When using an app in full screen
+mode."
+
+`QSystemTrayIcon` lives in the **QtWidgets** module and requires a `QApplication`, not
+the `QGuiApplication` a QML-only app normally constructs — `main.cpp` now constructs
+`QApplication` instead (a drop-in superset; no QML/Quick behavior changes), and
+`CMakeLists.txt` links `Qt6::Widgets`.
+
+The tray icon is owned directly by `AutoPlayController` (`m_trayIcon`) rather than a
+separate notifier class — a pragmatic choice given there are only 3 short, tightly
+bound notifications; a dedicated class would be a premature abstraction for this scope.
 
 ### Alternate: manual queue editing during a session
 
-Two independent gating properties on `AutoPlayController`, read by every relevant QML
+Four independent gating properties on `AutoPlayController`, read by every relevant QML
 control:
 ```cpp
 bool manualQueueEditingAllowed() const {
     return !m_active || (m_appConfig && m_appConfig->autoPlayAllowManualModification());
 }
 bool queueClearAllowed() const { return !m_active; }
+bool playPauseAllowed() const {
+    if (!m_active || manualQueueEditingAllowed()) return true;
+    if (!m_appConfig) return false;
+    const QString mode = m_appConfig->autoPlayTransportAccess();
+    return mode == "playPause" || mode == "playPauseAndSelect";
+}
+bool trackNavigationAllowed() const {
+    if (!m_active || manualQueueEditingAllowed()) return true;
+    if (!m_appConfig) return false;
+    return m_appConfig->autoPlayTransportAccess() == "playPauseAndSelect";
+}
 ```
 `manualQueueEditingAllowed` governs add/remove/reorder (`PlaybackQueue`'s move-up/down,
 remove, drag-reorder, and album-drop `DropArea`; `AlbumCard`'s double-click add;
@@ -1881,6 +1975,21 @@ is just allowed in MANUAL MODE." Every clear site routes through
 `engine.clearQueue()` directly, so `m_playCounts` always resets in lockstep with the
 queue — including "restarting the next AUTO PLAY session does the same [reset]," since
 `start()` also unconditionally clears it.
+
+`playPauseAllowed` (gates `NowPlaying`'s Play/Pause button) and `trackNavigationAllowed`
+(gates `NowPlaying`'s Previous/Next buttons and clicking a `PlaybackQueue` row to select
+a different track) are both unconditionally `true` outside a session or whenever
+`autoPlayAllowManualModification` is on — full transport control always accompanies
+full queue control. While a session is active *and* Allow Manual Modification is off,
+both instead follow `AppConfig.autoPlayTransportAccess` (`SetupDialog`'s AUTO PLAY tab
+"Exceptions" radio group, indented under Allow Manual Modification and only
+interactive/undimmed while it's off — the inverse dependency direction from Minimum
+Rating's indent under Consider Rating): `"nothing"` (default) — both `false`, full AUTO
+PLAY with zero manual interaction; `"playPause"` — only `playPauseAllowed` is `true`;
+`"playPauseAndSelect"` — both `true`, since that tier is a strict superset including
+play/pause. This is a pure start-time-style gate re-evaluated on every click, not a
+one-shot check — toggling `autoPlayTransportAccess` or `autoPlayAllowManualModification`
+mid-session takes effect on the very next click of any of these controls.
 
 Deliberately, these gates are QML-layer only — not additionally re-checked inside
 `PlaybackEngine`'s own invokables. The controller itself must call `addTrack`/etc.

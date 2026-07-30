@@ -30,7 +30,8 @@ Popup {
     // ── Geometry ─────────────────────────────────────────────────────────
     anchors.centerIn: Overlay.overlay
     width:  920   // widened so genreManageGrid's cells grow ~20% for longer genre names
-    height: 680   // grown to fit the AUTO PLAY tab's 7th settings row (Title Adding)
+    height: 760   // grown to fit the AUTO PLAY tab's 8th settings row (Exceptions,
+                  // a single-row 3-option radio group)
     padding: 0
 
     modal: true
@@ -1228,7 +1229,15 @@ Popup {
                         }
                     }
 
-                    // ── Allow Manual Modification row ─────────────────
+                    // ── Allow Manual Modification + Exceptions group ───
+                    // Wrapped together (tight spacing: 16) so "Exceptions" reads
+                    // clearly as belonging to "Allow Manual Modification" above it,
+                    // distinct from the outer panel's spacing: 40 between unrelated
+                    // rows/blocks.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 16
@@ -1275,6 +1284,83 @@ Popup {
                             }
                         }
                     }
+
+                    // ── Exceptions row (dependent on Allow Manual Modification) ──
+                    // Only interactive while Allow Manual Modification is OFF —
+                    // governs what limited manual interaction (if any) remains
+                    // possible during an active AUTO PLAY session. Dimmed/disabled
+                    // the opposite way Minimum Rating is: here the row goes inert
+                    // when its parent toggle is ON, since it's then moot (full
+                    // manual control already applies).
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 24
+                        spacing: 12
+                        enabled: root.appConfig !== null && !root.appConfig.autoPlayAllowManualModification
+                        opacity: enabled ? 1.0 : 0.35
+
+                        Text {
+                            text: "Exceptions"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Row {
+                            Layout.leftMargin: 24
+                            spacing: 32
+
+                            Repeater {
+                                model: [
+                                    { value: "nothing",            label: "Nothing" },
+                                    { value: "playPause",          label: "Play/Pause allowed" },
+                                    { value: "playPauseAndSelect", label: "Play/Pause & Select another Track allowed" }
+                                ]
+
+                                delegate: RowLayout {
+                                    spacing: 8
+
+                                    readonly property bool selected:
+                                        root.appConfig !== null
+                                        && root.appConfig.autoPlayTransportAccess === modelData.value
+
+                                    Rectangle {
+                                        width: 18; height: 18
+                                        radius: 9
+                                        color: "transparent"
+                                        border.width: 2
+                                        border.color: selected ? Theme.secondary : Theme.outlineVariant
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 10; height: 10
+                                            radius: 5
+                                            color: Theme.secondary
+                                            visible: selected
+                                        }
+                                    }
+
+                                    Text {
+                                        text: modelData.label
+                                        font.family:    Theme.fontFamilyBody
+                                        font.pixelSize: Theme.labelLg
+                                        color: Theme.fgSurface
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (root.appConfig)
+                                                root.appConfig.setAutoPlayTransportAccess(modelData.value)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    } // end Allow Manual Modification + Exceptions group
 
                     // ── Play a Song row ────────────────────────────────
                     // First radio-button control in the app: a single row of
