@@ -35,7 +35,7 @@ Rectangle {
         Repeater {
             model: [
                 { label: "AUTO PLAY",       icon: "\u25B6", active: root.autoPlayReady },
-                { label: "EQUALIZER",       icon: "\u2261", active: false },
+                { label: "AUDIO VISUALIZER", icon: "\u2261", active: false },
                 { label: "TAG INFORMATION", icon: "\u24D8", active: false },
                 { label: "SCAN DIRECTORIES",icon: "\u29C9", active: false }
             ]

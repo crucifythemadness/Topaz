@@ -434,12 +434,17 @@ Rectangle {
                     }
 
                     Rectangle {
+                        id: loadPlaylistBtn
                         width:  parent.width / 2
                         height: parent.height
-                        color:  loadHover.containsMouse ? Theme.surfaceContainerHigh
-                                                        : Theme.surfaceContainer
+
+                        readonly property bool active: !root.autoPlay || root.autoPlay.queueClearAllowed
+
+                        color:  active && loadHover.containsMouse ? Theme.surfaceContainerHigh
+                                                                  : Theme.surfaceContainer
                         border.color: Theme.ov20
                         border.width: 1
+                        opacity: active ? 1.0 : 0.35
 
                         Row {
                             anchors.centerIn: parent
@@ -462,11 +467,11 @@ Rectangle {
                         }
                         MouseArea {
                             id: loadHover; anchors.fill: parent
-                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            hoverEnabled: true
+                            cursorShape: loadPlaylistBtn.active ? Qt.PointingHandCursor : Qt.ArrowCursor
                             onClicked: {
-                                if (root.autoPlay && !root.autoPlay.manualQueueEditingAllowed) return
-                                const clearAllowed = !root.autoPlay || root.autoPlay.queueClearAllowed
-                                if (root.engine && root.engine.activePlaylistName !== "" && clearAllowed) {
+                                if (!loadPlaylistBtn.active) return
+                                if (root.engine && root.engine.activePlaylistName !== "") {
                                     if (root.autoPlay) root.autoPlay.clearQueueAndHistory()
                                     else root.engine.clearQueue()
                                 }
@@ -476,7 +481,7 @@ Rectangle {
                                 loadPlaylistDialog.open()
                             }
 
-                            ToolTip.visible: containsMouse
+                            ToolTip.visible: containsMouse && loadPlaylistBtn.active
                             ToolTip.delay:   600
                             ToolTip.text:    qsTr("LOAD PLAYLIST")
                         }
@@ -489,12 +494,13 @@ Rectangle {
                     height: 52
 
                     Rectangle {
+                        // Permanently disabled — not yet implemented.
                         width:  parent.width / 2
                         height: parent.height
-                        color:  exportHover.containsMouse ? Theme.surfaceContainerHigh
-                                                          : Theme.surfaceContainer
+                        color: Theme.surfaceContainer
                         border.color: Theme.ov20
                         border.width: 1
+                        opacity: 0.35
 
                         Row {
                             anchors.centerIn: parent
@@ -517,7 +523,7 @@ Rectangle {
                         }
                         MouseArea {
                             id: exportHover; anchors.fill: parent
-                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            hoverEnabled: true; cursorShape: Qt.ArrowCursor
                         }
                     }
 

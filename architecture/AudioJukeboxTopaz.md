@@ -350,11 +350,11 @@ Topaz module
 │                         property var autoPlay  (gates clear/remove/move/reorder/drop via autoPlay.manualQueueEditingAllowed + autoPlay.queueClearAllowed; row click (select another track) via autoPlay.trackNavigationAllowed; clear button routes through autoPlay.clearQueueAndHistory(), see UC-16)
 ├── NowPlaying.qml      Right panel  default width 359 px, user-resizable  (bound to PlaybackEngine + PlaylistManager: art + transport + progress + playlists + 10-star rating row, see UC-14)
 |                         property playlistManager PlaylistManager
-|                         property var autoPlay  (gates playlist-load add + LOAD/REMOVE's implicit clear; Play/Pause via autoPlay.playPauseAllowed; Previous/Next via autoPlay.trackNavigationAllowed, see UC-16)
+|                         property var autoPlay  (gates playlist-load add; LOAD and REMOVE buttons are both fully disabled during an active AUTO PLAY session via autoPlay.queueClearAllowed; Play/Pause via autoPlay.playPauseAllowed; Previous/Next via autoPlay.trackNavigationAllowed, see UC-16)
 |                         signal newPlaylistRequested()  <- "+ NEW" button click
 |                         FileDialog loadPlaylistDialog <- opens on LOAD; default folder = playlistDirectory(); filter *.xml
-|                         Playlist row 1: NEW | LOAD (clears active playlist first if one is loaded and allowed, then opens file dialog)
-|                         Playlist row 2: EXPORT (not yet wired) | REMOVE (active only when playlist loaded AND queue-clear is allowed; routes through autoPlay.clearQueueAndHistory())
+|                         Playlist row 1: NEW | LOAD (disabled whenever an AUTO PLAY session is active; when enabled, clears active playlist first if one is loaded, then opens file dialog)
+|                         Playlist row 2: EXPORT (permanently disabled — not yet implemented) | REMOVE (active only when playlist loaded AND queue-clear is allowed; routes through autoPlay.clearQueueAndHistory())
 │                         signal newPlaylistRequested()  ← “+ NEW” button click
 └── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all; autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16)
 ```
@@ -1967,8 +1967,9 @@ bool trackNavigationAllowed() const {
 remove, drag-reorder, and album-drop `DropArea`; `AlbumCard`'s double-click add;
 `NowPlaying`'s playlist-load add) — always `true` outside a session (MANUAL MODE),
 otherwise following `autoPlayAllowManualModification`. `queueClearAllowed` governs the
-queue's CLEAR button and `NowPlaying`'s LOAD (its implicit pre-clear)/REMOVE buttons —
-**always** `false` during an active session regardless of `autoPlayAllowManualModification`,
+queue's CLEAR button and `NowPlaying`'s LOAD/REMOVE buttons — all three are fully
+disabled (dimmed, non-interactive), not just gated on click — **always** `false`
+during an active session regardless of `autoPlayAllowManualModification`,
 matching "it is forbidden for the user to clear the whole queue during a session; this
 is just allowed in MANUAL MODE." Every clear site routes through
 `AutoPlayController::clearQueueAndHistory()` instead of calling
