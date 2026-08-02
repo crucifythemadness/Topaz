@@ -70,7 +70,7 @@ void LibraryScanner::scanDirectory(
     int                        &done,
     int                         total)
 {
-    const QStringList filters{ QStringLiteral("*.mp3"), QStringLiteral("*.flac") };
+    const QStringList filters{ QStringLiteral("*.mp3"), QStringLiteral("*.flac"), QStringLiteral("*.opus") };
     const QDir::Filters dirFilter =
         QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Readable;
 
@@ -90,7 +90,7 @@ void LibraryScanner::scanDirectory(
         }
 
         const QString suffix = fi.suffix().toLower();
-        if (suffix != "mp3" && suffix != "flac") continue;
+        if (suffix != "mp3" && suffix != "flac" && suffix != "opus") continue;
 
         const QString path       = fi.absoluteFilePath();
         const qint64  modifiedMs = fi.lastModified().toMSecsSinceEpoch();
@@ -183,7 +183,7 @@ void LibraryScanner::fullScan(QStringList  genres,
             for (const QFileInfo &fi : entries) {
                 if (fi.isDir() && recursive) { countFiles(fi.absoluteFilePath()); continue; }
                 const QString suf = fi.suffix().toLower();
-                if (suf == "mp3" || suf == "flac") ++total;
+                if (suf == "mp3" || suf == "flac" || suf == "opus") ++total;
             }
         };
         countFiles(path);

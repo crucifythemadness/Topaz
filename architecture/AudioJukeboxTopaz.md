@@ -11,7 +11,8 @@ author:
 # References  
 [Qt](https://en.wikipedia.org/wiki/Qt_(software))
 [flac](https://en.wikipedia.org/wiki/FLAC)  
-[mp3](https://en.wikipedia.org/wiki/MP3)
+[mp3](https://en.wikipedia.org/wiki/MP3)  
+[opus](https://en.wikipedia.org/wiki/Opus_(audio_format))
 [ID3-Tag](https://de.wikipedia.org/wiki/ID3-Tag)
 [FIFO](https://en.wikipedia.org/wiki/FIFO_(computing_and_electronics))
 [Fade - audio engineering](https://en.wikipedia.org/wiki/Fade_(audio_engineering))
@@ -22,10 +23,11 @@ author:
 # Abbreviations and definitions of terms  
 - flac (Free Lossless Audio Codec)  
 - mp3 (formally MPEG-1 Audio Layer III or MPEG-2 Audio Layer III)
+- opus (a lossy audio codec, delivered in an Ogg container)
 - Topaz (Project name and also the Application name)
 
 # Introduction and overview
-Topaz is an audio jukebox which is a desktop app that can play audio files (*.flac and *.mp3) from a queue. The queue plays the audio files according to the FIFO principle. Optionally, the user can set whether the audio files should be played with fade-in and fade-out (Fade - audio engineering) or whether the audio files should be played to the end before the next audio file is played. The user can move audio files within the queue up and down, except the audio file that is currently playing. The audio files are stored within a main folder that Topaz can scan. Topaz has an application Json Config-File were the user can set the proper main folder path via GUI. Audio files are then organized under three levels. Genre, Album Artist and Album. At the Top are 30 toggle buttons (3 rows with 10 buttons over the whole application with) that are representing the genres. A genre is active when the button is pressed and all album artists, albums and audio files under this genre are now visible and selectable. Available Genres can be configured within the application config file. The application config file will be read at startup and each available genre will be connected with one toggle button. On the left side under the genre toggle buttons is a tree control that contains all available genres. The tree control has three levels (genre, album artist, album). Right from that is a section that can contain all albums, each with the cover and all the audio files, from a selected Genre or a selected Album artist. Alternatively the user can also just select one Album. Right from that is antother section with the audio file queue. The queue should display the Number when the Audio file will be played, the Album name, the Artist, the Name of the Audio file and the Audio file bitrate. Right from that is antother section that contains the cover and detail information of the audio file that is currently playing. All together we have 4 sections that are under the big genre toggle buttons. Each Audio file that Topaz played will be stored and saved automatically in a Json playlist file. The possibility to manage playlist files is in the section on the right side were the details of the currently playing Audio file are. The User can start a new playlist with a given name or the User can load an already existing playlist. That means that at the application startup the user has to decide to create a new playlist or load an exisisting playlist. If the User loads an existing playlist, Topaz will automatically start playing the first audio file from that playlist. Albums or Audio Files can be add to the queue via context menu (mouse right click) or via drag and drop. Topaz should be an application that has a moderate memory consumption. That means that unnecessary Album covers and Audio Files (ID3-Tag Informations) in Memory has to be unloaded.
+Topaz is an audio jukebox which is a desktop app that can play audio files (*.flac, *.mp3, and *.opus) from a queue. The queue plays the audio files according to the FIFO principle. Optionally, the user can set whether the audio files should be played with fade-in and fade-out (Fade - audio engineering) or whether the audio files should be played to the end before the next audio file is played. The user can move audio files within the queue up and down, except the audio file that is currently playing. The audio files are stored within a main folder that Topaz can scan. Topaz has an application Json Config-File were the user can set the proper main folder path via GUI. Audio files are then organized under three levels. Genre, Album Artist and Album. At the Top are 30 toggle buttons (3 rows with 10 buttons over the whole application with) that are representing the genres. A genre is active when the button is pressed and all album artists, albums and audio files under this genre are now visible and selectable. Available Genres can be configured within the application config file. The application config file will be read at startup and each available genre will be connected with one toggle button. On the left side under the genre toggle buttons is a tree control that contains all available genres. The tree control has three levels (genre, album artist, album). Right from that is a section that can contain all albums, each with the cover and all the audio files, from a selected Genre or a selected Album artist. Alternatively the user can also just select one Album. Right from that is antother section with the audio file queue. The queue should display the Number when the Audio file will be played, the Album name, the Artist, the Name of the Audio file and the Audio file bitrate. Right from that is antother section that contains the cover and detail information of the audio file that is currently playing. All together we have 4 sections that are under the big genre toggle buttons. Each Audio file that Topaz played will be stored and saved automatically in a Json playlist file. The possibility to manage playlist files is in the section on the right side were the details of the currently playing Audio file are. The User can start a new playlist with a given name or the User can load an already existing playlist. That means that at the application startup the user has to decide to create a new playlist or load an exisisting playlist. If the User loads an existing playlist, Topaz will automatically start playing the first audio file from that playlist. Albums or Audio Files can be add to the queue via context menu (mouse right click) or via drag and drop. Topaz should be an application that has a moderate memory consumption. That means that unnecessary Album covers and Audio Files (ID3-Tag Informations) in Memory has to be unloaded.
 
 # Essential requirements  
 - Topaz will be a Qt application (GUI with QML or partially with QML)
@@ -154,7 +156,7 @@ User clicks an album row in `LibraryTree`:
 
 | Field | Detail |
 |-------|--------|
-| **Goal** | User specifies which directories Topaz should scan for audio files (FLAC / MP3). |
+| **Goal** | User specifies which directories Topaz should scan for audio files (FLAC / MP3 / Opus). |
 | **Actor** | User |
 | **Precondition** | Setup dialog is open on the FILE MONITORING tab. |
 | **Trigger** | User interacts with folder management controls. |
@@ -211,7 +213,7 @@ User clicks an album row in `LibraryTree`:
 3. `LibraryModel` copies genres + folders from `AppConfig`, emits `_requestFullScan` to worker thread.
 4. `LibraryScanner.fullScan()` runs on the worker thread:
    a. Recursively walks each configured folder (respecting `includeSubfolders`).
-   b. For each `*.mp3` / `*.flac` file: calls `TagReader::read()`.
+   b. For each `*.mp3` / `*.flac` / `*.opus` file: calls `TagReader::read()`.
    c. Compares the file's genre tag (case-insensitive trim) against configured genres. Skips unmatched files.
    d. Assigns a stable UUID (reused from cache if path is known).
    e. For the first track of each (albumArtist, album) pair: extracts and scales a 160×160 JPEG thumbnail.
@@ -239,7 +241,7 @@ User clicks an album row in `LibraryTree`:
 
 ### Genre Matching Rule (Version 1)
 
-The genre tag value read from the audio file (TCON for MP3, GENRE for FLAC) is
+The genre tag value read from the audio file (TCON for MP3, GENRE for FLAC/Opus) is
 compared **case-insensitively** against the configured genre names in `AppConfig`.
 
 ```
@@ -372,7 +374,7 @@ queued-connection mechanism.
 | Class | File | Role |
 |-------|------|------|
 | `TrackInfo` | `trackinfo.h` | Flat data struct; the single record type in the library |
-| `TagReader` | `tagreader.h/cpp` | Zero-dependency ID3v2 + FLAC tag reader; cover thumbnail generator |
+| `TagReader` | `tagreader.h/cpp` | Zero-dependency ID3v2 + FLAC + Opus tag reader; cover thumbnail generator |
 | `LibraryCache` | `librarycache.h/cpp` | Atomic read/write of `Topaz.library.json` |
 | `LibraryScanner` | `libraryscanner.h/cpp` | Worker: directory walk, genre filter, QFileSystemWatcher |
 | `LibraryModel` | `librarymodel.h/cpp` | QAbstractListModel + Q_INVOKABLE query helpers exposed to QML |
@@ -384,6 +386,7 @@ queued-connection mechanism.
 |--------|-------------|-------------|
 | MP3 | ID3v2.2, ID3v2.3, ID3v2.4 | TIT2, TPE1, TPE2, TALB, TRCK, TCON, TLEN, TYER/TDRC, APIC |
 | FLAC | Vorbis Comment + STREAMINFO + PICTURE | TITLE, ARTIST, ALBUMARTIST, ALBUM, TRACKNUMBER, GENRE, DATE |
+| Opus | Ogg container; `OpusTags` packet (Vorbis-comment layout) | TITLE, ARTIST, ALBUMARTIST, ALBUM, TRACKNUMBER, GENRE, DATE |
 
 **Bitrate and duration for MP3**: the first MPEG frame header (past the ID3v2 tag) is
 always scanned to determine bitrate, since ID3v2 has no dedicated bitrate frame. Duration
@@ -393,16 +396,55 @@ frame header scan:
 2. Check for Xing/Info VBR header → use `frame_count × samples_per_frame / sample_rate`.
 3. CBR fallback → `audio_bytes × 8 / bitrate`.
 
-**Cover thumbnails**: extracted from APIC (MP3) or PICTURE (FLAC), scaled to
-160×160 JPEG via `QImage`, encoded as Base64. Only one thumbnail is generated
-per `(albumArtist, album)` pair; all other tracks in the same album store an
-empty `coverThumb`. Passed to `AlbumCard` as a `data:image/jpeg;base64,…` URL.
+**Duration and bitrate for Opus**: Opus has no total-sample-count field like FLAC's
+`STREAMINFO`. `readOpus()` walks Ogg page framing (`TagReader::readOggPageHeader()`,
+shared with `readRawCover()`'s Opus branch) past every page, tracking the granule
+position of the *last* page in the stream; duration is
+`(lastGranule - preSkip) × 1000 / 48000` ms, where `preSkip` comes from the `OpusHead`
+packet on the first page (bytes 10-11, little-endian — RFC 7845 §5.1). Opus has no
+nominal-bitrate header field either, so bitrate falls back to the same
+filesize-over-duration approximation FLAC uses when not explicitly known.
+
+An Ogg page's payload is capped at ~64KB (255 segments × 255 bytes), but the
+`OpusTags` packet routinely exceeds that once it embeds cover art, and per RFC 7845 §3
+is allowed to span multiple pages. `TagReader::readOggPacket()` handles this
+transparently — it concatenates page payloads for as long as
+`readOggPageHeader()`'s `continuesPacket` out-parameter (true when a page's last
+lacing value is 255) says the packet isn't finished — and is used to read both
+`OpusHead` and `OpusTags` in `readOpus()` and `readRawCover()`'s Opus branch. Reading
+`OpusTags` as a single page (the original implementation) silently truncated or missed
+`METADATA_BLOCK_PICTURE` for any file where cover art pushed the comment header past
+one page, while earlier, smaller comments (TITLE/ARTIST/...) still parsed fine — this
+was the cause of a "tags work, cover doesn't" bug fixed shortly after Opus support
+first shipped.
+
+**Cover thumbnails**: extracted from APIC (MP3), PICTURE (FLAC), or the
+`METADATA_BLOCK_PICTURE` comment (Opus — a base64-encoded block using the identical
+binary layout as FLAC's PICTURE block, decoded and parsed via the shared
+`TagReader::parsePictureBlock()` helper), scaled to 160×160 JPEG via `QImage`, encoded
+as Base64. Only one thumbnail is generated per `(albumArtist, album)` pair; all other
+tracks in the same album store an empty `coverThumb`. Passed to `AlbumCard` as a
+`data:image/jpeg;base64,…` URL.
+
+`parsePictureBlock()` and the `VORBIS_COMMENT` vendor-string skip in `readFlac()` both
+skip a length-prefixed field with two explicit statements (`const len = beU32(); pos
++= len;`) rather than a single combined expression like `pos += 4 + int(beU32())`.
+That combined form looks equivalent but isn't: since C++17, a compound assignment's
+right operand — including `beU32()`'s own `pos`-mutating side effect — is sequenced
+before the left operand's value read, so it silently double-skips the length field
+itself. This was verified empirically against this project's exact compiler/standard,
+not just reasoned about. It was the actual cause of Opus (and, latent/unconfirmed
+until fixed alongside it, FLAC) cover art never showing up, and of FLAC's tag fields
+being at risk of the same corruption — fixed together since `parsePictureBlock()` is
+shared by both formats. Watch for this exact pattern (a lambda that mutates a captured
+index as a side effect, combined into one assignment expression with its own return
+value) if extending `TagReader` further.
 
 **Full-resolution cover** (`readRawCover`): a separate static method added for
-the `NowPlaying` panel. It re-opens the file, locates the APIC (MP3) or PICTURE
-(FLAC) block, and returns the raw embedded image bytes — no scaling. Called
-off-thread by `PlaybackEngine` via `QtConcurrent::run` when the current track
-changes (see `PlaybackEngine::currentLargeCoverSource`).
+the `NowPlaying` panel. It re-opens the file, locates the APIC (MP3), PICTURE (FLAC),
+or `METADATA_BLOCK_PICTURE` comment (Opus) and returns the raw embedded image bytes —
+no scaling. Called off-thread by `PlaybackEngine` via `QtConcurrent::run` when the
+current track changes (see `PlaybackEngine::currentLargeCoverSource`).
 
 ### LibraryModel public API
 
@@ -496,7 +538,7 @@ Main.qml → libraryModel.startFullScan()
    ▼
 LibraryScanner.fullScan() [worker thread]
    ├── walk folders (recursive per config)
-   ├── for each *.mp3 / *.flac:
+   ├── for each *.mp3 / *.flac / *.opus:
    │     TagReader::read(path, needCover)
    │     genre filter (case-insensitive match)
    │     assign stable UUID from cache or new QUuid
@@ -1223,7 +1265,7 @@ explicitly. See UC-15 for the full crossfade flow.
 | `currentTitle` | `QString` | Title of the current track |
 | `currentArtist` | `QString` | artist (falls back to albumArtist) of the current track |
 | `currentAlbum` | `QString` | Album name of the current track |
-| `currentFormat` | `QString` | "FLAC" or "MP3" derived from file extension |
+| `currentFormat` | `QString` | "FLAC", "MP3", or "OPUS" derived from file extension |
 | `currentBitrate` | `int` | kbps bitrate of the current track |
 | `currentRating` | `int` | Rating (0-10; 0 = unrated) of the current track. Resolved in `loadTrack()` via `TrackInfo::computeRatingId()` + `RatingCache::load()` — the single canonical point regardless of how the track reached the queue (see UC-14). |
 | `currentCoverSource` | `QString` | `data:image/jpeg;base64,…` cover thumbnail URL — 160×160 px, available immediately |  

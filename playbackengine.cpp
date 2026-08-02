@@ -728,5 +728,6 @@ QString PlaybackEngine::formatFromPath(const QString &path)
     const QString ext = QFileInfo(path).suffix().toUpper();
     if (ext == QStringLiteral("FLAC")) return QStringLiteral("FLAC");
     if (ext == QStringLiteral("MP3"))  return QStringLiteral("MP3");
+    if (ext == QStringLiteral("OPUS")) return QStringLiteral("OPUS");
     return ext;
 }

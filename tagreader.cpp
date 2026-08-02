@@ -359,7 +359,12 @@ bool TagReader::readFlac(QFile &f, TrackInfo &info, bool generateCoverThumb)
                 return quint32(p[0]) | (quint32(p[1]) << 8) |
                        (quint32(p[2]) << 16) | (quint32(p[3]) << 24);
             };
-            pos += 4 + int(leU32()); // skip vendor string length+content
+            // Split into two statements (not "pos += 4 + int(leU32())"): see
+            // parsePictureBlock()'s comment — this combined form double-skips
+            // 4 bytes past the vendor string under C++17 sequencing rules
+            // (verified empirically), corrupting every tag field read below.
+            const quint32 vendorLen = leU32(); // advances pos past the length field itself
+            pos += int(vendorLen);             // now skip the vendor string content
             const quint32 count = leU32();
             for (quint32 i = 0; i < count && pos + 4 <= vc.size(); ++i) {
                 const quint32 len = leU32();
@@ -384,22 +389,10 @@ bool TagReader::readFlac(QFile &f, TrackInfo &info, bool generateCoverThumb)
         else if (blockType == 6) {
             // PICTURE
             const QByteArray pic = f.read(blockLen);
-            if (!hasCover && generateCoverThumb && quint32(pic.size()) >= 8) {
-                int pos = 0;
-                auto beU32 = [&]() -> quint32 {
-                    if (pos + 4 > pic.size()) return 0;
-                    const uchar *p = reinterpret_cast<const uchar *>(pic.constData() + pos);
-                    pos += 4;
-                    return (quint32(p[0]) << 24) | (quint32(p[1]) << 16) |
-                           (quint32(p[2]) <<  8) |  quint32(p[3]);
-                };
-                const quint32 picType = beU32();
-                pos += 4 + int(beU32()); // skip MIME
-                pos += 4 + int(beU32()); // skip description
-                beU32(); beU32(); beU32(); beU32(); // skip w/h/depth/colors
-                const quint32 dataLen = beU32();
-                if ((picType == 3 || picType == 0) && pos + int(dataLen) <= pic.size()) {
-                    info.coverThumb = makeCoverThumb(pic.mid(pos, int(dataLen)));
+            if (!hasCover && generateCoverThumb) {
+                const QByteArray imageBytes = parsePictureBlock(pic);
+                if (!imageBytes.isEmpty()) {
+                    info.coverThumb = makeCoverThumb(imageBytes);
                     hasCover = !info.coverThumb.isEmpty();
                 }
             }
@@ -413,6 +406,159 @@ bool TagReader::readFlac(QFile &f, TrackInfo &info, bool generateCoverThumb)
     }
 
     return streamInfoOk;
+}
+
+// ── Shared picture-block parser (FLAC PICTURE / Opus+Vorbis METADATA_BLOCK_PICTURE) ──
+
+QByteArray TagReader::parsePictureBlock(const QByteArray &block)
+{
+    if (quint32(block.size()) < 8) return {};
+    int pos = 0;
+    auto beU32 = [&]() -> quint32 {
+        if (pos + 4 > block.size()) return 0;
+        const uchar *p = reinterpret_cast<const uchar *>(block.constData() + pos);
+        pos += 4;
+        return (quint32(p[0]) << 24) | (quint32(p[1]) << 16) |
+               (quint32(p[2]) <<  8) |  quint32(p[3]);
+    };
+    const quint32 picType = beU32();
+    // Two explicit statements per skip (not "pos += 4 + int(beU32())"): since
+    // C++17, a compound assignment's right operand — including beU32()'s own
+    // pos-mutating side effect — is sequenced before the left operand's value
+    // read, so a combined expression here would read the already-advanced
+    // pos and double-skip 4 bytes past each field (verified empirically with
+    // this project's exact compiler/standard — this was the actual bug
+    // behind covers never showing up for Opus, and would equally have broken
+    // FLAC's PICTURE block, which shares this function).
+    const quint32 mimeLen = beU32();
+    pos += int(mimeLen); // skip MIME string content
+    const quint32 descLen = beU32();
+    pos += int(descLen); // skip description string content
+    beU32(); beU32(); beU32(); beU32(); // skip w/h/depth/colors
+    const quint32 dataLen = beU32();
+    if ((picType == 3 || picType == 0) && pos + int(dataLen) <= block.size())
+        return block.mid(pos, int(dataLen));
+    return {};
+}
+
+// ── Ogg page framing (shared by readOpus and readRawCover's opus branch) ─────
+
+bool TagReader::readOggPageHeader(QFile &f, quint32 &dataSize, qint64 &granulePos,
+                                   bool &continuesPacket)
+{
+    uchar hdr[27];
+    if (f.read(reinterpret_cast<char *>(hdr), 27) != 27) return false;
+    if (hdr[0] != 'O' || hdr[1] != 'g' || hdr[2] != 'g' || hdr[3] != 'S') return false;
+
+    granulePos = 0;
+    for (int i = 0; i < 8; ++i)
+        granulePos |= qint64(hdr[6 + i]) << (8 * i); // little-endian, offset 6..13
+
+    const quint8 numSegments = hdr[26];
+    const QByteArray segmentTable = f.read(numSegments);
+    if (segmentTable.size() != numSegments) return false;
+
+    dataSize = 0;
+    for (int i = 0; i < numSegments; ++i)
+        dataSize += quint8(segmentTable.at(i));
+
+    continuesPacket = numSegments > 0 && quint8(segmentTable.at(numSegments - 1)) == 255;
+
+    return true;
+}
+
+QByteArray TagReader::readOggPacket(QFile &f, qint64 &granulePos)
+{
+    QByteArray packet;
+    quint32 dataSize = 0;
+    bool continuesPacket = false;
+    do {
+        if (!readOggPageHeader(f, dataSize, granulePos, continuesPacket)) return {};
+        const QByteArray pageData = f.read(dataSize);
+        if (quint32(pageData.size()) != dataSize) return {};
+        packet += pageData;
+    } while (continuesPacket);
+    return packet;
+}
+
+// ── Opus reader (Ogg container) ──────────────────────────────────────────
+
+bool TagReader::readOpus(QFile &f, TrackInfo &info, bool generateCoverThumb)
+{
+    // First page: OpusHead packet (always alone on page 1 per RFC 7845 §3,
+    // so this is always exactly one page in practice).
+    qint64 granulePos = 0;
+    const QByteArray head = readOggPacket(f, granulePos);
+    if (head.size() < 12 || head.left(8) != QByteArray("OpusHead", 8)) return false;
+    // Byte 8 = version, byte 9 = channel count, bytes 10-11 = pre-skip (LE) — RFC 7845 §5.1.
+    const quint16 preSkip = quint8(head.at(10)) | (quint16(quint8(head.at(11))) << 8);
+
+    // OpusTags packet — same Vorbis-comment layout FLAC uses. Unlike
+    // OpusHead, this routinely spans multiple pages once it embeds cover
+    // art, which readOggPacket() handles transparently.
+    const QByteArray tags = readOggPacket(f, granulePos);
+    if (tags.size() < 8 || tags.left(8) != QByteArray("OpusTags", 8)) return false;
+
+    int pos = 8;
+    auto leU32 = [&]() -> quint32 {
+        if (pos + 4 > tags.size()) return 0;
+        const uchar *p = reinterpret_cast<const uchar *>(tags.constData() + pos);
+        pos += 4;
+        return quint32(p[0]) | (quint32(p[1]) << 8) |
+               (quint32(p[2]) << 16) | (quint32(p[3]) << 24);
+    };
+    // Split into two statements (not "pos += 4 + int(leU32())"): since C++17,
+    // a compound assignment's right operand — including leU32()'s own
+    // pos-mutating side effect — is sequenced before the left operand's value
+    // read, so a combined expression here would read the already-advanced
+    // pos and double-skip 4 bytes past the vendor string.
+    const quint32 vendorLen = leU32(); // advances pos past the length field itself
+    pos += int(vendorLen);             // now skip the vendor string content
+    const quint32 count = leU32();
+    bool hasCover = false;
+    for (quint32 i = 0; i < count && pos + 4 <= tags.size(); ++i) {
+        const quint32 len = leU32();
+        if (pos + int(len) > tags.size()) break;
+        const QString comment = QString::fromUtf8(tags.constData() + pos, int(len));
+        pos += int(len);
+        const int eq = comment.indexOf('=');
+        if (eq <= 0) continue;
+        const QString key   = comment.left(eq).toUpper().trimmed();
+        const QString value = comment.mid(eq + 1).trimmed();
+        if      (key == "TITLE")                               info.title       = value;
+        else if (key == "ARTIST")                              info.artist      = value;
+        else if (key == "ALBUMARTIST" || key == "ALBUM ARTIST") info.albumArtist = value;
+        else if (key == "ALBUM")                               info.album       = value;
+        else if (key == "TRACKNUMBER" || key == "TRACK")
+            info.track = value.split('/').constFirst().trimmed().toInt();
+        else if (key == "GENRE")                               info.genre       = value.trimmed();
+        else if (key == "DATE"  || key == "YEAR")
+            info.year = value.trimmed().left(4).toInt();
+        else if (key == "METADATA_BLOCK_PICTURE" && !hasCover && generateCoverThumb) {
+            const QByteArray imageBytes = parsePictureBlock(QByteArray::fromBase64(value.toUtf8()));
+            if (!imageBytes.isEmpty()) {
+                info.coverThumb = makeCoverThumb(imageBytes);
+                hasCover = !info.coverThumb.isEmpty();
+            }
+        }
+    }
+
+    // Remaining pages: skip payloads, tracking the last page's granule
+    // position — that value (minus pre-skip) is the total sample count.
+    // Packet boundaries don't matter here, only page granule positions, so
+    // continuesPacket is unused.
+    quint32 dataSize = 0;
+    bool    continuesPacket = false;
+    qint64  lastGranule = granulePos;
+    while (readOggPageHeader(f, dataSize, granulePos, continuesPacket)) {
+        lastGranule = granulePos;
+        if (!f.seek(f.pos() + dataSize)) break;
+    }
+
+    if (lastGranule > preSkip)
+        info.duration = (lastGranule - preSkip) * 1000LL / 48000LL;
+
+    return true;
 }
 
 // ── Public entry point ────────────────────────────────────────────────────
@@ -437,6 +583,12 @@ TrackInfo TagReader::read(const QString &filePath, bool generateCoverThumb)
     } else if (ext == "flac") {
         readFlac(f, info, generateCoverThumb);
         // Approximate FLAC bitrate from file size + duration
+        if (info.bitrate == 0 && info.duration > 0)
+            info.bitrate = int(info.fileSize * 8LL / info.duration); // kbps
+    } else if (ext == "opus") {
+        readOpus(f, info, generateCoverThumb);
+        // Opus has no fixed nominal-bitrate header field; approximate the
+        // same way FLAC's bitrate is approximated when not explicitly known.
         if (info.bitrate == 0 && info.duration > 0)
             info.bitrate = int(info.fileSize * 8LL / info.duration); // kbps
     }
@@ -540,6 +692,42 @@ QByteArray TagReader::readRawCover(const QString &filePath)
 
             if (isLast) break;
             f.seek(f.pos() + len);
+        }
+    } else if (ext == QLatin1String("opus")) {
+        // First page: OpusHead — we only need to skip past it.
+        qint64 granulePos = 0;
+        readOggPacket(f, granulePos);
+
+        // OpusTags — same Vorbis-comment layout as FLAC's VORBIS_COMMENT,
+        // scan for a METADATA_BLOCK_PICTURE comment. May span multiple pages
+        // once it embeds cover art, which readOggPacket() handles.
+        const QByteArray tags = readOggPacket(f, granulePos);
+        if (tags.size() < 8 || tags.left(8) != QByteArray("OpusTags", 8)) return {};
+
+        int pos = 8;
+        auto leU32 = [&]() -> quint32 {
+            if (pos + 4 > tags.size()) return 0;
+            const uchar *p = reinterpret_cast<const uchar *>(tags.constData() + pos);
+            pos += 4;
+            return quint32(p[0]) | (quint32(p[1]) << 8) |
+                   (quint32(p[2]) << 16) | (quint32(p[3]) << 24);
+        };
+        const quint32 vendorLen = leU32(); // advances pos past the length field itself
+        pos += int(vendorLen);             // now skip the vendor string content
+        const quint32 count = leU32();
+        for (quint32 i = 0; i < count && pos + 4 <= tags.size(); ++i) {
+            const quint32 len = leU32();
+            if (pos + int(len) > tags.size()) break;
+            const QString comment = QString::fromUtf8(tags.constData() + pos, int(len));
+            pos += int(len);
+            const int eq = comment.indexOf('=');
+            if (eq <= 0) continue;
+            if (comment.left(eq).toUpper().trimmed() == QLatin1String("METADATA_BLOCK_PICTURE")) {
+                const QByteArray decoded =
+                    QByteArray::fromBase64(comment.mid(eq + 1).trimmed().toUtf8());
+                const QByteArray imageBytes = parsePictureBlock(decoded);
+                if (!imageBytes.isEmpty()) return imageBytes;
+            }
         }
     }
 
