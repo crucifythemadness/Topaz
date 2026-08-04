@@ -30,6 +30,8 @@ qt_add_executable(topaz
     playlistmanager.cpp
     autoplaycontroller.h
     autoplaycontroller.cpp
+    systemvolumecontroller.h
+    systemvolumecontroller.cpp
     app.rc
 )
 
@@ -67,6 +69,7 @@ set_target_properties(topaz PROPERTIES
 
 target_link_libraries(topaz
     PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Multimedia Qt6::Concurrent Qt6::Widgets
+    PRIVATE ole32
 )
 
 include(GNUInstallDirs)

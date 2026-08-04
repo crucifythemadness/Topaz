@@ -1,16 +1,21 @@
-﻿import QtQuick
+import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 
-// Header bar: Logo | Navigation tabs | Settings icon + Equalizer icon + User avatar
+// Header bar: Logo | Navigation tabs | Loudspeaker icon + Settings icon + User avatar
 Rectangle {
     id: root
     height: 64
     color: Theme.surface
 
+    // Bound from Main.qml -- controls the Windows OS master volume (not
+    // Topaz's own playback level). See systemvolumecontroller.h.
+    property var systemVolume: null
+
     // Emitted when the user clicks the gear (⚙) icon
     signal settingsRequested()
 
-    // Ghost bottom border (10 % outlineVariant) вЂ” satisfies the "no-line" rule
+    // Ghost bottom border (10 % outlineVariant) -- satisfies the "no-line" rule
     Rectangle {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         height: 1
@@ -21,7 +26,7 @@ Rectangle {
         anchors { fill: parent; leftMargin: 24; rightMargin: 24 }
         spacing: 0
 
-        // в”Ђв”Ђ Branding в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+        // -- Branding --------------------------------------------------
         Text {
             text: qsTr("TOPAZ JUKEBOX")
             font.family: Theme.fontFamilyHeadline
@@ -33,7 +38,7 @@ Rectangle {
 
         Item { Layout.fillWidth: true }
 
-        // в”Ђв”Ђ Navigation tabs в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+        // -- Navigation tabs ---------------------------------------------
         Row {
             Layout.fillHeight: true
             spacing: 48
@@ -86,15 +91,183 @@ Rectangle {
 
         Item { Layout.fillWidth: true }
 
-        // в”Ђв”Ђ Right-side actions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+        // -- Right-side actions --------------------------------------------
         Row {
             Layout.fillHeight: true
             spacing: 20
 
-            // Settings вљ™
+            // OS Volume (loudspeaker) -- opens a flyout pane with the volume
+            // slider. Leftmost of the three (swapped with Settings).
+            Item {
+                id: volumeButton
+                width:  32
+                height: 32
+                anchors.verticalCenter: parent.verticalCenter
+
+                // Hover feedback: a background highlight rather than the
+                // usual text-recolor, since the speaker emoji glyph is
+                // rendered full-color by the system font and ignores text color.
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radiusMd
+                    color:  Theme.p10
+                    visible: hoverVolume.containsMouse || volumePopup.opened
+                }
+
+                Text {
+                    anchors.fill: parent
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment:   Text.AlignVCenter
+                    text: "🔊"
+                    font.pixelSize: 22
+                }
+
+                MouseArea {
+                    id: hoverVolume
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        // Re-read the OS volume in case it changed elsewhere
+                        // while Topaz was already running (see
+                        // SystemVolumeController::refresh()).
+                        if (root.systemVolume) root.systemVolume.refresh()
+                        volumePopup.open()
+                    }
+                    onContainsMouseChanged: volumeCloseTimer.restart()
+                }
+
+                Popup {
+                    id: volumePopup
+                    parent: volumeButton
+                    x: volumeButton.width - width
+                    y: volumeButton.height + 8
+                    padding: Theme.sp5
+
+                    modal: false
+                    focus: false
+                    closePolicy: Popup.NoAutoClose
+
+                    background: Rectangle {
+                        color:  Theme.surfaceContainerLow
+                        radius: Theme.radiusLg
+                        border.color: Theme.ov20
+                        border.width: 1
+                    }
+
+                    contentItem: ColumnLayout {
+                        spacing: 12
+
+                        // Closes the pane once neither the button nor the
+                        // pane itself has been hovered for a short moment --
+                        // debounced so moving the mouse from the button onto
+                        // the pane doesn't flicker-close it in transit.
+                        HoverHandler {
+                            id: hoverPane
+                            onHoveredChanged: volumeCloseTimer.restart()
+                        }
+                        Timer {
+                            id: volumeCloseTimer
+                            interval: 150
+                            onTriggered: {
+                                if (!hoverVolume.containsMouse && !hoverPane.hovered)
+                                    volumePopup.close()
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: qsTr("OS Volume")
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(volumeSlider.value)
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "0"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: volumeSlider
+                                Layout.preferredWidth: 300
+                                from: 0
+                                to:   100
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.systemVolume ? root.systemVolume.volume : 100
+
+                                onMoved: {
+                                    if (root.systemVolume)
+                                        root.systemVolume.setVolume(Math.round(value))
+                                }
+
+                                background: Rectangle {
+                                    x: volumeSlider.leftPadding
+                                    y: volumeSlider.topPadding
+                                       + volumeSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  300
+                                    implicitHeight: 4
+                                    width:  volumeSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  volumeSlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: volumeSlider.leftPadding
+                                       + volumeSlider.visualPosition
+                                         * (volumeSlider.availableWidth - width)
+                                    y: volumeSlider.topPadding
+                                       + volumeSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "100"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Settings
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "\u2699"
+                text: "⚙"
                 font.pixelSize: 20
                 color: hoverSettings.containsMouse ? Theme.primary : Theme.fgSurfaceVariant
                 MouseArea {
@@ -103,20 +276,6 @@ Rectangle {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.settingsRequested()
-                }
-            }
-
-            // Equalizer в‰Ў
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "\u2261"
-                font.pixelSize: 22
-                color: hoverEq.containsMouse ? Theme.primary : Theme.fgSurfaceVariant
-                MouseArea {
-                    id: hoverEq
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
                 }
             }
 

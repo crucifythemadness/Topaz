@@ -334,12 +334,30 @@ Topaz module
 ├── LibraryData.qml     shared state model — genre toggle, selection, tree builder
 │                         property AppConfig appConfig
 │                         property LibraryModel libraryModel
-├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, LibraryModel, PlaybackEngine, PlaylistManager, SetupDialog, NewPlaylistDialog
+├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, SetupDialog, NewPlaylistDialog
 ├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY, see UC-15 / UC-14)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
-├── TopBar.qml          Header (logo | navigation tabs | icons + avatar)  height 64 px
+├── TopBar.qml          Header (logo | navigation tabs | loudspeaker icon + gear icon + avatar)  height 64 px
+│                         property var systemVolume  (bound to SystemVolumeController; drives the OS-Volume flyout, see below)
 │                         signal settingsRequested()  ← gear icon click
+│                         Loudspeaker icon (🔊, leftmost of the three): click opens a non-modal Popup (~8cm/300px-wide
+│                         Slider, 0-100, labeled "OS Volume") anchored under the button via parent: <button item>.
+│                         Closes when neither the button nor the popup itself has been hovered for ~150ms (combined
+│                         hover state + debounce Timer, to avoid flicker-closing in transit from button to popup) —
+│                         deliberately not Popup.CloseOnPressOutside, since the close trigger is hover-exit, not click.
+│                         Slider.onMoved calls systemVolume.setVolume(Math.round(value)) directly (Q_INVOKABLE, see
+│                         SystemVolumeController below — its Q_PROPERTY volume is intentionally READ-only, matching
+│                         AppConfig's convention of always using a separate Q_INVOKABLE setter rather than a
+│                         Q_PROPERTY WRITE clause, since a WRITE function is not itself callable as obj.setX() from
+│                         QML unless also marked Q_INVOKABLE — an early version of this feature used WRITE and the
+│                         slider silently did nothing to the real OS volume). onClicked also calls
+│                         systemVolume.refresh() right before opening the popup, so the slider reflects the OS
+│                         volume even if it changed elsewhere while Topaz was already running; beyond that,
+│                         Slider.value stays live-synced for the whole session via SystemVolumeController's
+│                         IAudioEndpointVolumeCallback registration — no further QML-side action needed, since
+│                         volumeChanged() re-firing is enough for the existing value: binding to pick it up,
+│                         popup open or not (see SystemVolumeController below).
 ├── GenreBar.qml        3 × 10 genre toggle grid  (reads lib.genreModel, calls lib.toggleGenre)
 ├── LibraryTree.qml     Left sidebar  default width 286 px, user-resizable  (flat virtualised ListView; flatRows JS array; no nested Repeaters)
 ├── AlbumBrowser.qml    Center album list  flex-grow (absorbs all surplus width from window resize or panel drag)  (calls lib.filteredAlbums() via Qt.callLater; property autoPlay forwarded to each AlbumCard, see UC-16)
@@ -379,6 +397,95 @@ queued-connection mechanism.
 | `LibraryScanner` | `libraryscanner.h/cpp` | Worker: directory walk, genre filter, QFileSystemWatcher |
 | `LibraryModel` | `librarymodel.h/cpp` | QAbstractListModel + Q_INVOKABLE query helpers exposed to QML |
 | `PlaylistManager` | `playlistmanager.h/cpp` | XSPF playlist file creation; path-portability helpers |
+| `SystemVolumeController` | `systemvolumecontroller.h/cpp` | Windows OS master-volume control via Core Audio COM |
+
+### SystemVolumeController — Windows OS master volume
+
+Controls the Windows **system** output volume (not Topaz's own playback level —
+`QAudioOutput::setVolume()` is separate, used only internally for crossfade ramping).
+Qt has no cross-platform API for this, so `SystemVolumeController` wraps the Windows
+Core Audio `IAudioEndpointVolume` COM interface directly — the same kind of
+native-Windows-API work as `AutoPlayController`'s `QSystemTrayIcon` notifications.
+
+`Q_PROPERTY(int volume READ volume NOTIFY volumeChanged)` — deliberately **no WRITE
+clause**; mutation goes through a separate `Q_INVOKABLE void setVolume(int)`, matching
+`AppConfig`'s convention everywhere else in this codebase. This matters: a function
+referenced only via a `Q_PROPERTY`'s `WRITE` clause is wired into the `obj.prop = x`
+assignment mechanism but is **not** itself exposed as a callable `obj.setX(x)` method
+from QML unless it's independently `Q_INVOKABLE`. An early version of this class used
+`WRITE setVolume` and called it from QML as `systemVolume.setVolume(...)` — the call
+silently did nothing (no error, no crash), because `setVolume` wasn't actually
+reachable that way; the bound `Slider` still looked fully functional since its
+displayed value came from the `Slider`'s own local `value`, not from `volume`. Any
+future `Q_PROPERTY` on a new class in this codebase should follow the same
+READ/NOTIFY-only + separate-`Q_INVOKABLE`-setter pattern to avoid repeating this.
+
+Construction sequence: `CoInitializeEx` (apartment-threaded; `RPC_E_CHANGED_MODE` —
+COM already initialized on this thread by something else, e.g. Qt itself — is treated
+as "still usable, just don't call `CoUninitialize()` for it later") → `CoCreateInstance`
+an `IMMDeviceEnumerator` → `GetDefaultAudioEndpoint(eRender, eConsole, ...)` (the same
+role Windows' own volume flyout/taskbar targets) → `Activate` an `IAudioEndpointVolume`
+on it → `GetMasterVolumeLevelScalar()` once to seed `volume` (0-100, rounded) from
+whatever the OS actually has at startup → `RegisterControlChangeNotify()` a callback
+for live sync (below). All the well-known CLSID/IID GUIDs are hardcoded (verified
+against Microsoft's published values, and for `IAudioEndpointVolumeCallback`'s IID
+specifically, against the actual mingw-w64 `endpointvolume.h` source) rather than
+relying on `__uuidof()` (an MSVC extension with inconsistent MinGW coverage) or
+linking `uuid.lib` via `-DINITGUID` — kept dependency-free, consistent with the rest
+of this codebase. Any COM step failing logs a `qWarning()` (this class's own boundary
+with unpredictable external/OS state is judged to warrant it, even though no other
+class in this codebase logs anything) and leaves the endpoint pointer null;
+`setVolume()` becomes a no-op (with its own `qWarning()`) rather than crashing.
+
+**Staying in sync with volume changes made outside Topaz** — two layers:
+- `Q_INVOKABLE void refresh()`: re-runs just the `GetMasterVolumeLevelScalar()` +
+  seed step. Called from `TopBar.qml`'s loudspeaker `onClicked`, right before the
+  popup opens — covers "the OS volume changed while Topaz was already running, before
+  the pane was ever opened."
+- Live sync for the rest of the session: a private nested `VolumeChangeCallback`
+  class (in the `.cpp`, not the header) implements `IAudioEndpointVolumeCallback`,
+  registered via `RegisterControlChangeNotify()` after `Activate()` succeeds and
+  unregistered in the destructor before releasing `endpointVolume`. Its `OnNotify()`
+  fires whenever the endpoint's volume changes **from any source** — other apps,
+  Windows' own volume UI, or hardware volume controls (keys, external soundcard
+  knobs, etc.) that route through the OS volume model. Whether a *specific* piece of
+  external hardware routes through that model at all is outside Windows' or Topaz's
+  control — most consumer USB audio interfaces do (they act like standard multimedia
+  volume keys), but some pro-audio interfaces do pure analog attenuation on the
+  device itself, entirely bypassing it; in that case no Windows API could ever
+  observe the change, since it isn't an OS-level concept at all.
+  - **Threading**: `OnNotify` runs on an internal audio-engine worker thread, never
+    the GUI thread that owns `SystemVolumeController`. It cannot safely touch
+    `m_volume`/emit `volumeChanged()` directly. It instead calls
+    `QMetaObject::invokeMethod(this, lambda, Qt::QueuedConnection)` passing the
+    controller itself as the context object — Qt automatically marshals the call
+    onto the controller's own thread, and automatically (silently) drops it if the
+    controller is destroyed before the queued call runs, with no extra manual
+    guarding needed. The shared `applyLevel(float)` helper (used by the constructor,
+    `refresh()`, and this callback alike) does the actual scalar→0-100 conversion and
+    the emit, guarded to no-op if the value didn't actually change.
+  - **Self-notification loopback**: the audio engine notifies *all* registered
+    listeners for *any* change, including ones this class itself caused via
+    `setVolume()` — so every `setVolume()` call also triggers its own `OnNotify`
+    round-trip back to this same object. This is harmless, not a bug: `applyLevel`'s
+    unchanged-value guard makes it a no-op re-affirmation of the value already set.
+  - `VolumeChangeCallback` needs to call the private `applyLevel()`, so
+    `SystemVolumeController` forward-declares it and declares it a `friend class` —
+    the only such relationship in this codebase, needed because the callback class
+    must live in the `.cpp` (same PIMPL/no-Windows-headers-in-the-header rationale
+    below) rather than as a member of `SystemVolumeController` itself.
+
+All Windows/COM headers (`mmdeviceapi.h`, `endpointvolume.h`) are confined to the
+`.cpp` behind a private `struct Impl` (PIMPL) — `<windows.h>`-family headers define
+macros (`interface`, `min`, `max`) that can clash with Qt/STL if leaked into every
+file that includes `systemvolumecontroller.h`.
+
+**Known simplification** (not fixed, not requested): no default-audio-device-change
+tracking — the endpoint is resolved once at construction; if the user switches their
+default output device in Windows Settings mid-session, `SystemVolumeController` keeps
+targeting the old one. An `IMMNotificationClient`/`OnDefaultDeviceChanged`
+registration would handle that, but it's a distinct concern (device swap, not volume
+level) from what was asked for here.
 
 ### TagReader — supported formats
 

@@ -40,6 +40,9 @@ ApplicationWindow {
     // Playlist manager — handles XSPF file creation.
     PlaylistManager { id: playlistManager }
 
+    // Windows OS master volume control — see systemvolumecontroller.h.
+    SystemVolumeController { id: systemVolume }
+
     // AUTO PLAY session/policy controller — see UC-16 in the architecture doc.
     // Passed as `autoPlay` property to BottomBar, AlbumBrowser, PlaybackQueue, NowPlaying.
     AutoPlayController {
@@ -94,6 +97,7 @@ ApplicationWindow {
 
         TopBar {
             Layout.fillWidth: true
+            systemVolume: systemVolume
             onSettingsRequested: setupDialog.open()
         }
 
