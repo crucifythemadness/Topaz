@@ -337,11 +337,14 @@ Topaz module
 ├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, SetupDialog, NewPlaylistDialog
 │                         property bool bigCoverPaneOpen  (toggled by NowPlaying.onBigCoverRequested / BigCoverWindow.onCloseRequested)
 │                         Loader { active: bigCoverPaneOpen; sourceComponent: BigCoverWindow {...} }  — see "Detachable panes" below
+│                         property bool tagInfoPaneOpen  (toggled by BottomBar.onTagInfoToggleRequested / TagInfoWindow.onCloseRequested)
+│                         Loader { active: tagInfoPaneOpen; sourceComponent: TagInfoWindow {...} }  — see UC-18
 ├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY, see UC-15 / UC-14)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
 ├── FloatingPane.qml    Reusable base Window for detachable panes (frameless, movable, resizable, right-click-to-close) — see "Detachable panes" below
 ├── BigCoverWindow.qml  FloatingPane specialization: shows only the current track's cover art
+├── TagInfoWindow.qml   FloatingPane specialization: shows the current track's tag metadata, content scales with pane size — see UC-18
 ├── TopBar.qml          Header (logo | navigation tabs | loudspeaker icon + gear icon + avatar)  height 64 px
 │                         property var systemVolume  (bound to SystemVolumeController; drives the OS-Volume flyout, see below)
 │                         signal settingsRequested()  ← gear icon click
@@ -382,6 +385,7 @@ Topaz module
 |                         Playlist row 2: EXPORT (permanently disabled — not yet implemented) | REMOVE (active only when playlist loaded AND queue-clear is allowed; routes through autoPlay.clearQueueAndHistory())
 │                         signal newPlaylistRequested()  ← “+ NEW” button click
 └── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all; autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16)
+                          signal tagInfoToggleRequested()  ← TAG INFORMATION button click; property tagInfoPaneOpen (bound from Main.qml) drives its on/off color — same "dumb button, owner decides" split as scanRequested()/scanning, see UC-18
 ```
 
 ## LibraryModel Component
@@ -757,6 +761,9 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     },
     "bigCoverPane": {
         "x": 100, "y": 100, "width": 400, "height": 400, "screenName": "DISPLAY1"
+    },
+    "tagInfoPane": {
+        "x": 100, "y": 100, "width": 460, "height": 230, "screenName": "DISPLAY1"
     }
 }
 ```
@@ -765,10 +772,10 @@ Settings are grouped into a nested object per `SetupDialog` tab (`crossfade`,
 `autoPlay`); genres/folders/window-layout stay flat at the top level. The
 `AppConfig` property/method names (`crossfadeEnabled`, `crossfadeSeconds`,
 `autoPlayQueueHorizon`, and their setters) are unchanged by this grouping — only the
-on-disk JSON shape differs. `bigCoverPane` is also nested; unlike the others, its
-*presence* in the file (not a stored bool) is what "configured" means — absent means
-the pane has never been positioned yet, so `Main.qml` uses a centered default
-instead of `bigCoverPaneX`/`Y` (see UC below).
+on-disk JSON shape differs. `bigCoverPane`/`tagInfoPane` are also nested; unlike the
+others, their *presence* in the file (not a stored bool) is what "configured" means —
+absent means that pane has never been positioned yet, so `Main.qml` uses a centered
+default instead of its saved `X`/`Y` (see UC-17/UC-18).
 
 ### AppConfig public API
 
@@ -792,8 +799,10 @@ instead of `bigCoverPaneX`/`Y` (see UC below).
 | `autoPlayAllowManualModification` / `setAutoPlayAllowManualModification(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should allow the user to manually modify its auto-filled queue entries (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Allow Manual Modification"); not yet consumed by any queue-filling or editing logic (see UC-14). |
 | `autoPlaySongRepeat` / `setAutoPlaySongRepeat(mode)` | How many times AUTO PLAY should play a selected track before moving on (default `"once"`); one of `"once"`, `"twice"`, `"twiceIfNoneAvailable"`, `"several"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab radio group ("Play a Title") — the app's first radio-button control; not yet consumed by any selection logic (see UC-14). |
 | `autoPlayTransportAccess` / `setAutoPlayTransportAccess(mode)` | How much manual transport control remains available during an active AUTO PLAY session while `autoPlayAllowManualModification` is off (default `"nothing"`); one of `"nothing"`, `"playPause"`, `"playPauseAndSelect"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab "Exceptions" radio group, indented under and only interactive while Allow Manual Modification is off. Consumed by `AutoPlayController::playPauseAllowed()`/`trackNavigationAllowed()` (see UC-16). |
-| `bigCoverPaneConfigured` / `bigCoverPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable BigCoverWindow pane's last-saved geometry (defaults `400`×`400`, `configured` starts `false`). See UC below. |
+| `bigCoverPaneConfigured` / `bigCoverPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable BigCoverWindow pane's last-saved geometry (defaults `400`×`400`, `configured` starts `false`). See UC-17. |
 | `saveBigCoverPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles; `screenName` is stored for completeness/debugging but not re-exposed as its own property. Auto-saves. Called from `Main.qml`'s `Loader` on `FloatingPane.geometrySettled()`. |
+| `tagInfoPaneConfigured` / `tagInfoPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable TagInfoWindow pane's last-saved geometry (defaults `460`×`230`, `configured` starts `false`). Same convention as `bigCoverPane*` above. See UC-18. |
+| `saveTagInfoPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles. Same calling convention as `saveBigCoverPaneGeometry`. |
 | `save()` | Persist current state to `Topaz.config` (called automatically by all mutators). |
 
 ## Data Flow: Genre Filter (GenreBar toggle)
@@ -1385,6 +1394,10 @@ explicitly. See UC-15 for the full crossfade flow.
 | `currentTitle` | `QString` | Title of the current track |
 | `currentArtist` | `QString` | artist (falls back to albumArtist) of the current track |
 | `currentAlbum` | `QString` | Album name of the current track |
+| `currentAlbumArtist` | `QString` | Album artist of the current track (added for `TagInfoWindow`, UC-18) |
+| `currentGenre` | `QString` | Genre tag of the current track (added for `TagInfoWindow`, UC-18) |
+| `currentYear` | `int` | Release year of the current track, `0` if unknown (added for `TagInfoWindow`, UC-18) |
+| `currentTrackNumber` | `int` | Track number of the current track, `0` if unknown (added for `TagInfoWindow`, UC-18) |
 | `currentFormat` | `QString` | "FLAC", "MP3", or "OPUS" derived from file extension |
 | `currentBitrate` | `int` | kbps bitrate of the current track |
 | `currentRating` | `int` | Rating (0-10; 0 = unrated) of the current track. Resolved in `loadTrack()` via `TrackInfo::computeRatingId()` + `RatingCache::load()` — the single canonical point regardless of how the track reached the queue (see UC-14). |
@@ -1413,6 +1426,16 @@ explicitly. See UC-15 for the full crossfade flow.
 | `next()` | invokable | Advance to the next track |
 | `previous()` | invokable | Restart or go to previous track |
 | `seek(ms)` | invokable | Seek to a position in milliseconds |
+
+**`year` field threading (added for `TagInfoWindow`, UC-18)**: `TrackInfo::year` was
+always populated by the scanner, but the `QVariantMap`s built to queue a track never
+carried a `"year"` key — `trackFromMap()` (used by `addTrack`/`addTracks`) simply had
+nothing to read. Fixed by threading `"year"` through the three call sites that build
+these maps: `LibraryModel::filteredAlbums()`'s per-track map (used when queueing from
+`AlbumCard`), `LibraryModel::autoPlayCandidatePool()` (used by AUTO PLAY), and
+`PlaylistManager::loadPlaylist()`'s per-entry map (re-read live from the file via
+`TagReader::read()`). No scanner or cache-schema change — the data already existed in
+`TrackInfo`, it just wasn't being copied into the maps that cross into the queue.
 
 ### Queue model roles (used by PlaybackQueue.qml delegate)
 
@@ -2370,4 +2393,112 @@ and fixed once this session).
 - Whether the pane reopens automatically on the next app launch was deliberately
   left as "no" — only geometry is persisted, not open/closed state; every launch
   starts with the pane closed until the user clicks the cover again.
+
+## UC-18 Detachable Panes (Tag Information)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | User detaches the current track's tag metadata (title, artist, album, genre, year, track, duration, format, bitrate) into its own frameless, movable, freely-resizable window, whose content (fonts/spacing) scales smoothly with the pane's size. |
+| **Actor** | User |
+| **Precondition** | Topaz is running. |
+| **Trigger** | User clicks the "TAG INFORMATION" button in `BottomBar`. |
+
+Second pane built on the `FloatingPane.qml` base introduced for UC-17 — see that
+section for the shared chrome (move via `startSystemMove()`, right-click-to-close,
+geometry-persistence debounce, `Popup`-vs-`Window` rationale) and the QML
+Component-root scoping gotcha, which applies identically here. This section only
+covers what's specific to `TagInfoWindow.qml`.
+
+### `PlaybackEngine` — new metadata getters
+
+Four new one-line getters were added, mirroring the existing `currentAlbum()`/
+`currentFormat()` pattern exactly (`currentAlbumArtist`, `currentGenre`,
+`currentYear`, `currentTrackNumber`; see the `PlaybackEngine` Public API table
+above) — all reusing the existing `currentTrackChanged` signal, no new signal
+needed. Scope was deliberately kept to metadata Topaz already scans: the mockup
+this pane was built from also showed total-track-count ("01 / 22") and sample
+rate/bit depth ("24-bit/96kHz"), both skipped since neither exists anywhere in
+`TrackInfo` today — adding them would mean scanner/`TagReader`/cache-schema changes,
+a separate, larger piece of work than this pane itself.
+
+While wiring `currentYear`, a real (if minor) gap was found and fixed: `TrackInfo::year`
+was always populated by the scanner but never threaded through the `QVariantMap`s used
+to queue a track — see the `year` field threading note in the `PlaybackEngine` Public
+API section above.
+
+### `TagInfoWindow.qml`
+
+A `FloatingPane` specialization with **no `fixedAspectRatio`** (unlike the square
+`BigCoverWindow`) — free resize via `startSystemResize()`, default size 460×230.
+Went through two rounds of shrinking: 460×420 (original) → 460×280 → 460×230, each
+time reducing the default and tightening internal padding/spacing/the specs-box
+height, since content sitting in a top-anchored `Column` with no explicit height
+never grows to fill the pane — any extra height just shows through as empty themed
+background below the technical-specs box. **The pane's *saved* geometry
+(`Topaz.config`'s `tagInfoPane` entry) always wins over this default once the user
+has resized the pane even once** — confirmed directly from a real user's config
+during round 2 (a genuine 1658×592 saved size on real hardware) — so shrinking the
+default only affects a pane that's never been touched; an already-resized pane needs
+a manual resize-down to benefit from a tighter default.
+
+**Content scales with pane size**: a single computed property,
+```qml
+readonly property real scaleFactor:
+    Math.max(0.55, Math.min(2.2, Math.min(width / 460, height / 230)))
+```
+multiplies every `font.pixelSize` and layout padding/spacing value in the pane. It's
+derived from *both* width and height (via `Math.min`) so a pane resized narrow-but-tall
+or short-but-wide doesn't overflow in the constrained dimension; clamped to `[0.55,
+2.2]` so text never becomes unreadably tiny or absurdly oversized at extreme sizes.
+
+Layout, adapted from a user-supplied mockup (`code.html`/`DESIGN.md`) but built with
+this codebase's own `Theme.*` tokens rather than the mockup's hardcoded hex/Tailwind
+values: a thin header strip ("ⓘ TAG INFORMATION"), a title row (large uppercase title
++ a format-badge pill reusing `NowPlaying`'s visual, `engine.currentFormat`), an
+artist subtitle (same expression `NowPlaying.qml` uses), a divider, a 2-column
+metadata grid (Album / Album Artist / Genre / Year — each field elides long values
+with a `ToolTip` showing the full string on hover), and a bordered technical-specs
+box (Track / Duration / Bitrate, 3 columns with 1px vertical dividers). Two small
+inline QML `component`s (`MetadataField`, `SpecField`, Qt 6.4+ syntax) factor out the
+repeated label-over-value markup without needing separate files/module registration.
+Placeholder state (no track loaded) reuses the same gradient+glyph idiom as
+`BigCoverWindow.qml`'s placeholder.
+
+### `BottomBar.qml` — TAG INFORMATION toggle wiring
+
+The "TAG INFORMATION" button already existed in `BottomBar`'s button model (icon `ⓘ`)
+but was previously a no-op. Two toggle-button idioms already existed in this file
+before this change — AUTO PLAY (Main.qml owns a full controller object with gating
+logic; the button reads `autoPlay.active` and calls `autoPlay.toggle()`) and SCAN
+DIRECTORIES (Main.qml owns a plain bool; the button just emits `scanRequested()` and
+reflects the externally-bound `scanning` property back). TAG INFORMATION follows the
+**SCAN DIRECTORIES** idiom — there's no gating logic here, just open/closed — via a
+new `signal tagInfoToggleRequested()` and `property bool tagInfoPaneOpen` (bound from
+`Main.qml`), with the button's color reading `tagInfoPaneOpen` the same way the
+generic `modelData.active` path already did.
+
+### `Main.qml` wiring
+
+Exact structural mirror of the `bigCoverLoader` block from UC-17 (`tagInfoLoader` /
+`tagInfoPaneOpen` / `TagInfoWindow` in place of `bigCoverLoader` / `bigCoverPaneOpen`
+/ `BigCoverWindow`), including the same `Loader.onLoaded: { item.engine = engine }`
+pattern (required for the same Component-root scoping reason as UC-17), the same
+`rectIntersectsAnyScreen()` reuse for geometry restore/validation, and the same
+`raise()`/`requestActivate()` after `visible = true`. Default size on first-ever-open
+(no saved geometry yet) is 460×230, centered on the primary screen.
+
+### `AppConfig` — `tagInfoPane` persistence
+
+Exact mirror of the `bigCoverPane` persistence block from UC-17 — nested JSON object,
+key *presence* (not a stored bool) means "configured," `Q_PROPERTY`s are `READ`-only
+with a single `NOTIFY tagInfoPaneChanged`, mutated only via `Q_INVOKABLE
+saveTagInfoPaneGeometry(...)`. See the `AppConfig` public API table and Config file
+format section above.
+
+### Known limitations (not fixed, not requested)
+
+Same as UC-17's: no live handling of screen-configuration changes while the pane is
+open (only restore-at-open is validated against connected screens), and open/closed
+state is not persisted across app restarts — every launch starts with the pane
+closed.
 

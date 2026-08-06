@@ -254,6 +254,21 @@ void AppConfig::saveBigCoverPaneGeometry(int x, int y, int width, int height,
     save();
 }
 
+// ── Tag info pane geometry ──────────────────────────────────────────────────
+
+void AppConfig::saveTagInfoPaneGeometry(int x, int y, int width, int height,
+                                         const QString &screenName)
+{
+    m_tagInfoPaneConfigured = true;
+    m_tagInfoPaneX          = x;
+    m_tagInfoPaneY          = y;
+    m_tagInfoPaneWidth      = width;
+    m_tagInfoPaneHeight     = height;
+    m_tagInfoPaneScreenName = screenName;
+    emit tagInfoPaneChanged();
+    save();
+}
+
 // ── Persistence ───────────────────────────────────────────────────────────
 
 void AppConfig::load()
@@ -320,6 +335,14 @@ void AppConfig::load()
     m_bigCoverPaneWidth      = bigCoverPane[QStringLiteral("width")].toInt(400);
     m_bigCoverPaneHeight     = bigCoverPane[QStringLiteral("height")].toInt(400);
     m_bigCoverPaneScreenName = bigCoverPane[QStringLiteral("screenName")].toString();
+
+    m_tagInfoPaneConfigured = root.contains(QStringLiteral("tagInfoPane"));
+    const QJsonObject tagInfoPane = root[QStringLiteral("tagInfoPane")].toObject();
+    m_tagInfoPaneX          = tagInfoPane[QStringLiteral("x")].toInt(0);
+    m_tagInfoPaneY          = tagInfoPane[QStringLiteral("y")].toInt(0);
+    m_tagInfoPaneWidth      = tagInfoPane[QStringLiteral("width")].toInt(460);
+    m_tagInfoPaneHeight     = tagInfoPane[QStringLiteral("height")].toInt(230);
+    m_tagInfoPaneScreenName = tagInfoPane[QStringLiteral("screenName")].toString();
 }
 
 void AppConfig::save()
@@ -371,6 +394,16 @@ void AppConfig::save()
         bigCoverPane[QStringLiteral("height")]     = m_bigCoverPaneHeight;
         bigCoverPane[QStringLiteral("screenName")] = m_bigCoverPaneScreenName;
         root[QStringLiteral("bigCoverPane")] = bigCoverPane;
+    }
+
+    if (m_tagInfoPaneConfigured) {
+        QJsonObject tagInfoPane;
+        tagInfoPane[QStringLiteral("x")]          = m_tagInfoPaneX;
+        tagInfoPane[QStringLiteral("y")]          = m_tagInfoPaneY;
+        tagInfoPane[QStringLiteral("width")]      = m_tagInfoPaneWidth;
+        tagInfoPane[QStringLiteral("height")]     = m_tagInfoPaneHeight;
+        tagInfoPane[QStringLiteral("screenName")] = m_tagInfoPaneScreenName;
+        root[QStringLiteral("tagInfoPane")] = tagInfoPane;
     }
 
     QFile f(configFilePath());

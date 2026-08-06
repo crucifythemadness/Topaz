@@ -20,7 +20,9 @@
 //                    "allowManualModification": false, "songRepeat": "once",
 //                    "transportAccess": "nothing" },
 //     "bigCoverPane": { "x": 100, "y": 100, "width": 400, "height": 400,
-//                       "screenName": "DISPLAY1" }
+//                       "screenName": "DISPLAY1" },
+//     "tagInfoPane": { "x": 100, "y": 100, "width": 460, "height": 230,
+//                      "screenName": "DISPLAY1" }
 //   }
 // autoPlaySongRepeat allowed values: "once", "twice", "twiceIfNoneAvailable", "several".
 // autoPlayTransportAccess allowed values: "nothing", "playPause", "playPauseAndSelect"
@@ -73,6 +75,14 @@ class AppConfig : public QObject
     Q_PROPERTY(int  bigCoverPaneWidth      READ bigCoverPaneWidth      NOTIFY bigCoverPaneChanged)
     Q_PROPERTY(int  bigCoverPaneHeight     READ bigCoverPaneHeight     NOTIFY bigCoverPaneChanged)
 
+    // ── Detachable "tag info" pane geometry (see FloatingPane.qml / TagInfoWindow.qml) ──
+    // Same READ-only + Q_INVOKABLE-setter convention as bigCoverPane above.
+    Q_PROPERTY(bool tagInfoPaneConfigured READ tagInfoPaneConfigured NOTIFY tagInfoPaneChanged)
+    Q_PROPERTY(int  tagInfoPaneX          READ tagInfoPaneX          NOTIFY tagInfoPaneChanged)
+    Q_PROPERTY(int  tagInfoPaneY          READ tagInfoPaneY          NOTIFY tagInfoPaneChanged)
+    Q_PROPERTY(int  tagInfoPaneWidth      READ tagInfoPaneWidth      NOTIFY tagInfoPaneChanged)
+    Q_PROPERTY(int  tagInfoPaneHeight     READ tagInfoPaneHeight     NOTIFY tagInfoPaneChanged)
+
 public:
     explicit AppConfig(QObject *parent = nullptr);
 
@@ -102,6 +112,12 @@ public:
     int  bigCoverPaneY()          const { return m_bigCoverPaneY;          }
     int  bigCoverPaneWidth()      const { return m_bigCoverPaneWidth;      }
     int  bigCoverPaneHeight()     const { return m_bigCoverPaneHeight;     }
+
+    bool tagInfoPaneConfigured() const { return m_tagInfoPaneConfigured; }
+    int  tagInfoPaneX()          const { return m_tagInfoPaneX;          }
+    int  tagInfoPaneY()          const { return m_tagInfoPaneY;          }
+    int  tagInfoPaneWidth()      const { return m_tagInfoPaneWidth;      }
+    int  tagInfoPaneHeight()     const { return m_tagInfoPaneHeight;     }
 
     // ── Genre operations ─────────────────────────────────────────────────
     Q_INVOKABLE void addGenre(const QString &name);
@@ -156,6 +172,11 @@ public:
     Q_INVOKABLE void saveBigCoverPaneGeometry(int x, int y, int width, int height,
                                                const QString &screenName);
 
+    // ── Tag info pane geometry ───────────────────────────────────────────
+    // Same calling convention as saveBigCoverPaneGeometry above.
+    Q_INVOKABLE void saveTagInfoPaneGeometry(int x, int y, int width, int height,
+                                              const QString &screenName);
+
     // ── Persistence ──────────────────────────────────────────────────────
     Q_INVOKABLE void save();
 
@@ -174,6 +195,7 @@ signals:
     void autoPlaySongRepeatChanged();
     void autoPlayTransportAccessChanged();
     void bigCoverPaneChanged();
+    void tagInfoPaneChanged();
 
 private:
     void    load();
@@ -207,4 +229,11 @@ private:
     int     m_bigCoverPaneWidth      = 400;
     int     m_bigCoverPaneHeight     = 400;
     QString m_bigCoverPaneScreenName;
+
+    bool    m_tagInfoPaneConfigured = false;
+    int     m_tagInfoPaneX          = 0;
+    int     m_tagInfoPaneY          = 0;
+    int     m_tagInfoPaneWidth      = 460;
+    int     m_tagInfoPaneHeight     = 230;
+    QString m_tagInfoPaneScreenName;
 };

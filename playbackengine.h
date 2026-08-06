@@ -55,6 +55,10 @@ class PlaybackEngine : public QAbstractListModel
     Q_PROPERTY(QString currentTitle     READ currentTitle     NOTIFY currentTrackChanged)
     Q_PROPERTY(QString currentArtist    READ currentArtist    NOTIFY currentTrackChanged)
     Q_PROPERTY(QString currentAlbum     READ currentAlbum     NOTIFY currentTrackChanged)
+    Q_PROPERTY(QString currentAlbumArtist READ currentAlbumArtist NOTIFY currentTrackChanged)
+    Q_PROPERTY(QString currentGenre     READ currentGenre     NOTIFY currentTrackChanged)
+    Q_PROPERTY(int     currentYear      READ currentYear      NOTIFY currentTrackChanged)
+    Q_PROPERTY(int     currentTrackNumber READ currentTrackNumber NOTIFY currentTrackChanged)
     Q_PROPERTY(QString currentFormat    READ currentFormat    NOTIFY currentTrackChanged)
     Q_PROPERTY(int     currentBitrate   READ currentBitrate   NOTIFY currentTrackChanged)
     Q_PROPERTY(int     currentRating    READ currentRating    NOTIFY currentRatingChanged)
@@ -100,6 +104,10 @@ public:
     QString currentTitle()      const;
     QString currentArtist()     const;
     QString currentAlbum()      const;
+    QString currentAlbumArtist() const;
+    QString currentGenre()      const;
+    int     currentYear()       const;
+    int     currentTrackNumber() const;
     QString currentFormat()     const;
     int     currentBitrate()    const;
     int     currentRating()     const;   // 0-10; 0 if no track loaded or unrated

@@ -96,6 +96,46 @@ ApplicationWindow {
         }
     }
 
+    // ── Detachable "tag info" pane ───────────────────────────────────────
+    // Opened by toggling the "TAG INFORMATION" button in BottomBar; see
+    // FloatingPane.qml / TagInfoWindow.qml for the pane itself. Mirrors the
+    // bigCoverLoader wiring above exactly (same engine-binding scoping
+    // gotcha applies — see the onLoaded comment above).
+    property bool tagInfoPaneOpen: false
+
+    Loader {
+        id: tagInfoLoader
+        active: root.tagInfoPaneOpen
+        onLoaded: { if (item) item.engine = engine }
+
+        sourceComponent: TagInfoWindow {
+            id: tagInfoWindow
+
+            Component.onCompleted: {
+                if (appConfig.tagInfoPaneConfigured &&
+                    root.rectIntersectsAnyScreen(appConfig.tagInfoPaneX, appConfig.tagInfoPaneY,
+                                                  appConfig.tagInfoPaneWidth, appConfig.tagInfoPaneHeight)) {
+                    width  = appConfig.tagInfoPaneWidth
+                    height = appConfig.tagInfoPaneHeight
+                    x      = appConfig.tagInfoPaneX
+                    y      = appConfig.tagInfoPaneY
+                } else {
+                    width  = 460
+                    height = 230
+                    x = Screen.virtualX + (Screen.width  - width)  / 2
+                    y = Screen.virtualY + (Screen.height - height) / 2
+                }
+                visible = true
+                raise()
+                requestActivate()
+            }
+
+            onGeometrySettled: (x, y, width, height, screenName) =>
+                appConfig.saveTagInfoPaneGeometry(x, y, width, height, screenName)
+            onCloseRequested: root.tagInfoPaneOpen = false
+        }
+    }
+
     // Shared data model — owns genre toggle state and mock library.
     // Passed as `lib` property to GenreBar, LibraryTree, AlbumBrowser.
     AppConfig  { id: appConfig }
@@ -232,7 +272,9 @@ ApplicationWindow {
             scanning: libraryModel.scanning
             autoPlayReady: libraryModel.ratingsReady
             autoPlay: autoPlay
+            tagInfoPaneOpen: root.tagInfoPaneOpen
             onScanRequested: libraryModel.startFullScan()
+            onTagInfoToggleRequested: root.tagInfoPaneOpen = !root.tagInfoPaneOpen
         }
     }
 }

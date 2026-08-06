@@ -60,6 +60,7 @@ qt_add_qml_module(topaz
         MessageBox.qml
         FloatingPane.qml
         BigCoverWindow.qml
+        TagInfoWindow.qml
     RESOURCES
         app.ico
 )

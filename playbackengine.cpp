@@ -168,6 +168,30 @@ QString PlaybackEngine::currentAlbum() const
     return m_queue.at(m_currentIndex).album;
 }
 
+QString PlaybackEngine::currentAlbumArtist() const
+{
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
+    return m_queue.at(m_currentIndex).albumArtist;
+}
+
+QString PlaybackEngine::currentGenre() const
+{
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
+    return m_queue.at(m_currentIndex).genre;
+}
+
+int PlaybackEngine::currentYear() const
+{
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return 0;
+    return m_queue.at(m_currentIndex).year;
+}
+
+int PlaybackEngine::currentTrackNumber() const
+{
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return 0;
+    return m_queue.at(m_currentIndex).track;
+}
+
 QString PlaybackEngine::currentFormat() const
 {
     if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
@@ -207,6 +231,7 @@ TrackInfo PlaybackEngine::trackFromMap(const QVariantMap &map)
                                map.value(QStringLiteral("artist"))).toString();
     t.album       = map.value(QStringLiteral("album")).toString();
     t.genre       = map.value(QStringLiteral("genre")).toString();
+    t.year        = map.value(QStringLiteral("year")).toInt();
     t.bitrate     = map.value(QStringLiteral("bitrate")).toInt();
     t.track       = map.value(QStringLiteral("number")).toString().toInt();
     t.duration    = map.value(QStringLiteral("durationMs")).toLongLong();

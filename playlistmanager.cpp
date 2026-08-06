@@ -380,6 +380,7 @@ QVariantMap PlaylistManager::loadPlaylist(const QString &filePath)
         m[QStringLiteral("albumArtist")] = tag.albumArtist.isEmpty() ? e.creator : tag.albumArtist;
         m[QStringLiteral("album")]       = tag.album.isEmpty()  ? e.album   : tag.album;
         m[QStringLiteral("genre")]       = tag.genre;
+        m[QStringLiteral("year")]        = tag.year;
 
         const int tn = tag.track > 0 ? tag.track : e.trackNum.toInt();
         m[QStringLiteral("number")]      = tn;

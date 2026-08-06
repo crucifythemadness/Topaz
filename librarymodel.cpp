@@ -370,6 +370,7 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
             tm[QStringLiteral("albumArtist")] = t->albumArtist;
             tm[QStringLiteral("album")]       = t->album;
             tm[QStringLiteral("genre")]       = t->genre;
+            tm[QStringLiteral("year")]        = t->year;
             tm[QStringLiteral("coverSource")] = coverSrc; // set directly – no post-loop needed
             trackList.append(tm);
         }
@@ -429,6 +430,7 @@ QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres
         tm[QStringLiteral("albumArtist")] = t.albumArtist;
         tm[QStringLiteral("album")]       = t.album;
         tm[QStringLiteral("genre")]       = t.genre;
+        tm[QStringLiteral("year")]        = t.year;
         tm[QStringLiteral("durationMs")]  = static_cast<qlonglong>(t.duration);
         tm[QStringLiteral("bitrate")]     = t.bitrate;
         tm[QStringLiteral("rating")]      = t.rating;
