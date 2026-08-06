@@ -1,0 +1,241 @@
+import QtQuick
+import QtQuick.Window
+
+// ── FloatingPane ─────────────────────────────────────────────────────────
+// Reusable base for detachable, frameless, movable, resizable panes that can
+// be dragged onto any connected screen (a plain QtQuick Popup can't leave its
+// owning ApplicationWindow's surface, so this is a genuine second top-level
+// Window instead). First user: BigCoverWindow.qml. More are planned later
+// (tag info, audio visualizers) — keep this generic, no AppConfig/persistence
+// logic here; that's the owner's responsibility via geometrySettled().
+//
+// Usage (see BigCoverWindow.qml):
+//   FloatingPane {
+//       Image { ... }   // becomes a child of the content area via the
+//   }                   // default property alias below
+//
+// Interaction:
+//   - Left-press anywhere (except the resize edges) starts an OS-native
+//     interactive move (Window.startSystemMove()); pointing-hand cursor,
+//     matching NowPlaying's Play/Pause.
+//   - Right-click anywhere emits closeRequested() — this pane does not close
+//     itself; the owner (typically a Loader) decides what "closed" means.
+//   - Dragging any of the 8 edge/corner zones resizes the pane, with the
+//     matching cursor shape. When fixedAspectRatio is 0 (default) this uses
+//     an OS-native interactive resize (Window.startSystemResize()); when set,
+//     see "Aspect-locked resize" below — startSystemResize() hands the whole
+//     interactive gesture to the OS window manager, so there's no way to
+//     constrain intermediate frames of it, which is why locking requires a
+//     completely different, manually-tracked mechanism.
+//   - Any settled change to x/y/width/height (debounced 500ms, same pattern
+//     as Main.qml's saveLayoutTimer) emits geometrySettled() for the owner to
+//     persist.
+Window {
+    id: pane
+
+    default property alias contentData: contentItem.data
+
+    property int minPaneWidth:  120
+    property int minPaneHeight: 120
+    property int gripSize: 8
+
+    // 0 (default) = free resize via native startSystemResize(). Otherwise the
+    // width/height ratio to maintain while resizing (e.g. 1.0 for a square
+    // pane) — see "Aspect-locked resize" below. Generic on purpose: any
+    // future FloatingPane subclass can opt in, not just square ones.
+    property real fixedAspectRatio: 0
+
+    flags: Qt.Window | Qt.FramelessWindowHint
+    minimumWidth:  minPaneWidth
+    minimumHeight: minPaneHeight
+
+    // Explicit default (rather than relying on Window's own default, which
+    // isn't guaranteed the same across Qt versions/contexts): stay hidden
+    // until the owner has positioned the pane, so it never flashes into view
+    // at a default position before Component.onCompleted repositions it.
+    visible: false
+
+    signal closeRequested()
+    signal geometrySettled(int x, int y, int width, int height, string screenName)
+
+    Item {
+        id: contentItem
+        anchors.fill: parent
+    }
+
+    // Move (whole pane) + close (right-click). Declared before the resize
+    // grips below so they naturally stack above it for their thin strips.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onPressed: (mouse) => {
+            if (mouse.button === Qt.LeftButton) pane.startSystemMove()
+        }
+        onClicked: (mouse) => {
+            if (mouse.button === Qt.RightButton) pane.closeRequested()
+        }
+    }
+
+    // ── Aspect-locked resize (only used while fixedAspectRatio > 0) ──────
+    // Tracks the drag using global cursor coordinates (via mapToGlobal),
+    // never the grip's own local mouse.x/y — the grip itself moves as the
+    // window resizes, so accumulating local per-frame deltas would drift;
+    // recomputing from the fixed press-time global position each move does
+    // not. xAnchorRight/yAnchorBottom say which corner of the pane stays
+    // fixed (true = right/bottom edge fixed, so the left/top edge is the one
+    // that moves); useX/useY say which mouse-delta axis this grip's growth
+    // amount is drawn from (edges use one axis; corners use both, taking
+    // whichever grew the pane more, via Math.max).
+    property real _dragPressGlobalX: 0
+    property real _dragPressGlobalY: 0
+    property real _dragStartX: 0
+    property real _dragStartY: 0
+    property real _dragStartSize: 0
+
+    function beginAspectResize(item, mouse) {
+        const g = item.mapToGlobal(mouse.x, mouse.y)
+        pane._dragPressGlobalX = g.x
+        pane._dragPressGlobalY = g.y
+        pane._dragStartX = pane.x
+        pane._dragStartY = pane.y
+        pane._dragStartSize = pane.width   // width === height, already square
+    }
+
+    function updateAspectResize(item, mouse, xAnchorRight, yAnchorBottom, useX, useY) {
+        const g = item.mapToGlobal(mouse.x, mouse.y)
+        const growthX = xAnchorRight ? (pane._dragPressGlobalX - g.x) : (g.x - pane._dragPressGlobalX)
+        const growthY = yAnchorBottom ? (pane._dragPressGlobalY - g.y) : (g.y - pane._dragPressGlobalY)
+        const growth = (useX && useY) ? Math.max(growthX, growthY) : (useX ? growthX : growthY)
+        const newSize = Math.max(pane.minPaneWidth, pane._dragStartSize + growth)
+        pane.width  = newSize
+        pane.height = newSize
+        pane.x = xAnchorRight ? (pane._dragStartX + pane._dragStartSize) - newSize : pane._dragStartX
+        pane.y = yAnchorBottom ? (pane._dragStartY + pane._dragStartSize) - newSize : pane._dragStartY
+    }
+
+    // ── Resize edges/corners ────────────────────────────────────────────
+    MouseArea {
+        id: topGrip
+        anchors { top: parent.top; left: parent.left; right: parent.right
+                  leftMargin: pane.gripSize; rightMargin: pane.gripSize }
+        height: pane.gripSize
+        cursorShape: Qt.SizeVerCursor
+        onPressed: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.beginAspectResize(topGrip, mouse)
+            else pane.startSystemResize(Qt.TopEdge)
+        }
+        onPositionChanged: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.updateAspectResize(topGrip, mouse, true, true, false, true)
+        }
+    }
+    MouseArea {
+        id: bottomGrip
+        anchors { bottom: parent.bottom; left: parent.left; right: parent.right
+                  leftMargin: pane.gripSize; rightMargin: pane.gripSize }
+        height: pane.gripSize
+        cursorShape: Qt.SizeVerCursor
+        onPressed: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.beginAspectResize(bottomGrip, mouse)
+            else pane.startSystemResize(Qt.BottomEdge)
+        }
+        onPositionChanged: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.updateAspectResize(bottomGrip, mouse, false, false, false, true)
+        }
+    }
+    MouseArea {
+        id: leftGrip
+        anchors { left: parent.left; top: parent.top; bottom: parent.bottom
+                  topMargin: pane.gripSize; bottomMargin: pane.gripSize }
+        width: pane.gripSize
+        cursorShape: Qt.SizeHorCursor
+        onPressed: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.beginAspectResize(leftGrip, mouse)
+            else pane.startSystemResize(Qt.LeftEdge)
+        }
+        onPositionChanged: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.updateAspectResize(leftGrip, mouse, true, true, true, false)
+        }
+    }
+    MouseArea {
+        id: rightGrip
+        anchors { right: parent.right; top: parent.top; bottom: parent.bottom
+                  topMargin: pane.gripSize; bottomMargin: pane.gripSize }
+        width: pane.gripSize
+        cursorShape: Qt.SizeHorCursor
+        onPressed: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.beginAspectResize(rightGrip, mouse)
+            else pane.startSystemResize(Qt.RightEdge)
+        }
+        onPositionChanged: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.updateAspectResize(rightGrip, mouse, false, false, true, false)
+        }
+    }
+    MouseArea {
+        id: topLeftGrip
+        anchors { top: parent.top; left: parent.left }
+        width: pane.gripSize; height: pane.gripSize
+        cursorShape: Qt.SizeFDiagCursor
+        onPressed: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.beginAspectResize(topLeftGrip, mouse)
+            else pane.startSystemResize(Qt.TopEdge | Qt.LeftEdge)
+        }
+        onPositionChanged: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.updateAspectResize(topLeftGrip, mouse, true, true, true, true)
+        }
+    }
+    MouseArea {
+        id: bottomRightGrip
+        anchors { bottom: parent.bottom; right: parent.right }
+        width: pane.gripSize; height: pane.gripSize
+        cursorShape: Qt.SizeFDiagCursor
+        onPressed: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.beginAspectResize(bottomRightGrip, mouse)
+            else pane.startSystemResize(Qt.BottomEdge | Qt.RightEdge)
+        }
+        onPositionChanged: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.updateAspectResize(bottomRightGrip, mouse, false, false, true, true)
+        }
+    }
+    MouseArea {
+        id: topRightGrip
+        anchors { top: parent.top; right: parent.right }
+        width: pane.gripSize; height: pane.gripSize
+        cursorShape: Qt.SizeBDiagCursor
+        onPressed: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.beginAspectResize(topRightGrip, mouse)
+            else pane.startSystemResize(Qt.TopEdge | Qt.RightEdge)
+        }
+        onPositionChanged: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.updateAspectResize(topRightGrip, mouse, false, true, true, true)
+        }
+    }
+    MouseArea {
+        id: bottomLeftGrip
+        anchors { bottom: parent.bottom; left: parent.left }
+        width: pane.gripSize; height: pane.gripSize
+        cursorShape: Qt.SizeBDiagCursor
+        onPressed: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.beginAspectResize(bottomLeftGrip, mouse)
+            else pane.startSystemResize(Qt.BottomEdge | Qt.LeftEdge)
+        }
+        onPositionChanged: (mouse) => {
+            if (pane.fixedAspectRatio > 0) pane.updateAspectResize(bottomLeftGrip, mouse, true, false, true, true)
+        }
+    }
+
+    // ── Geometry persistence hook ────────────────────────────────────────
+    onXChanged:      geometryTimer.restart()
+    onYChanged:      geometryTimer.restart()
+    onWidthChanged:  geometryTimer.restart()
+    onHeightChanged: geometryTimer.restart()
+
+    Timer {
+        id: geometryTimer
+        interval: 500
+        repeat: false
+        onTriggered: pane.geometrySettled(pane.x, pane.y, pane.width, pane.height,
+                                           pane.screen ? pane.screen.name : "")
+    }
+}

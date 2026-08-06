@@ -18,13 +18,17 @@
 //                    "considerGenre": false,
 //                    "considerRating": false, "minimumRating": 5,
 //                    "allowManualModification": false, "songRepeat": "once",
-//                    "transportAccess": "nothing" }
+//                    "transportAccess": "nothing" },
+//     "bigCoverPane": { "x": 100, "y": 100, "width": 400, "height": 400,
+//                       "screenName": "DISPLAY1" }
 //   }
 // autoPlaySongRepeat allowed values: "once", "twice", "twiceIfNoneAvailable", "several".
 // autoPlayTransportAccess allowed values: "nothing", "playPause", "playPauseAndSelect"
 // (only consulted while autoPlayAllowManualModification is false).
 // Settings are grouped into a nested object per SetupDialog tab (crossfade, autoPlay);
-// genres/folders/window-layout stay flat at the top level.
+// genres/folders/window-layout stay flat at the top level. bigCoverPane is also
+// nested (its presence in the file means "has been positioned before" — absence
+// means first-ever open, so QML uses a centered default instead of x/y).
 //
 // Instantiated in Main.qml as:  AppConfig { id: appConfig }
 // Passed to LibraryData and SetupDialog via property binding.
@@ -58,6 +62,17 @@ class AppConfig : public QObject
     Q_PROPERTY(QString autoPlaySongRepeat            READ autoPlaySongRepeat               NOTIFY autoPlaySongRepeatChanged)
     Q_PROPERTY(QString autoPlayTransportAccess       READ autoPlayTransportAccess          NOTIFY autoPlayTransportAccessChanged)
 
+    // ── Detachable "big cover" pane geometry (see FloatingPane.qml / BigCoverWindow.qml) ──
+    // READ-only + a single Q_INVOKABLE setter (saveBigCoverPaneGeometry), matching
+    // this codebase's established convention — never Q_PROPERTY WRITE (see the
+    // OS-volume work's Q_PROPERTY-WRITE gotcha: a WRITE-only function isn't itself
+    // callable as obj.setX() from QML unless also Q_INVOKABLE).
+    Q_PROPERTY(bool bigCoverPaneConfigured READ bigCoverPaneConfigured NOTIFY bigCoverPaneChanged)
+    Q_PROPERTY(int  bigCoverPaneX          READ bigCoverPaneX          NOTIFY bigCoverPaneChanged)
+    Q_PROPERTY(int  bigCoverPaneY          READ bigCoverPaneY          NOTIFY bigCoverPaneChanged)
+    Q_PROPERTY(int  bigCoverPaneWidth      READ bigCoverPaneWidth      NOTIFY bigCoverPaneChanged)
+    Q_PROPERTY(int  bigCoverPaneHeight     READ bigCoverPaneHeight     NOTIFY bigCoverPaneChanged)
+
 public:
     explicit AppConfig(QObject *parent = nullptr);
 
@@ -81,6 +96,12 @@ public:
     bool autoPlayAllowManualModification() const { return m_autoPlayAllowManualModification; }
     QString autoPlaySongRepeat()           const { return m_autoPlaySongRepeat;              }
     QString autoPlayTransportAccess()      const { return m_autoPlayTransportAccess;         }
+
+    bool bigCoverPaneConfigured() const { return m_bigCoverPaneConfigured; }
+    int  bigCoverPaneX()          const { return m_bigCoverPaneX;          }
+    int  bigCoverPaneY()          const { return m_bigCoverPaneY;          }
+    int  bigCoverPaneWidth()      const { return m_bigCoverPaneWidth;      }
+    int  bigCoverPaneHeight()     const { return m_bigCoverPaneHeight;     }
 
     // ── Genre operations ─────────────────────────────────────────────────
     Q_INVOKABLE void addGenre(const QString &name);
@@ -127,6 +148,14 @@ public:
     // "playPauseAndSelect".
     Q_INVOKABLE void setAutoPlayTransportAccess(const QString &mode);
 
+    // ── Big cover pane geometry ──────────────────────────────────────────
+    // Called from Main.qml's Loader whenever FloatingPane.geometrySettled()
+    // fires (debounced there, not here). screenName is persisted for
+    // debugging/completeness but not re-exposed as its own Q_PROPERTY —
+    // nothing currently needs to read it back into QML.
+    Q_INVOKABLE void saveBigCoverPaneGeometry(int x, int y, int width, int height,
+                                               const QString &screenName);
+
     // ── Persistence ──────────────────────────────────────────────────────
     Q_INVOKABLE void save();
 
@@ -144,6 +173,7 @@ signals:
     void autoPlayAllowManualModificationChanged();
     void autoPlaySongRepeatChanged();
     void autoPlayTransportAccessChanged();
+    void bigCoverPaneChanged();
 
 private:
     void    load();
@@ -170,4 +200,11 @@ private:
     bool m_autoPlayAllowManualModification  = false;
     QString m_autoPlaySongRepeat            = QStringLiteral("once");
     QString m_autoPlayTransportAccess       = QStringLiteral("nothing");
+
+    bool    m_bigCoverPaneConfigured = false;
+    int     m_bigCoverPaneX          = 0;
+    int     m_bigCoverPaneY          = 0;
+    int     m_bigCoverPaneWidth      = 400;
+    int     m_bigCoverPaneHeight     = 400;
+    QString m_bigCoverPaneScreenName;
 };

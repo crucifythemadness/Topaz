@@ -58,6 +58,8 @@ qt_add_qml_module(topaz
         SetupDialog.qml
         NewPlaylistDialog.qml
         MessageBox.qml
+        FloatingPane.qml
+        BigCoverWindow.qml
     RESOURCES
         app.ico
 )

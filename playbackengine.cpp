@@ -51,9 +51,18 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     connect(&m_coverWatcher, &QFutureWatcher<QByteArray>::finished,
             this, [this]() {
                 const QByteArray raw = m_coverWatcher.result();
-                m_largeCoverSource = raw.isEmpty()
-                    ? QString()
-                    : QStringLiteral("data:image/jpeg;base64,") + raw.toBase64();
+                if (raw.isEmpty()) {
+                    m_largeCoverSource.clear();
+                } else {
+                    // TagReader::readRawCover() returns the embedded cover
+                    // "as-is (JPEG or PNG)" — unlike the always-JPEG-re-
+                    // encoded thumbnail (TagReader::makeCoverThumb()), so the
+                    // MIME type can't be hardcoded here; sniff the actual
+                    // format from the magic bytes instead.
+                    const char *mime = raw.startsWith("\x89PNG") ? "image/png" : "image/jpeg";
+                    m_largeCoverSource = QStringLiteral("data:%1;base64,%2")
+                        .arg(QLatin1String(mime), QString::fromLatin1(raw.toBase64()));
+                }
                 emit currentLargeCoverSourceChanged();
             });
 }

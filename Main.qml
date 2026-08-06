@@ -27,6 +27,75 @@ ApplicationWindow {
                      ? Window.Windowed : Window.FullScreen
     }
 
+    // ── Detachable "big cover" pane ──────────────────────────────────────
+    // Opened by clicking the album cover in NowPlaying (see below); see
+    // FloatingPane.qml / BigCoverWindow.qml for the pane itself.
+    property bool bigCoverPaneOpen: false
+
+    // True if rect (x,y,w,h), in virtual-desktop coordinates, overlaps at
+    // least one currently connected screen — used to validate a saved
+    // position before restoring it (a monitor may have been unplugged or
+    // rearranged since it was last saved).
+    function rectIntersectsAnyScreen(x, y, w, h) {
+        const screens = Qt.application.screens
+        for (let i = 0; i < screens.length; i++) {
+            const s = screens[i]
+            if (x < s.virtualX + s.width && x + w > s.virtualX &&
+                y < s.virtualY + s.height && y + h > s.virtualY)
+                return true
+        }
+        return false
+    }
+
+    Loader {
+        id: bigCoverLoader
+        active: root.bigCoverPaneOpen
+        // engine is deliberately NOT set as a declarative "engine: engine"
+        // binding inside the BigCoverWindow {} block below: that would be a
+        // property assignment on the root object of this Loader's inline
+        // Component, and BigCoverWindow declares its own "property var
+        // engine: null" — in that specific position, QML resolves the
+        // unqualified "engine" against the object's own just-declared
+        // property instead of walking out to this file's "engine" id
+        // (confirmed empirically: it read back as null; appConfig/root, which
+        // have no name collision, resolved fine in the same
+        // Component.onCompleted below). Setting it here in onLoaded — a plain
+        // signal handler on the Loader itself, not inside the Component —
+        // resolves "engine" via this file's normal scope, unambiguously.
+        onLoaded: { if (item) item.engine = engine }
+
+        sourceComponent: BigCoverWindow {
+            id: bigCoverWindow
+
+            Component.onCompleted: {
+                if (appConfig.bigCoverPaneConfigured &&
+                    root.rectIntersectsAnyScreen(appConfig.bigCoverPaneX, appConfig.bigCoverPaneY,
+                                                  appConfig.bigCoverPaneWidth, appConfig.bigCoverPaneHeight)) {
+                    width  = appConfig.bigCoverPaneWidth
+                    height = appConfig.bigCoverPaneHeight
+                    x      = appConfig.bigCoverPaneX
+                    y      = appConfig.bigCoverPaneY
+                } else {
+                    width  = 400
+                    height = 400
+                    x = Screen.virtualX + (Screen.width  - width)  / 2
+                    y = Screen.virtualY + (Screen.height - height) / 2
+                }
+                visible = true
+                // Without this, a newly created sibling window can end up
+                // hidden behind the main window when it's in exclusive
+                // fullscreen (Window.FullScreen) — raise()/requestActivate()
+                // ensure the pane is actually on top and focused when opened.
+                raise()
+                requestActivate()
+            }
+
+            onGeometrySettled: (x, y, width, height, screenName) =>
+                appConfig.saveBigCoverPaneGeometry(x, y, width, height, screenName)
+            onCloseRequested: root.bigCoverPaneOpen = false
+        }
+    }
+
     // Shared data model — owns genre toggle state and mock library.
     // Passed as `lib` property to GenreBar, LibraryTree, AlbumBrowser.
     AppConfig  { id: appConfig }
@@ -154,6 +223,7 @@ ApplicationWindow {
                 autoPlay:        autoPlay
                 onWidthChanged: saveLayoutTimer.restart()
                 onNewPlaylistRequested: newPlaylistDialog.open()
+                onBigCoverRequested: root.bigCoverPaneOpen = true
             }
         }
 

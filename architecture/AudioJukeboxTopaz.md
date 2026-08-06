@@ -335,9 +335,13 @@ Topaz module
 │                         property AppConfig appConfig
 │                         property LibraryModel libraryModel
 ├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, SetupDialog, NewPlaylistDialog
+│                         property bool bigCoverPaneOpen  (toggled by NowPlaying.onBigCoverRequested / BigCoverWindow.onCloseRequested)
+│                         Loader { active: bigCoverPaneOpen; sourceComponent: BigCoverWindow {...} }  — see "Detachable panes" below
 ├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY, see UC-15 / UC-14)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
+├── FloatingPane.qml    Reusable base Window for detachable panes (frameless, movable, resizable, right-click-to-close) — see "Detachable panes" below
+├── BigCoverWindow.qml  FloatingPane specialization: shows only the current track's cover art
 ├── TopBar.qml          Header (logo | navigation tabs | loudspeaker icon + gear icon + avatar)  height 64 px
 │                         property var systemVolume  (bound to SystemVolumeController; drives the OS-Volume flyout, see below)
 │                         signal settingsRequested()  ← gear icon click
@@ -372,6 +376,7 @@ Topaz module
 |                         property playlistManager PlaylistManager
 |                         property var autoPlay  (gates playlist-load add; LOAD and REMOVE buttons are both fully disabled during an active AUTO PLAY session via autoPlay.queueClearAllowed; Play/Pause via autoPlay.playPauseAllowed; Previous/Next via autoPlay.trackNavigationAllowed, see UC-16)
 |                         signal newPlaylistRequested()  <- "+ NEW" button click
+|                         signal bigCoverRequested()  <- left-click on the album cover (pointing-hand cursor, same as Play/Pause); opens the detachable BigCoverWindow pane, see below
 |                         FileDialog loadPlaylistDialog <- opens on LOAD; default folder = playlistDirectory(); filter *.xml
 |                         Playlist row 1: NEW | LOAD (disabled whenever an AUTO PLAY session is active; when enabled, clears active playlist first if one is loaded, then opens file dialog)
 |                         Playlist row 2: EXPORT (permanently disabled — not yet implemented) | REMOVE (active only when playlist loaded AND queue-clear is allowed; routes through autoPlay.clearQueueAndHistory())
@@ -749,6 +754,9 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
         "allowManualModification": false,
         "songRepeat": "once",
         "transportAccess": "nothing"
+    },
+    "bigCoverPane": {
+        "x": 100, "y": 100, "width": 400, "height": 400, "screenName": "DISPLAY1"
     }
 }
 ```
@@ -757,7 +765,10 @@ Settings are grouped into a nested object per `SetupDialog` tab (`crossfade`,
 `autoPlay`); genres/folders/window-layout stay flat at the top level. The
 `AppConfig` property/method names (`crossfadeEnabled`, `crossfadeSeconds`,
 `autoPlayQueueHorizon`, and their setters) are unchanged by this grouping — only the
-on-disk JSON shape differs.
+on-disk JSON shape differs. `bigCoverPane` is also nested; unlike the others, its
+*presence* in the file (not a stored bool) is what "configured" means — absent means
+the pane has never been positioned yet, so `Main.qml` uses a centered default
+instead of `bigCoverPaneX`/`Y` (see UC below).
 
 ### AppConfig public API
 
@@ -781,6 +792,8 @@ on-disk JSON shape differs.
 | `autoPlayAllowManualModification` / `setAutoPlayAllowManualModification(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should allow the user to manually modify its auto-filled queue entries (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Allow Manual Modification"); not yet consumed by any queue-filling or editing logic (see UC-14). |
 | `autoPlaySongRepeat` / `setAutoPlaySongRepeat(mode)` | How many times AUTO PLAY should play a selected track before moving on (default `"once"`); one of `"once"`, `"twice"`, `"twiceIfNoneAvailable"`, `"several"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab radio group ("Play a Title") — the app's first radio-button control; not yet consumed by any selection logic (see UC-14). |
 | `autoPlayTransportAccess` / `setAutoPlayTransportAccess(mode)` | How much manual transport control remains available during an active AUTO PLAY session while `autoPlayAllowManualModification` is off (default `"nothing"`); one of `"nothing"`, `"playPause"`, `"playPauseAndSelect"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab "Exceptions" radio group, indented under and only interactive while Allow Manual Modification is off. Consumed by `AutoPlayController::playPauseAllowed()`/`trackNavigationAllowed()` (see UC-16). |
+| `bigCoverPaneConfigured` / `bigCoverPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable BigCoverWindow pane's last-saved geometry (defaults `400`×`400`, `configured` starts `false`). See UC below. |
+| `saveBigCoverPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles; `screenName` is stored for completeness/debugging but not re-exposed as its own property. Auto-saves. Called from `Main.qml`'s `Loader` on `FloatingPane.geometrySettled()`. |
 | `save()` | Persist current state to `Topaz.config` (called automatically by all mutators). |
 
 ## Data Flow: Genre Filter (GenreBar toggle)
@@ -1376,7 +1389,7 @@ explicitly. See UC-15 for the full crossfade flow.
 | `currentBitrate` | `int` | kbps bitrate of the current track |
 | `currentRating` | `int` | Rating (0-10; 0 = unrated) of the current track. Resolved in `loadTrack()` via `TrackInfo::computeRatingId()` + `RatingCache::load()` — the single canonical point regardless of how the track reached the queue (see UC-14). |
 | `currentCoverSource` | `QString` | `data:image/jpeg;base64,…` cover thumbnail URL — 160×160 px, available immediately |  
-| `currentLargeCoverSource` | `QString` | Full-resolution cover as `data:image/jpeg;base64,…`, loaded asynchronously via `QtConcurrent::run` + `QFutureWatcher`. Empty until the background task completes; `NowPlaying.qml` falls back to `currentCoverSource` in the interim. |
+| `currentLargeCoverSource` | `QString` | Full-resolution cover as a `data:` URL, loaded asynchronously via `QtConcurrent::run` + `QFutureWatcher`. Unlike `currentCoverSource` (always re-encoded to JPEG by `TagReader::makeCoverThumb()`), this is `TagReader::readRawCover()`'s untouched embedded bytes — JPEG *or* PNG — so the MIME type is sniffed from the magic bytes (`\x89PNG` → `image/png`, else `image/jpeg`) rather than hardcoded. Empty until the background task completes; `NowPlaying.qml` falls back to `currentCoverSource` in the interim. |
 | `queueCount` | `int` | Number of tracks in the queue |
 | `activePlaylistName` | `QString` | File name (with `.xml` extension) of the playlist currently associated with the queue; empty when no playlist is active. Displayed in the `PlaybackQueue` header. Cleared automatically when the queue is cleared. |
 | `playlistLocked` | `bool` | When `true`, queue mutations (add, remove, move) do **not** update the XSPF file on disk. Default: `false`. Reset to `false` automatically when `activePlaylistName` changes or `clearQueue()` is called. When set from `true` → `false`, the XSPF is immediately rewritten with the current queue contents. |
@@ -2162,4 +2175,199 @@ gate applied consistently at every QML entry point is simpler and sufficient.
   (filtering, history, starvation, gating) has nothing to do with `QMediaPlayer`, so it
   lives in its own class that calls `PlaybackEngine`'s existing invokables rather than
   growing inside it.
+
+---
+
+## UC-17 Detachable Panes (Big Cover)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | User detaches the current track's cover art into its own frameless, movable, resizable window — usable as a "now playing" signage view on the main display or a second monitor — independent of the main `ApplicationWindow`. |
+| **Actor** | User |
+| **Precondition** | Topaz is running; `NowPlaying`'s album cover is visible. |
+| **Trigger** | User left-clicks the album cover in `NowPlaying` (pointing-hand cursor, same as Play/Pause). |
+
+This is the first of a planned family of detachable panes (tag information with
+larger fonts, audio visualizations are planned next) — the window chrome (move,
+resize, right-click-to-close, geometry persistence) is factored into a reusable
+`FloatingPane.qml` base for that reason, not speculatively.
+
+### Why not a `Popup`
+
+`SetupDialog`/`NewPlaylistDialog`/the OS-Volume flyout (`TopBar.qml`) all use
+QtQuick Controls' `Popup`, but a `Popup` is clipped to and cannot leave its owning
+`ApplicationWindow`'s surface — incompatible with "drag onto a second monitor." This
+pane is instead a genuine second top-level QML `Window`, loaded on demand via a
+`Loader` in `Main.qml` so each open starts from freshly-restored/validated geometry
+rather than carrying stale state between opens.
+
+### `FloatingPane.qml` — reusable chrome
+
+A frameless (`flags: Qt.Window | Qt.FramelessWindowHint`) `Window` base:
+- `default property alias contentData: contentItem.data` — subclasses just nest
+  their content directly inside `FloatingPane { ... }` (see `BigCoverWindow.qml`).
+- **Move**: a whole-pane `MouseArea`'s left-press calls `Window.startSystemMove()` —
+  an OS-native interactive move (Qt 6.8+; confirmed supported on Windows), not manual
+  x/y math, so it's correct across monitors with different DPI/scaling without any
+  extra code. `cursorShape: Qt.PointingHandCursor` + `hoverEnabled: true` on the same
+  `MouseArea`, matching `NowPlaying`'s Play/Pause cursor exactly.
+- **Resize**: eight thin (8px) edge/corner `MouseArea`s with the matching cursor
+  shape (`SizeHorCursor`/`SizeVerCursor`/`SizeFDiagCursor`/`SizeBDiagCursor`). When
+  `fixedAspectRatio` (see below) is `0` (the default), pressing one calls
+  `Window.startSystemResize(Qt.<Edge>)` — OS-native, no visible grip graphics needed
+  beyond the cursor change.
+- **Close**: the same whole-pane `MouseArea`'s right-click emits `closeRequested()`.
+  The pane does not close itself — the owner (the `Loader` in `Main.qml`) decides
+  what "closed" means, currently just `bigCoverPaneOpen = false`.
+- **Persistence hook**: `onXChanged`/`onYChanged`/`onWidthChanged`/`onHeightChanged`
+  restart a 500ms debounce `Timer` (same pattern as `Main.qml`'s `saveLayoutTimer`)
+  that emits `geometrySettled(x, y, width, height, screenName)`. `FloatingPane.qml`
+  itself has no `AppConfig` dependency — generic on purpose, for the panes planned
+  later — the owner wires this signal to actual persistence.
+- Starts `visible: false` explicitly (not relying on `Window`'s own default) so it
+  never flashes at a default position before the owner repositions it.
+
+### Aspect-locked resize (`fixedAspectRatio`)
+
+`property real fixedAspectRatio: 0` — `0` (default) means free resize via
+`startSystemResize()` as above; a positive value is the `width/height` ratio to
+maintain (`1.0` for a square pane like `BigCoverWindow`). Generic on purpose — any
+future `FloatingPane` subclass can opt in, not just square ones.
+
+`startSystemResize()` hands the *entire* interactive resize gesture to the OS window
+manager — Qt/QML gets no opportunity to constrain intermediate frames of it, so it's
+fundamentally incompatible with enforcing a ratio. When `fixedAspectRatio > 0`, the
+8 resize `MouseArea`s switch to a manually-tracked resize instead, computed via
+`Item.mapToGlobal()` — the same "pure mouse-position tracking" idiom `PlaybackQueue`
+already uses for queue-reordering, applied here to window geometry:
+- `onPressed` (`beginAspectResize`) captures the press-time *global* cursor position
+  (`item.mapToGlobal(mouse.x, mouse.y)`) plus the pane's starting `x`/`y`/`width`.
+- `onPositionChanged` (`updateAspectResize`) recomputes geometry from the delta
+  between the *current* global cursor position and that fixed press-time snapshot —
+  deliberately not accumulated per-frame local deltas, which would drift, since the
+  grip itself moves every frame as the window resizes (its anchors are relative to
+  the window's own edges).
+- Each grip is parameterized by which corner of the pane stays fixed
+  (`xAnchorRight`/`yAnchorBottom`) and which mouse-delta axis drives its growth
+  (`useX`/`useY`) — corners use both axes via `Math.max()` (whichever axis moved the
+  cursor further drives the resize); edges use only their own axis but still resize
+  *both* dimensions together (unavoidable once locked to a ratio) — right/bottom
+  edges anchor at top-left, left/top edges anchor at bottom-right, a consistent,
+  predictable convention rather than an arbitrary one.
+- Resulting size is clamped to `minPaneWidth`.
+
+### `BigCoverWindow.qml`
+
+A `FloatingPane` specialization (`fixedAspectRatio: 1.0` — covers are always square)
+containing one `Image`, reusing `PlaybackEngine.currentLargeCoverSource`/
+`currentCoverSource` — the exact same fallback expression `NowPlaying.qml`'s own
+embedded cover `Image` already binds. Both properties already have `NOTIFY` signals
+that fire on every track change, so this pane's cover "updates too" automatically —
+no new C++ code needed for that. Uses `Image.PreserveAspectFit` (letterboxed, never
+cropped) and `sourceSize.width/height` bound to the pane's own (reactive-to-resize)
+size, matching `NowPlaying`'s decode-size-constraining pattern.
+
+**Cover-never-appears bug, root cause and fix**: covers stayed stuck on the
+placeholder through two rounds of guessing (an async-decode-vs-fresh-window race, and
+a suspected `data:image/jpeg` vs. actual-PNG MIME mismatch — see `PlaybackEngine`
+below) before a temporary on-screen diagnostic (`engine` null/ok,
+`currentLargeCoverSource`/`currentCoverSource` string lengths, `Image.status`,
+`Image.errorString`, shown directly in the pane) proved the real cause on the first
+try: `bigCover.engine` was `NULL`. The wiring bug — see `Main.qml wiring` below for
+the fix — was a genuine QML scoping gotcha, not a data or decode problem; `Image`'s
+`sourceSize`/`asynchronous: true` settled back to matching `NowPlaying`'s pattern
+once the actual cause was found.
+
+### `Main.qml` wiring and geometry restore
+
+```qml
+property bool bigCoverPaneOpen: false
+function rectIntersectsAnyScreen(x, y, w, h) { ... }  // checked against Qt.application.screens
+
+Loader {
+    id: bigCoverLoader
+    active: bigCoverPaneOpen
+    // engine is set here, NOT as a declarative "engine: engine" binding
+    // inside the BigCoverWindow {} block below — see the Q_PROPERTY-WRITE-
+    // style gotcha note just below for why that specific form silently binds
+    // to null instead of this file's PlaybackEngine.
+    onLoaded: { if (item) item.engine = engine }
+
+    sourceComponent: BigCoverWindow {
+        Component.onCompleted: {
+            if (appConfig.bigCoverPaneConfigured && root.rectIntersectsAnyScreen(...)) {
+                x = appConfig.bigCoverPaneX; y = appConfig.bigCoverPaneY
+                width = appConfig.bigCoverPaneWidth; height = appConfig.bigCoverPaneHeight
+            } else {
+                width = 400; height = 400   // centered-on-primary-screen default
+                x = Screen.virtualX + (Screen.width - width) / 2
+                y = Screen.virtualY + (Screen.height - height) / 2
+            }
+            visible = true
+            raise(); requestActivate()
+        }
+        onGeometrySettled: (x, y, w, h, screenName) => appConfig.saveBigCoverPaneGeometry(x, y, w, h, screenName)
+        onCloseRequested: root.bigCoverPaneOpen = false
+    }
+}
+```
+
+- **The `engine: NULL` gotcha (found and fixed via the on-screen diagnostic described
+  above)**: `BigCoverWindow { engine: engine }` was originally written as a normal
+  declarative binding, the same way `NowPlaying { engine: engine }` etc. already work
+  elsewhere in this file. It silently resolved to `null`. The mechanism: `BigCoverWindow`
+  is the **root object of the `Loader`'s inline `Component`** (the value of
+  `sourceComponent`), and it declares its own `property var engine: null`
+  (`BigCoverWindow.qml`). For a property assignment in that specific position — on a
+  Component-root object, where the property name collides with an outer id of the same
+  name — QML resolves the unqualified `engine` against the object's own just-declared
+  property instead of walking out to `Main.qml`'s `engine` id. This is *not* general
+  breakage of outer-scope lookups inside the Component: `appConfig`/`root`/`Screen`,
+  referenced in the very same `Component.onCompleted` above, all resolved correctly,
+  because none of them collide with a property `BigCoverWindow`/`FloatingPane`
+  declares. The fix moves the assignment to `Loader.onLoaded` — a plain signal handler
+  on the `Loader` itself (not inside the Component), where `engine` unambiguously
+  resolves via this file's normal scope, then writes it onto `item` (`item.engine =
+  engine`) explicitly. `onGeometrySettled`/`onCloseRequested` didn't need the same
+  fix — `appConfig`/`root`, which they reference, aren't shadowed by anything
+  `BigCoverWindow` declares. **Lesson for any future `FloatingPane` subclass**: don't
+  set a property via a declarative binding at the point a `Component`'s root object is
+  declared if that property's name is also an outer id — set it imperatively via
+  `Loader.onLoaded`/`item.<prop> = <value>` instead.
+- **Screen validation on restore**: `rectIntersectsAnyScreen()` checks the saved rect
+  against every connected screen's geometry (`Qt.application.screens[i].virtualX/Y` +
+  `width`/`height`, the same virtual-desktop coordinate space `Window.x/y` use) —
+  guards against a monitor having been unplugged or rearranged since the pane was
+  last positioned. If it doesn't intersect anything currently connected, the pane
+  falls back to a centered default on the primary screen instead of restoring to a
+  now-inaccessible position.
+- **`raise()`/`requestActivate()` after `visible = true`**: without this, a newly
+  created sibling window can render *behind* the main window when it's in exclusive
+  fullscreen (`Window.FullScreen`, auto-triggered for exact-match screen
+  resolutions — see UC "no notifications while fullscreen" above for the same
+  underlying OS behavior affecting a different feature) — found during this
+  feature's own verification, not a hypothetical.
+- Clicking the cover while the pane is already open is a no-op (the `Loader` is
+  already `active`), matching "always visible until right-click closes it."
+
+### `AppConfig` — `bigCoverPane` persistence
+
+Nested JSON object (matching the `crossfade`/`autoPlay` nested-object convention),
+not the flat `windowWidth`-style keys — see the Config file format section above.
+Key **presence**, not a separate stored flag, means "has been positioned before";
+absence means first-ever open. `Q_PROPERTY`s are `READ`-only with a single
+`NOTIFY bigCoverPaneChanged`, mutated only via the `Q_INVOKABLE
+saveBigCoverPaneGeometry(...)` setter — never `Q_PROPERTY WRITE` (see UC-16's
+`SystemVolumeController`-adjacent note on why: a `WRITE`-only function isn't itself
+callable as `obj.setX()` from QML unless also `Q_INVOKABLE`, a mistake already made
+and fixed once this session).
+
+### Known limitations (not fixed, not requested)
+
+- No default-audio-device-style "what if the window's screen configuration changes
+  *while the pane is open*" handling beyond the OS's own window-manager behavior —
+  only the *restore-at-open* path is explicitly validated against connected screens.
+- Whether the pane reopens automatically on the next app launch was deliberately
+  left as "no" — only geometry is persisted, not open/closed state; every launch
+  starts with the pane closed until the user clicks the cover again.
 

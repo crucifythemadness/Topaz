@@ -239,6 +239,21 @@ void AppConfig::setAutoPlayTransportAccess(const QString &mode)
     save();
 }
 
+// ── Big cover pane geometry ─────────────────────────────────────────────────
+
+void AppConfig::saveBigCoverPaneGeometry(int x, int y, int width, int height,
+                                          const QString &screenName)
+{
+    m_bigCoverPaneConfigured = true;
+    m_bigCoverPaneX          = x;
+    m_bigCoverPaneY          = y;
+    m_bigCoverPaneWidth      = width;
+    m_bigCoverPaneHeight     = height;
+    m_bigCoverPaneScreenName = screenName;
+    emit bigCoverPaneChanged();
+    save();
+}
+
 // ── Persistence ───────────────────────────────────────────────────────────
 
 void AppConfig::load()
@@ -295,6 +310,16 @@ void AppConfig::load()
         autoPlay[QStringLiteral("songRepeat")].toString(QStringLiteral("once"));
     m_autoPlayTransportAccess =
         autoPlay[QStringLiteral("transportAccess")].toString(QStringLiteral("nothing"));
+
+    // Key presence, not a stored bool, is the "configured" signal — absence
+    // means the pane has never been positioned yet (first-ever open).
+    m_bigCoverPaneConfigured = root.contains(QStringLiteral("bigCoverPane"));
+    const QJsonObject bigCoverPane = root[QStringLiteral("bigCoverPane")].toObject();
+    m_bigCoverPaneX          = bigCoverPane[QStringLiteral("x")].toInt(0);
+    m_bigCoverPaneY          = bigCoverPane[QStringLiteral("y")].toInt(0);
+    m_bigCoverPaneWidth      = bigCoverPane[QStringLiteral("width")].toInt(400);
+    m_bigCoverPaneHeight     = bigCoverPane[QStringLiteral("height")].toInt(400);
+    m_bigCoverPaneScreenName = bigCoverPane[QStringLiteral("screenName")].toString();
 }
 
 void AppConfig::save()
@@ -337,6 +362,16 @@ void AppConfig::save()
     autoPlay[QStringLiteral("songRepeat")] = m_autoPlaySongRepeat;
     autoPlay[QStringLiteral("transportAccess")] = m_autoPlayTransportAccess;
     root[QStringLiteral("autoPlay")] = autoPlay;
+
+    if (m_bigCoverPaneConfigured) {
+        QJsonObject bigCoverPane;
+        bigCoverPane[QStringLiteral("x")]          = m_bigCoverPaneX;
+        bigCoverPane[QStringLiteral("y")]          = m_bigCoverPaneY;
+        bigCoverPane[QStringLiteral("width")]      = m_bigCoverPaneWidth;
+        bigCoverPane[QStringLiteral("height")]     = m_bigCoverPaneHeight;
+        bigCoverPane[QStringLiteral("screenName")] = m_bigCoverPaneScreenName;
+        root[QStringLiteral("bigCoverPane")] = bigCoverPane;
+    }
 
     QFile f(configFilePath());
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))

@@ -15,6 +15,9 @@ Rectangle {
     color: Theme.surfaceContainerLow
 
     signal newPlaylistRequested()
+    // Emitted when the user left-clicks the album cover — opens the
+    // detachable BigCoverWindow pane (see Main.qml's Loader wiring).
+    signal bigCoverRequested()
 
     // ── Load playlist file dialog ───────────────────────────────────────
     FileDialog {
@@ -97,6 +100,16 @@ Rectangle {
                     fillMode:  Image.PreserveAspectCrop
                     asynchronous: true
                     visible: status === Image.Ready
+                }
+
+                // Opens the detachable BigCoverWindow pane — same pointing-hand
+                // cursor as Play/Pause, left-click only (right-click is reserved
+                // for closing the pane itself, not for anything here).
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.bigCoverRequested()
                 }
             }
 
