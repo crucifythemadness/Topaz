@@ -57,24 +57,53 @@ Window {
 
     signal closeRequested()
     signal geometrySettled(int x, int y, int width, int height, string screenName)
+    // Emitted on a left-button double-click anywhere on the pane — see the
+    // MouseArea below for the detection mechanism. Generic on purpose — like
+    // closeRequested()/geometrySettled(), FloatingPane just detects and emits;
+    // what a double-click *means* (e.g. maximize/restore) is entirely up to the
+    // subclass. Unhandled by any pane that doesn't declare an onDoubleClicked
+    // handler, so this is a no-op for panes that don't opt in.
+    signal doubleClicked()
 
     Item {
         id: contentItem
         anchors.fill: parent
     }
 
-    // Move (whole pane) + close (right-click). Declared before the resize
-    // grips below so they naturally stack above it for their thin strips.
+    // Move (whole pane) + close (right-click) + double-click. Declared before
+    // the resize grips below so they naturally stack above it for their thin
+    // strips.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
-        onPressed: (mouse) => {
-            if (mouse.button === Qt.LeftButton) pane.startSystemMove()
+
+        property bool _moveStarted: false
+
+        onPressed: (mouse) => { _moveStarted = false }
+        onPositionChanged: (mouse) => {
+            // Only start the native move once real movement is seen while the
+            // left button is held — NOT on the raw press itself. An earlier
+            // version called startSystemMove() unconditionally on every press,
+            // which hands the mouse off to the OS's native interactive-move
+            // loop immediately; that loop swallows the second press of a
+            // double-click before Qt's own click/doubleClick synthesis (below)
+            // ever sees it — confirmed by testing, not just theorized. A
+            // stationary click (both halves of a double-click) never reaches
+            // this branch, so the native loop is never entered for it; a real
+            // drag still starts moving on its very first pixel of motion, so
+            // single-click-drag keeps feeling instant.
+            if (pressed && (mouse.buttons & Qt.LeftButton) && !_moveStarted) {
+                _moveStarted = true
+                pane.startSystemMove()
+            }
         }
         onClicked: (mouse) => {
             if (mouse.button === Qt.RightButton) pane.closeRequested()
+        }
+        onDoubleClicked: (mouse) => {
+            if (mouse.button === Qt.LeftButton) pane.doubleClicked()
         }
     }
 

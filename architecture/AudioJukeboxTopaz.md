@@ -763,7 +763,7 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
         "x": 100, "y": 100, "width": 400, "height": 400, "screenName": "DISPLAY1"
     },
     "tagInfoPane": {
-        "x": 100, "y": 100, "width": 460, "height": 230, "screenName": "DISPLAY1"
+        "x": 100, "y": 100, "width": 500, "height": 230, "screenName": "DISPLAY1"
     }
 }
 ```
@@ -801,7 +801,7 @@ default instead of its saved `X`/`Y` (see UC-17/UC-18).
 | `autoPlayTransportAccess` / `setAutoPlayTransportAccess(mode)` | How much manual transport control remains available during an active AUTO PLAY session while `autoPlayAllowManualModification` is off (default `"nothing"`); one of `"nothing"`, `"playPause"`, `"playPauseAndSelect"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab "Exceptions" radio group, indented under and only interactive while Allow Manual Modification is off. Consumed by `AutoPlayController::playPauseAllowed()`/`trackNavigationAllowed()` (see UC-16). |
 | `bigCoverPaneConfigured` / `bigCoverPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable BigCoverWindow pane's last-saved geometry (defaults `400`×`400`, `configured` starts `false`). See UC-17. |
 | `saveBigCoverPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles; `screenName` is stored for completeness/debugging but not re-exposed as its own property. Auto-saves. Called from `Main.qml`'s `Loader` on `FloatingPane.geometrySettled()`. |
-| `tagInfoPaneConfigured` / `tagInfoPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable TagInfoWindow pane's last-saved geometry (defaults `460`×`230`, `configured` starts `false`). Same convention as `bigCoverPane*` above. See UC-18. |
+| `tagInfoPaneConfigured` / `tagInfoPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable TagInfoWindow pane's last-saved geometry (defaults `500`×`230`, `configured` starts `false`). Same convention as `bigCoverPane*` above. See UC-18. |
 | `saveTagInfoPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles. Same calling convention as `saveBigCoverPaneGeometry`. |
 | `save()` | Persist current state to `Topaz.config` (called automatically by all mutators). |
 
@@ -2229,11 +2229,31 @@ rather than carrying stale state between opens.
 A frameless (`flags: Qt.Window | Qt.FramelessWindowHint`) `Window` base:
 - `default property alias contentData: contentItem.data` — subclasses just nest
   their content directly inside `FloatingPane { ... }` (see `BigCoverWindow.qml`).
-- **Move**: a whole-pane `MouseArea`'s left-press calls `Window.startSystemMove()` —
-  an OS-native interactive move (Qt 6.8+; confirmed supported on Windows), not manual
-  x/y math, so it's correct across monitors with different DPI/scaling without any
-  extra code. `cursorShape: Qt.PointingHandCursor` + `hoverEnabled: true` on the same
-  `MouseArea`, matching `NowPlaying`'s Play/Pause cursor exactly.
+- **Move**: a whole-pane `MouseArea` calls `Window.startSystemMove()` — an OS-native
+  interactive move (Qt 6.8+; confirmed supported on Windows), not manual x/y math,
+  so it's correct across monitors with different DPI/scaling without any extra code.
+  `cursorShape: Qt.PointingHandCursor` + `hoverEnabled: true` on the same
+  `MouseArea`, matching `NowPlaying`'s Play/Pause cursor exactly. Triggered from
+  `onPositionChanged` (guarded to fire only once per gesture via a `_moveStarted`
+  flag reset in `onPressed`) once actual movement is seen while the left button is
+  held — **not** unconditionally on the raw press. An earlier version called
+  `startSystemMove()` directly from `onPressed`; that starts the OS's native
+  interactive-move loop immediately on every press, which bypasses Qt's normal
+  input pipeline for that gesture and — confirmed by testing, not just theorized —
+  swallows the second press of a double-click before `MouseArea`'s own
+  `onDoubleClicked` synthesis ever sees it. Since a stationary click (both halves of
+  a double-click) never reaches the movement branch, the native loop is never
+  entered for it, leaving Qt's normal click/double-click detection intact; a real
+  drag still starts moving on its very first pixel of motion, so single-click-drag
+  keeps feeling instant.
+- **Double-click detection (`doubleClicked()` signal)**: the same whole-pane
+  `MouseArea`'s own (now-reliable, per above) `onDoubleClicked` re-emits a generic
+  `doubleClicked()` signal on the pane for left-button double-clicks — what it
+  *means* is entirely up to the subclass (e.g. `TagInfoWindow`'s maximize/restore
+  toggle, see UC-18); `FloatingPane` itself has no maximize logic, same
+  "detect/emit, owner decides" split as `closeRequested()`/`geometrySettled()`. A
+  pane that never adds an `onDoubleClicked` handler (e.g. `BigCoverWindow`) is
+  completely unaffected — the signal just goes unheard.
 - **Resize**: eight thin (8px) edge/corner `MouseArea`s with the matching cursor
   shape (`SizeHorCursor`/`SizeVerCursor`/`SizeFDiagCursor`/`SizeBDiagCursor`). When
   `fixedAspectRatio` (see below) is `0` (the default), pressing one calls
@@ -2429,27 +2449,48 @@ API section above.
 ### `TagInfoWindow.qml`
 
 A `FloatingPane` specialization with **no `fixedAspectRatio`** (unlike the square
-`BigCoverWindow`) — free resize via `startSystemResize()`, default size 460×230.
-Went through two rounds of shrinking: 460×420 (original) → 460×280 → 460×230, each
-time reducing the default and tightening internal padding/spacing/the specs-box
-height, since content sitting in a top-anchored `Column` with no explicit height
-never grows to fill the pane — any extra height just shows through as empty themed
-background below the technical-specs box. **The pane's *saved* geometry
-(`Topaz.config`'s `tagInfoPane` entry) always wins over this default once the user
-has resized the pane even once** — confirmed directly from a real user's config
-during round 2 (a genuine 1658×592 saved size on real hardware) — so shrinking the
+`BigCoverWindow`) — free resize via `startSystemResize()`, default size 500×230, and
+a floor of `minPaneWidth: 500` / `minPaneHeight: 200` (set directly on the
+`FloatingPane` instance — its `minPaneWidth`/`minPaneHeight` properties already
+existed generically, wired to the underlying `Window.minimumWidth`/`minimumHeight`,
+so Qt enforces the floor natively during interactive resize; `TagInfoWindow.qml`
+just hadn't overridden them from `FloatingPane`'s own `120`×`120` default until now).
+Went through several rounds of shrinking the default and tightening internal
+padding/spacing/the specs-box height: 460×420 (original) → 460×280 → 460×230 →
+500×230 (current; width bumped to 500 to stay above the new minimum), since content
+sitting in a top-anchored `Column` with no explicit height never grows to fill the
+pane — any extra height just shows through as empty themed background. **The pane's
+*saved* geometry (`Topaz.config`'s `tagInfoPane` entry) always wins over this default
+once the user has resized the pane even once** — confirmed directly from a real
+user's config (a genuine 1658×592 saved size on real hardware) — so shrinking the
 default only affects a pane that's never been touched; an already-resized pane needs
 a manual resize-down to benefit from a tighter default.
+
+The technical-specs box (Track/Duration/Bitrate) is anchored directly to the pane's
+own `left`/`right`/`bottom` edges (all with the same margin `body`'s own padding
+uses) rather than being the last child of `body`'s `Column`. It used to flow inside
+that `Column`, whose height is purely intrinsic — so whenever the pane was taller
+than the content needed, all the leftover space collected asymmetrically below the
+specs box while the side margins stayed fixed. Anchoring it independently guarantees
+its bottom margin always equals the side margins exactly, at any pane size; leftover
+vertical space now becomes a harmless gap between the metadata grid and the specs
+box instead.
 
 **Content scales with pane size**: a single computed property,
 ```qml
 readonly property real scaleFactor:
-    Math.max(0.55, Math.min(2.2, Math.min(width / 460, height / 230)))
+    Math.max(0.55, Math.min(width / 500, height / 230))
 ```
 multiplies every `font.pixelSize` and layout padding/spacing value in the pane. It's
 derived from *both* width and height (via `Math.min`) so a pane resized narrow-but-tall
-or short-but-wide doesn't overflow in the constrained dimension; clamped to `[0.55,
-2.2]` so text never becomes unreadably tiny or absurdly oversized at extreme sizes.
+or short-but-wide doesn't overflow in the constrained dimension; floored at `0.55` so
+text never becomes unreadably tiny when shrunk down. Deliberately has **no upper
+cap** — an earlier `2.2` ceiling was removed at the user's request, since the pane is
+meant to work as a large, readable "signage" display too (same rationale
+`BigCoverWindow`/UC-17 already has for a second-monitor "now playing" display) and a
+fixed ceiling just reproduces the "content stops growing, empty space grows around
+it" problem the pane's default-size tuning already fixed once, from the opposite
+direction.
 
 Layout, adapted from a user-supplied mockup (`code.html`/`DESIGN.md`) but built with
 this codebase's own `Theme.*` tokens rather than the mockup's hardcoded hex/Tailwind
@@ -2463,6 +2504,45 @@ inline QML `component`s (`MetadataField`, `SpecField`, Qt 6.4+ syntax) factor ou
 repeated label-over-value markup without needing separate files/module registration.
 Placeholder state (no track loaded) reuses the same gradient+glyph idiom as
 `BigCoverWindow.qml`'s placeholder.
+
+### Double-click to maximize width / restore
+
+Double-clicking anywhere on the pane horizontally centers it and widens it to fill
+the current screen; a second double-click restores the exact size/position from
+before. Implemented via `FloatingPane`'s generic `doubleClicked()` signal (see
+UC-17) — `TagInfoWindow.qml` itself does no input handling, just an
+`onDoubleClicked` handler:
+```qml
+property bool _maximized: false
+property real _restoreX: 0
+property real _restoreY: 0
+property real _restoreWidth: 0
+property real _restoreHeight: 0
+
+onDoubleClicked: {
+    if (!_maximized) {
+        _restoreX = x; _restoreY = y; _restoreWidth = width; _restoreHeight = height
+        width = Screen.width
+        x = Screen.virtualX
+        _maximized = true
+    } else {
+        x = _restoreX; y = _restoreY; width = _restoreWidth; height = _restoreHeight
+        _maximized = false
+    }
+}
+```
+Only `x`/`width` change on maximize — `y`/`height` are deliberately left alone,
+matching the request (horizontally center + widen to fit the screen; nothing said
+about vertical size/position). Restoring sets all four back regardless, which is a
+no-op for `y`/`height` since maximize never touched them. Uses the bare `Screen`
+attached property (`import QtQuick.Window`, added to this file for exactly this) —
+the same `Screen.virtualX + (Screen.width - width) / 2`-style idiom `Main.qml`
+already uses to center this pane on first-ever-open, here resolving to whichever
+screen the pane is currently on. No special-casing needed for persistence: the
+existing debounced `geometrySettled` in `FloatingPane.qml` fires on these
+programmatic changes exactly like a manual drag/resize, so a pane closed while
+maximized reopens maximized next time — consistent with saved geometry always
+winning over the default (see "saved geometry always wins" note above).
 
 ### `BottomBar.qml` — TAG INFORMATION toggle wiring
 
@@ -2485,7 +2565,7 @@ Exact structural mirror of the `bigCoverLoader` block from UC-17 (`tagInfoLoader
 pattern (required for the same Component-root scoping reason as UC-17), the same
 `rectIntersectsAnyScreen()` reuse for geometry restore/validation, and the same
 `raise()`/`requestActivate()` after `visible = true`. Default size on first-ever-open
-(no saved geometry yet) is 460×230, centered on the primary screen.
+(no saved geometry yet) is 500×230, centered on the primary screen.
 
 ### `AppConfig` — `tagInfoPane` persistence
 

@@ -340,7 +340,7 @@ void AppConfig::load()
     const QJsonObject tagInfoPane = root[QStringLiteral("tagInfoPane")].toObject();
     m_tagInfoPaneX          = tagInfoPane[QStringLiteral("x")].toInt(0);
     m_tagInfoPaneY          = tagInfoPane[QStringLiteral("y")].toInt(0);
-    m_tagInfoPaneWidth      = tagInfoPane[QStringLiteral("width")].toInt(460);
+    m_tagInfoPaneWidth      = tagInfoPane[QStringLiteral("width")].toInt(500);
     m_tagInfoPaneHeight     = tagInfoPane[QStringLiteral("height")].toInt(230);
     m_tagInfoPaneScreenName = tagInfoPane[QStringLiteral("screenName")].toString();
 }

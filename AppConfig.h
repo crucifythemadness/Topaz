@@ -21,7 +21,7 @@
 //                    "transportAccess": "nothing" },
 //     "bigCoverPane": { "x": 100, "y": 100, "width": 400, "height": 400,
 //                       "screenName": "DISPLAY1" },
-//     "tagInfoPane": { "x": 100, "y": 100, "width": 460, "height": 230,
+//     "tagInfoPane": { "x": 100, "y": 100, "width": 500, "height": 230,
 //                      "screenName": "DISPLAY1" }
 //   }
 // autoPlaySongRepeat allowed values: "once", "twice", "twiceIfNoneAvailable", "several".
@@ -233,7 +233,7 @@ private:
     bool    m_tagInfoPaneConfigured = false;
     int     m_tagInfoPaneX          = 0;
     int     m_tagInfoPaneY          = 0;
-    int     m_tagInfoPaneWidth      = 460;
+    int     m_tagInfoPaneWidth      = 500;
     int     m_tagInfoPaneHeight     = 230;
     QString m_tagInfoPaneScreenName;
 };

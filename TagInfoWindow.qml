@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 
 // ── TagInfoWindow ────────────────────────────────────────────────────────
 // Detachable tag-metadata viewer — see FloatingPane.qml for the movable/
@@ -13,9 +14,10 @@ import QtQuick.Controls
 //
 // Content-scales-with-pane-size: every font size/padding/spacing below is
 // multiplied by scaleFactor, a single ratio derived from how far the pane has
-// been resized from its default 460x230. This is what makes the text grow or
+// been resized from its default 500x230. This is what makes the text grow or
 // shrink smoothly as the user drags the resize grips, rather than staying
-// fixed while empty space grows around it.
+// fixed while empty space grows around it. minPaneWidth/minPaneHeight below
+// stop the user from resizing below 500x200.
 //
 // Note: the pane's *saved* geometry (Topaz.config's tagInfoPane entry) always
 // wins over this default once the user has resized it once — shrinking the
@@ -27,10 +29,35 @@ FloatingPane {
 
     title: qsTr("Topaz — Tag Info")
     color: Theme.surfaceContainerLowest
+    minPaneWidth:  500
+    minPaneHeight: 200
 
     readonly property real scaleFactor:
-        Math.max(0.55, Math.min(2.2, Math.min(width / 460, height / 230)))
+        Math.max(0.55, Math.min(width / 500, height / 230))
     readonly property bool hasTrack: engine && engine.currentTitle.length > 0
+
+    // Double-click-to-maximize-width / restore (see FloatingPane's generic
+    // doubleClicked() signal). Only x/width are touched — y/height stay as
+    // they were, matching the request ("horizontally center... widen it to
+    // fit the screen"); restoring puts all four back regardless, which is a
+    // no-op for y/height since maximize never changed them.
+    property bool _maximized: false
+    property real _restoreX: 0
+    property real _restoreY: 0
+    property real _restoreWidth: 0
+    property real _restoreHeight: 0
+
+    onDoubleClicked: {
+        if (!_maximized) {
+            _restoreX = x; _restoreY = y; _restoreWidth = width; _restoreHeight = height
+            width = Screen.width
+            x = Screen.virtualX
+            _maximized = true
+        } else {
+            x = _restoreX; y = _restoreY; width = _restoreWidth; height = _restoreHeight
+            _maximized = false
+        }
+    }
 
     // ── Reusable label-over-value field for the metadata grid ────────────
     component MetadataField: Column {
@@ -256,64 +283,74 @@ FloatingPane {
                 scale: tagInfo.scaleFactor
             }
         }
+    }
 
-        // Technical specs box — Track / Duration / Bitrate
-        Rectangle {
-            id: specBox
-            width:  body.contentWidth
-            height: 48 * tagInfo.scaleFactor
-            radius: Theme.radiusMd
-            color:  Theme.surfaceContainer
-            border.width: 1
-            border.color: Theme.ov20
+    // Technical specs box — Track / Duration / Bitrate. Anchored directly to the
+    // pane's own edges (not flowed inside body's Column) so its bottom margin
+    // always equals the left/right margins exactly, regardless of how much
+    // vertical space the pane has beyond what the content above needs — any
+    // leftover space just becomes a bigger gap above this box instead of an
+    // asymmetric edge below it.
+    Rectangle {
+        id: specBox
+        anchors {
+            left:   parent.left;   leftMargin:   10 * tagInfo.scaleFactor
+            right:  parent.right;  rightMargin:  10 * tagInfo.scaleFactor
+            bottom: parent.bottom; bottomMargin: 10 * tagInfo.scaleFactor
+        }
+        visible: tagInfo.hasTrack
+        height: 48 * tagInfo.scaleFactor
+        radius: Theme.radiusMd
+        color:  Theme.surfaceContainer
+        border.width: 1
+        border.color: Theme.ov20
 
-            readonly property real colWidth: width / 3
+        readonly property real colWidth: width / 3
 
-            Row {
-                anchors.fill: parent
+        Row {
+            anchors.fill: parent
 
-                Item {
-                    width: specBox.colWidth; height: parent.height
-                    SpecField {
-                        anchors.centerIn: parent
-                        label: qsTr("TRACK")
-                        value: (tagInfo.engine && tagInfo.engine.currentTrackNumber > 0)
-                               ? String(tagInfo.engine.currentTrackNumber).padStart(2, '0')
-                               : "—"
-                        scale: tagInfo.scaleFactor
-                    }
-                    Rectangle {
-                        anchors { right: parent.right; top: parent.top; bottom: parent.bottom
-                                  topMargin: 8 * tagInfo.scaleFactor; bottomMargin: 8 * tagInfo.scaleFactor }
-                        width: 1
-                        color: Theme.ov20
-                    }
+            Item {
+                width: specBox.colWidth; height: parent.height
+                SpecField {
+                    anchors.centerIn: parent
+                    label: qsTr("TRACK")
+                    value: (tagInfo.engine && tagInfo.engine.currentTrackNumber > 0)
+                           ? String(tagInfo.engine.currentTrackNumber).padStart(2, '0')
+                           : "—"
+                    scale: tagInfo.scaleFactor
                 }
-                Item {
-                    width: specBox.colWidth; height: parent.height
-                    SpecField {
-                        anchors.centerIn: parent
-                        label: qsTr("DURATION")
-                        value: tagInfo.engine ? tagInfo.engine.durationString : "0:00"
-                        scale: tagInfo.scaleFactor
-                    }
-                    Rectangle {
-                        anchors { right: parent.right; top: parent.top; bottom: parent.bottom
-                                  topMargin: 8 * tagInfo.scaleFactor; bottomMargin: 8 * tagInfo.scaleFactor }
-                        width: 1
-                        color: Theme.ov20
-                    }
+                Rectangle {
+                    anchors { right: parent.right; top: parent.top; bottom: parent.bottom
+                              topMargin: 8 * tagInfo.scaleFactor; bottomMargin: 8 * tagInfo.scaleFactor }
+                    width: 1
+                    color: Theme.ov20
                 }
-                Item {
-                    width: specBox.colWidth; height: parent.height
-                    SpecField {
-                        anchors.centerIn: parent
-                        label: qsTr("BITRATE")
-                        value: tagInfo.engine
-                               ? (tagInfo.engine.currentBitrate + " KBPS")
-                               : ""
-                        scale: tagInfo.scaleFactor
-                    }
+            }
+            Item {
+                width: specBox.colWidth; height: parent.height
+                SpecField {
+                    anchors.centerIn: parent
+                    label: qsTr("DURATION")
+                    value: tagInfo.engine ? tagInfo.engine.durationString : "0:00"
+                    scale: tagInfo.scaleFactor
+                }
+                Rectangle {
+                    anchors { right: parent.right; top: parent.top; bottom: parent.bottom
+                              topMargin: 8 * tagInfo.scaleFactor; bottomMargin: 8 * tagInfo.scaleFactor }
+                    width: 1
+                    color: Theme.ov20
+                }
+            }
+            Item {
+                width: specBox.colWidth; height: parent.height
+                SpecField {
+                    anchors.centerIn: parent
+                    label: qsTr("BITRATE")
+                    value: tagInfo.engine
+                           ? (tagInfo.engine.currentBitrate + " KBPS")
+                           : ""
+                    scale: tagInfo.scaleFactor
                 }
             }
         }

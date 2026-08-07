@@ -120,7 +120,7 @@ ApplicationWindow {
                     x      = appConfig.tagInfoPaneX
                     y      = appConfig.tagInfoPaneY
                 } else {
-                    width  = 460
+                    width  = 500
                     height = 230
                     x = Screen.virtualX + (Screen.width  - width)  / 2
                     y = Screen.virtualY + (Screen.height - height) / 2
