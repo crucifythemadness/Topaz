@@ -45,7 +45,14 @@ Window {
     // future FloatingPane subclass can opt in, not just square ones.
     property real fixedAspectRatio: 0
 
-    flags: Qt.Window | Qt.FramelessWindowHint
+    // NoDropShadowWindowHint removes Qt's own drop shadow on the frameless
+    // window; WindowChrome.prepareWindow() below (native, no QML equivalent
+    // exists) requests an alpha-capable surface before the native window is
+    // created (needed for AudioVisualizerWindow's background opacity to
+    // actually composite as translucent — see WindowChrome's own comment for
+    // why a QML `color` binding alone isn't reliable here) and removes
+    // Windows 11's default DWM window border on top of that.
+    flags: Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
     minimumWidth:  minPaneWidth
     minimumHeight: minPaneHeight
 
@@ -54,6 +61,13 @@ Window {
     // until the owner has positioned the pane, so it never flashes into view
     // at a default position before Component.onCompleted repositions it.
     visible: false
+
+    // Fires before any subclass's own outer Component.onCompleted (in
+    // Main.qml's Loader.sourceComponent blocks, which set visible = true) —
+    // nested Component.onCompleted handlers fire innermost-first, so the
+    // native window is prepared (translucency-capable, border-free) before
+    // it's ever actually shown.
+    Component.onCompleted: WindowChrome.prepareWindow(pane)
 
     signal closeRequested()
     signal geometrySettled(int x, int y, int width, int height, string screenName)

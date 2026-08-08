@@ -20,6 +20,17 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
         m_players[d]->setAudioOutput(m_audioOutputs[d]);
         m_audioOutputs[d]->setVolume(1.0f);
 
+        // Decoded-buffer tap for the audio visualizer (UC-19) — independent of
+        // setAudioOutput() above, doesn't affect normal playback. Only the
+        // active deck's buffers are forwarded; see audioBufferAvailable()'s
+        // doc comment in the header for the crossfade simplification.
+        m_audioBufferOutputs[d] = new QAudioBufferOutput(this);
+        m_players[d]->setAudioBufferOutput(m_audioBufferOutputs[d]);
+        connect(m_audioBufferOutputs[d], &QAudioBufferOutput::audioBufferReceived,
+                this, [this, d](const QAudioBuffer &buffer) {
+                    if (d == m_activeDeck) emit audioBufferAvailable(buffer);
+                });
+
         connect(m_players[d], &QMediaPlayer::positionChanged,
                 this, [this, d](qint64) { onDeckPositionChanged(d); });
         connect(m_players[d], &QMediaPlayer::durationChanged,

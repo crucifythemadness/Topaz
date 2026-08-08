@@ -269,6 +269,75 @@ void AppConfig::saveTagInfoPaneGeometry(int x, int y, int width, int height,
     save();
 }
 
+// ── Audio visualizer settings ───────────────────────────────────────────────
+
+void AppConfig::setAudioVisualizerBarCount(int count)
+{
+    count = qBound(8, count, 64);
+    if (m_audioVisualizerBarCount == count) return;
+    m_audioVisualizerBarCount = count;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerColor(const QString &color)
+{
+    if (color.isEmpty() || m_audioVisualizerColor == color) return;
+    m_audioVisualizerColor = color;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerDecaySpeed(double speed)
+{
+    speed = qBound(0.0, speed, 1.0);
+    if (qFuzzyCompare(m_audioVisualizerDecaySpeed, speed)) return;
+    m_audioVisualizerDecaySpeed = speed;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerSensitivity(double sensitivity)
+{
+    sensitivity = qBound(0.0, sensitivity, 1.0);
+    if (qFuzzyCompare(m_audioVisualizerSensitivity, sensitivity)) return;
+    m_audioVisualizerSensitivity = sensitivity;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerPeakHoldEnabled(bool enabled)
+{
+    if (m_audioVisualizerPeakHoldEnabled == enabled) return;
+    m_audioVisualizerPeakHoldEnabled = enabled;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerPaneOpacity(double opacity)
+{
+    opacity = qBound(0.0, opacity, 1.0);
+    if (qFuzzyCompare(m_audioVisualizerPaneOpacity, opacity)) return;
+    m_audioVisualizerPaneOpacity = opacity;
+    emit audioVisualizerChanged();
+    save();
+}
+
+// ── Audio visualizer pane geometry ──────────────────────────────────────────
+
+void AppConfig::saveAudioVisualizerPaneGeometry(int x, int y, int width, int height,
+                                                 const QString &screenName)
+{
+    m_audioVisualizerPaneConfigured = true;
+    m_audioVisualizerPaneX          = x;
+    m_audioVisualizerPaneY          = y;
+    m_audioVisualizerPaneWidth      = width;
+    m_audioVisualizerPaneHeight     = height;
+    m_audioVisualizerPaneScreenName = screenName;
+    emit audioVisualizerPaneChanged();
+    save();
+}
+
 // ── Persistence ───────────────────────────────────────────────────────────
 
 void AppConfig::load()
@@ -343,6 +412,24 @@ void AppConfig::load()
     m_tagInfoPaneWidth      = tagInfoPane[QStringLiteral("width")].toInt(500);
     m_tagInfoPaneHeight     = tagInfoPane[QStringLiteral("height")].toInt(230);
     m_tagInfoPaneScreenName = tagInfoPane[QStringLiteral("screenName")].toString();
+
+    const QJsonObject audioVisualizer = root[QStringLiteral("audioVisualizer")].toObject();
+    m_audioVisualizerBarCount = audioVisualizer[QStringLiteral("barCount")].toInt(24);
+    m_audioVisualizerColor =
+        audioVisualizer[QStringLiteral("color")].toString(QStringLiteral("#00DAF3"));
+    m_audioVisualizerDecaySpeed = audioVisualizer[QStringLiteral("decaySpeed")].toDouble(0.5);
+    m_audioVisualizerSensitivity = audioVisualizer[QStringLiteral("sensitivity")].toDouble(0.5);
+    m_audioVisualizerPeakHoldEnabled =
+        audioVisualizer[QStringLiteral("peakHoldEnabled")].toBool(true);
+    m_audioVisualizerPaneOpacity = audioVisualizer[QStringLiteral("paneOpacity")].toDouble(1.0);
+
+    m_audioVisualizerPaneConfigured = root.contains(QStringLiteral("audioVisualizerPane"));
+    const QJsonObject audioVisualizerPane = root[QStringLiteral("audioVisualizerPane")].toObject();
+    m_audioVisualizerPaneX          = audioVisualizerPane[QStringLiteral("x")].toInt(0);
+    m_audioVisualizerPaneY          = audioVisualizerPane[QStringLiteral("y")].toInt(0);
+    m_audioVisualizerPaneWidth      = audioVisualizerPane[QStringLiteral("width")].toInt(500);
+    m_audioVisualizerPaneHeight     = audioVisualizerPane[QStringLiteral("height")].toInt(260);
+    m_audioVisualizerPaneScreenName = audioVisualizerPane[QStringLiteral("screenName")].toString();
 }
 
 void AppConfig::save()
@@ -404,6 +491,25 @@ void AppConfig::save()
         tagInfoPane[QStringLiteral("height")]     = m_tagInfoPaneHeight;
         tagInfoPane[QStringLiteral("screenName")] = m_tagInfoPaneScreenName;
         root[QStringLiteral("tagInfoPane")] = tagInfoPane;
+    }
+
+    QJsonObject audioVisualizer;
+    audioVisualizer[QStringLiteral("barCount")]        = m_audioVisualizerBarCount;
+    audioVisualizer[QStringLiteral("color")]           = m_audioVisualizerColor;
+    audioVisualizer[QStringLiteral("decaySpeed")]      = m_audioVisualizerDecaySpeed;
+    audioVisualizer[QStringLiteral("sensitivity")]     = m_audioVisualizerSensitivity;
+    audioVisualizer[QStringLiteral("peakHoldEnabled")] = m_audioVisualizerPeakHoldEnabled;
+    audioVisualizer[QStringLiteral("paneOpacity")]     = m_audioVisualizerPaneOpacity;
+    root[QStringLiteral("audioVisualizer")] = audioVisualizer;
+
+    if (m_audioVisualizerPaneConfigured) {
+        QJsonObject audioVisualizerPane;
+        audioVisualizerPane[QStringLiteral("x")]          = m_audioVisualizerPaneX;
+        audioVisualizerPane[QStringLiteral("y")]          = m_audioVisualizerPaneY;
+        audioVisualizerPane[QStringLiteral("width")]      = m_audioVisualizerPaneWidth;
+        audioVisualizerPane[QStringLiteral("height")]     = m_audioVisualizerPaneHeight;
+        audioVisualizerPane[QStringLiteral("screenName")] = m_audioVisualizerPaneScreenName;
+        root[QStringLiteral("audioVisualizerPane")] = audioVisualizerPane;
     }
 
     QFile f(configFilePath());

@@ -326,6 +326,7 @@ All components are registered in the `Topaz` QML module
 ```
 Topaz module
 ├── Theme.qml           singleton — all colour, typography, spacing, and radius tokens
+├── WindowChrome         C++ QML_ELEMENT + QML_SINGLETON — stateless native helper: requests an alpha-capable surface before native window creation (real translucency) and strips the Windows 11 DWM accent border off FloatingPane windows; see UC-17
 ├── AppConfig           C++ QML_ELEMENT — reads/writes Topaz.config JSON; exposes genres & folders
 ├── LibraryModel        C++ QML_ELEMENT — QAbstractListModel + scanner orchestration
 │                         property AppConfig appConfig
@@ -334,17 +335,20 @@ Topaz module
 ├── LibraryData.qml     shared state model — genre toggle, selection, tree builder
 │                         property AppConfig appConfig
 │                         property LibraryModel libraryModel
-├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, SetupDialog, NewPlaylistDialog
+├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, AudioVisualizerController, SetupDialog, NewPlaylistDialog
 │                         property bool bigCoverPaneOpen  (toggled by NowPlaying.onBigCoverRequested / BigCoverWindow.onCloseRequested)
 │                         Loader { active: bigCoverPaneOpen; sourceComponent: BigCoverWindow {...} }  — see "Detachable panes" below
 │                         property bool tagInfoPaneOpen  (toggled by BottomBar.onTagInfoToggleRequested / TagInfoWindow.onCloseRequested)
 │                         Loader { active: tagInfoPaneOpen; sourceComponent: TagInfoWindow {...} }  — see UC-18
-├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY, see UC-15 / UC-14)
+│                         property bool audioVisualizerPaneOpen  (toggled by BottomBar.onAudioVisualizerToggleRequested / AudioVisualizerWindow.onCloseRequested)
+│                         Loader { active: audioVisualizerPaneOpen; sourceComponent: AudioVisualizerWindow {...} }  — see UC-19
+├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY | AUDIO VISUALIZER, see UC-15 / UC-14 / UC-19)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
 ├── FloatingPane.qml    Reusable base Window for detachable panes (frameless, movable, resizable, right-click-to-close) — see "Detachable panes" below
 ├── BigCoverWindow.qml  FloatingPane specialization: shows only the current track's cover art
 ├── TagInfoWindow.qml   FloatingPane specialization: shows the current track's tag metadata, content scales with pane size — see UC-18
+├── AudioVisualizerWindow.qml FloatingPane specialization: renders bumping bars from AudioVisualizerController's barLevels/peakLevels — see UC-19
 ├── TopBar.qml          Header (logo | navigation tabs | loudspeaker icon + gear icon + avatar)  height 64 px
 │                         property var systemVolume  (bound to SystemVolumeController; drives the OS-Volume flyout, see below)
 │                         signal settingsRequested()  ← gear icon click
@@ -386,6 +390,7 @@ Topaz module
 │                         signal newPlaylistRequested()  ← “+ NEW” button click
 └── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all; autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16)
                           signal tagInfoToggleRequested()  ← TAG INFORMATION button click; property tagInfoPaneOpen (bound from Main.qml) drives its on/off color — same "dumb button, owner decides" split as scanRequested()/scanning, see UC-18
+                          signal audioVisualizerToggleRequested()  ← AUDIO VISUALIZER button click; property audioVisualizerPaneOpen (bound from Main.qml) drives its on/off color — same split, see UC-19
 ```
 
 ## LibraryModel Component
@@ -764,18 +769,25 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     },
     "tagInfoPane": {
         "x": 100, "y": 100, "width": 500, "height": 230, "screenName": "DISPLAY1"
+    },
+    "audioVisualizer": {
+        "barCount": 24, "color": "#00DAF3", "decaySpeed": 0.5, "sensitivity": 0.5,
+        "peakHoldEnabled": true, "paneOpacity": 1.0
+    },
+    "audioVisualizerPane": {
+        "x": 100, "y": 100, "width": 500, "height": 260, "screenName": "DISPLAY1"
     }
 }
 ```
 
 Settings are grouped into a nested object per `SetupDialog` tab (`crossfade`,
-`autoPlay`); genres/folders/window-layout stay flat at the top level. The
-`AppConfig` property/method names (`crossfadeEnabled`, `crossfadeSeconds`,
+`autoPlay`, `audioVisualizer`); genres/folders/window-layout stay flat at the top
+level. The `AppConfig` property/method names (`crossfadeEnabled`, `crossfadeSeconds`,
 `autoPlayQueueHorizon`, and their setters) are unchanged by this grouping — only the
-on-disk JSON shape differs. `bigCoverPane`/`tagInfoPane` are also nested; unlike the
-others, their *presence* in the file (not a stored bool) is what "configured" means —
-absent means that pane has never been positioned yet, so `Main.qml` uses a centered
-default instead of its saved `X`/`Y` (see UC-17/UC-18).
+on-disk JSON shape differs. `bigCoverPane`/`tagInfoPane`/`audioVisualizerPane` are
+also nested; unlike the others, their *presence* in the file (not a stored bool) is
+what "configured" means — absent means that pane has never been positioned yet, so
+`Main.qml` uses a centered default instead of its saved `X`/`Y` (see UC-17/UC-18/UC-19).
 
 ### AppConfig public API
 
@@ -803,6 +815,14 @@ default instead of its saved `X`/`Y` (see UC-17/UC-18).
 | `saveBigCoverPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles; `screenName` is stored for completeness/debugging but not re-exposed as its own property. Auto-saves. Called from `Main.qml`'s `Loader` on `FloatingPane.geometrySettled()`. |
 | `tagInfoPaneConfigured` / `tagInfoPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable TagInfoWindow pane's last-saved geometry (defaults `500`×`230`, `configured` starts `false`). Same convention as `bigCoverPane*` above. See UC-18. |
 | `saveTagInfoPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles. Same calling convention as `saveBigCoverPaneGeometry`. |
+| `audioVisualizerBarCount` / `setAudioVisualizerBarCount(count)` | Number of bars the Audio Visualizer pane renders (default `24`); clamped to `[8, 64]`; auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider. Read live by `AudioVisualizerController` on every processed audio block — never cached, same convention `PlaybackEngine` uses for crossfade settings. See UC-19. |
+| `audioVisualizerColor` / `setAudioVisualizerColor(color)` | Hex color string for the bars (default `"#00DAF3"`); no validation beyond non-empty. Set from 32 preset swatches (16-column `Grid`, two full rows) on the AUDIO VISUALIZER tab (not a full color picker — see UC-19). |
+| `audioVisualizerDecaySpeed` / `setAudioVisualizerDecaySpeed(speed)` | How quickly bars fall after a peak (default `0.5`); clamped to `[0.0, 1.0]`; auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider ("SLOW"…"FAST"). |
+| `audioVisualizerSensitivity` / `setAudioVisualizerSensitivity(sensitivity)` | Gain offset applied before dB normalization in `AudioVisualizerController::processBlock` (default `0.5` = no change from the original fixed mapping); clamped to `[0.0, 1.0]`; auto-saves. Mapped to ±18dB (`(sensitivity - 0.5) * 2 * 18`) — `1.0` boosts bars closer to full height on loud passages, `0.0` cuts them noticeably lower. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider ("LOW"…"HIGH", displayed 0–100%). See UC-19. |
+| `audioVisualizerPeakHoldEnabled` / `setAudioVisualizerPeakHoldEnabled(enabled)` | Whether a slowly-decaying peak marker is drawn above each bar (default `true`); auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab toggle. |
+| `audioVisualizerPaneOpacity` / `setAudioVisualizerPaneOpacity(opacity)` | Background-only opacity for the Audio Visualizer pane (default `1.0`, fully opaque); clamped to `[0.0, 1.0]`; auto-saves. Applied to `AudioVisualizerWindow`'s `Window.color` alpha channel only — never to the bars/peak ticks, which stay fully opaque regardless. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider (0–100%). |
+| `audioVisualizerPaneConfigured` / `audioVisualizerPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable AudioVisualizerWindow pane's last-saved geometry (defaults `500`×`260`, `configured` starts `false`). Same convention as `bigCoverPane*`/`tagInfoPane*` above. See UC-19. |
+| `saveAudioVisualizerPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles. Same calling convention as `saveBigCoverPaneGeometry`. |
 | `save()` | Persist current state to `Topaz.config` (called automatically by all mutators). |
 
 ## Data Flow: Genre Filter (GenreBar toggle)
@@ -1436,6 +1456,14 @@ these maps: `LibraryModel::filteredAlbums()`'s per-track map (used when queueing
 `PlaylistManager::loadPlaylist()`'s per-entry map (re-read live from the file via
 `TagReader::read()`). No scanner or cache-schema change — the data already existed in
 `TrackInfo`, it just wasn't being copied into the maps that cross into the queue.
+
+**`audioBufferAvailable(const QAudioBuffer &buffer)` signal (added for the audio
+visualizer, UC-19)**: not a `Q_PROPERTY`/QML-facing signal — only
+`AudioVisualizerController` (plain C++) connects to it. Emitted from a per-deck
+`QAudioBufferOutput::audioBufferReceived` handler, filtered to `m_activeDeck` only
+(a deliberate simplification during crossfades — see UC-19's "Known limitations").
+`QAudioBufferOutput` requires Qt Multimedia's FFmpeg backend; see UC-19 for how that
+was confirmed present on the reference toolchain.
 
 ### Queue model roles (used by PlaybackQueue.qml delegate)
 
@@ -2226,7 +2254,8 @@ rather than carrying stale state between opens.
 
 ### `FloatingPane.qml` — reusable chrome
 
-A frameless (`flags: Qt.Window | Qt.FramelessWindowHint`) `Window` base:
+A frameless (`flags: Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint`)
+`Window` base:
 - `default property alias contentData: contentItem.data` — subclasses just nest
   their content directly inside `FloatingPane { ... }` (see `BigCoverWindow.qml`).
 - **Move**: a whole-pane `MouseArea` calls `Window.startSystemMove()` — an OS-native
@@ -2269,6 +2298,65 @@ A frameless (`flags: Qt.Window | Qt.FramelessWindowHint`) `Window` base:
   later — the owner wires this signal to actual persistence.
 - Starts `visible: false` explicitly (not relying on `Window`'s own default) so it
   never flashes at a default position before the owner repositions it.
+
+### `WindowChrome` singleton — genuine translucency + removing OS-drawn chrome
+
+Added when `AudioVisualizerWindow`'s configurable background opacity (see UC-19)
+exposed two separate, unrelated gaps in "frameless," found and fixed across two
+rounds:
+
+**Round 1 (insufficient on its own): Windows 11's default DWM accent border** —
+drawn around *every* top-level window since Windows 11 build 22000, independent of
+frameless status or content. No QML property covers this; requires a native
+`DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &DWMWA_COLOR_NONE, ...)` call. This
+alone was shipped first and turned out not to be the (whole) problem — the user
+reported the pane still looked like "a solid/opaque box," not just a bordered one.
+
+**Round 2 (the actual fix): the window wasn't translucent at all.** Qt6's default
+hardware-rendering (RHI/D3D11) backend on Windows does not reliably negotiate
+window-level alpha compositing from a QML `color` binding with alpha alone — a real,
+somewhat known Qt6-on-Windows limitation (Qt Forum: "Qt5 -> Qt6 partial window
+transparency"; "Translucent background not rendering correctly in Qt6 with hardware
+rendering but works with Software rendering"), confirmed here empirically (pane
+opacity read back correctly but rendered fully opaque regardless). The fix: request
+an alpha-capable `QSurfaceFormat` (`setAlphaBufferSize(8)`) **before** the native
+window is created — once created, the surface format is locked in, and a `color`
+binding with alpha from that point only controls what's drawn, not whether the
+window *can* composite as translucent at all.
+
+Both concerns live in one class, `windowchrome.h`/`.cpp` — a small `QObject` with
+`QML_ELEMENT` + `QML_SINGLETON` (stateless, one shared instance), exposing a single
+`Q_INVOKABLE void prepareWindow(QQuickWindow *window)` that does, strictly in this
+order:
+1. `window->setFormat()` with `setAlphaBufferSize(8)` requested — **must** happen
+   before anything forces native creation.
+2. `window->create()` — explicit, with that format now locked in.
+3. `DwmSetWindowAttribute(..., DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, ...)` — only
+   possible once a real `HWND` exists, which step 2 guarantees.
+
+`FloatingPane.qml` calls it from its own
+`Component.onCompleted: WindowChrome.prepareWindow(pane)` — nested
+`Component.onCompleted` handlers fire innermost-first, so this runs before any
+subclass's outer `Component.onCompleted` (in `Main.qml`'s `Loader.sourceComponent`
+blocks, which set `visible = true`), guaranteeing the correct step order relative to
+the window actually being shown.
+
+`DWMWA_BORDER_COLOR`/`DWMWA_COLOR_NONE` are **hardcoded as raw constants** (`34` /
+`0xFFFFFFFE`) rather than relied upon as names from mingw-w64's bundled `dwmapi.h` —
+both are Windows 11 additions that header may predate, the same defensive reasoning
+already applied to `SystemVolumeController`'s hardcoded COM GUIDs. Values
+cross-checked against Microsoft's published `DWMWINDOWATTRIBUTE` documentation
+before writing any code. The DWM call logs via `qWarning()` and no-ops on failure
+(e.g. pre-Windows-11, where it simply fails harmlessly) rather than crashing — same
+convention `SystemVolumeController` uses for COM failures. Requires linking
+`dwmapi` (parallel to `ole32` for `SystemVolumeController`).
+
+Applies to every pane in the family (`BigCoverWindow`/`TagInfoWindow`/
+`AudioVisualizerWindow`), not just the visualizer — harmless for the two always-opaque
+panes (an unused alpha channel changes nothing visually for them).
+
+Windows-only, no `#ifdef` guard — same as `SystemVolumeController`; both are tracked
+together as needing a platform switch for a future Linux port.
 
 ### Aspect-locked resize (`fixedAspectRatio`)
 
@@ -2597,4 +2685,279 @@ Same as UC-17's: no live handling of screen-configuration changes while the pane
 open (only restore-at-open is validated against connected screens), and open/closed
 state is not persisted across app restarts — every launch starts with the pane
 closed.
+
+## UC-19 Audio Visualizer (Bars)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | User opens a detachable pane showing real-time bumping bars driven by the currently playing track's audio spectrum. |
+| **Actor** | User |
+| **Precondition** | Topaz is running. |
+| **Trigger** | User clicks the "AUDIO VISUALIZER" button in `BottomBar`. |
+
+Third pane built on the `FloatingPane.qml` base introduced for UC-17 — see that
+section for the shared chrome and UC-18 for the toggle-button wiring pattern this
+one mirrors exactly. This section covers what's specific to the visualizer: the
+first third-party dependency this codebase has taken on, the audio-tap mechanism,
+and the FFT/rendering pipeline.
+
+### KissFFT — first third-party dependency
+
+Everything in Topaz before this was hand-rolled specifically to stay
+dependency-free (`TagReader`'s "dependency-free ID3v2/FLAC/Vorbis reader" being the
+clearest example). A bar visualizer needs a real FFT, and hand-rolling one wasn't
+worth it against a tiny, permissively-licensed, purpose-fit library — so this is a
+deliberate, scoped exception, not a change in philosophy.
+
+Two candidates were evaluated: **FFTW** (the speed benchmark for scientific/HPC FFT
+workloads) is GPL-licensed — using the open-source build would require Topaz itself
+to be GPL, or a paid commercial license from MIT; also far more machinery than a
+16-64-bar visualizer's FFT workload needs. **KissFFT** (BSD-3-Clause, ~500 lines of
+C for the core transform, real-FFT variant built in, runtime-configurable size) has
+no such licensing entanglement and is trivially small — chosen for both reasons.
+
+Vendored under `third_party/kissfft/` (first use of a `third_party/` layout in this
+repo — everything else sits flat at the root; vendored foreign code is kept visibly
+separate from Topaz's own sources): `kiss_fft.h/.c`, `kiss_fft_log.h`,
+`_kiss_fft_guts.h`, `kiss_fftr.h/.c` (the real-FFT wrapper, the actual entry point
+used — audio samples are real-valued, not complex; `kiss_fft.c` is its dependency).
+Unmodified upstream sources, compiled as plain C (`project(... LANGUAGES CXX C RC)`
+in `CMakeLists.txt` — the rest of the codebase is C++, so C had to be explicitly
+enabled as a project language for these files to compile at all).
+
+### `PlaybackEngine` — audio tap
+
+Getting live PCM samples out of `QMediaPlayer` requires Qt 6.8+'s
+`QAudioBufferOutput` API, which **only works with Qt Multimedia's FFmpeg backend**.
+Confirmed present and default on the reference Qt 6.10.2 mingw_64 toolchain before
+writing any code (`plugins/multimedia/ffmpegmediaplugin.dll` and `bin/avcodec-61.dll`
+both exist; nothing in the codebase overrides `QT_MEDIA_BACKEND`) — this was the one
+real feasibility risk in the whole feature, checked and cleared up front rather than
+discovered mid-implementation.
+
+`PlaybackEngine` runs two independent `QMediaPlayer`/`QAudioOutput` decks for
+crossfading (see UC-15). A parallel `QAudioBufferOutput m_audioBufferOutputs[2]`
+array is constructed inside the same per-deck loop that builds `m_players`/
+`m_audioOutputs`, via `m_players[d]->setAudioBufferOutput(m_audioBufferOutputs[d])`
+— independent of `setAudioOutput()`, doesn't touch normal playback in any way. Each
+deck's `audioBufferReceived` signal is connected to a `[this, d]` lambda that emits
+a new signal, `void audioBufferAvailable(const QAudioBuffer &buffer)`, **only when
+`d == m_activeDeck`** (see the `PlaybackEngine` Public API section above for the
+signal's own doc comment).
+
+**Known limitation — crossfade simplification**: outside a crossfade, `m_activeDeck`
+always matches the one deck that's actually audible, so this is exact. *During* a
+crossfade, both decks are genuinely audible simultaneously for the whole fade
+duration (complementary volumes, linearly ramped every 40ms tick — see
+`onFadeTick()` in UC-15), and `m_activeDeck` doesn't flip to the incoming deck until
+the fade's *midpoint*. The visualizer therefore silently ignores the fading-out
+deck's contribution for the back half of every crossfade (and the fading-in deck for
+the front half) — a real but minor, purely cosmetic gap. Accurate crossfade mixing
+would mean weighting both decks' buffers by the fade fraction (not currently stored
+as a member, only local to `onFadeTick()`) — a reasonable future enhancement, not
+part of this first version, which was scoped to "a simple audio visualizer to see
+how this works out."
+
+### `AudioVisualizerController` — FFT pipeline
+
+`QObject` + `QML_ELEMENT`, modeled on `AutoPlayController`'s shape: depends on
+`PlaybackEngine` + `AppConfig`, neither of which knows this class exists (same
+"controller subscribes to the engine's signals" split). `setEngine()` connects to
+`audioBufferAvailable`; bar/decay/color settings are read live from `AppConfig` on
+every processed block, never cached — same convention `PlaybackEngine` already uses
+for crossfade settings.
+
+Per-buffer pipeline (`onAudioBufferAvailable` → `appendSamples` → `processBlock`):
+1. **Extract mono samples**: averages channels from the buffer's interleaved PCM.
+   Only `QAudioFormat::Float` and `QAudioFormat::Int16` are handled (the two formats
+   actually produced by the FFmpeg backend in practice) — anything else is silently
+   skipped. A deliberate simplification, not a generic-format converter.
+2. **Accumulate** into a rolling sample buffer; once `kFftSize` (1024) samples are
+   available, consume exactly that many and repeat for any remainder — a plain
+   non-overlapping block FFT, no overlap-add window sliding (unnecessary precision
+   for a bar visualizer).
+3. **Hann window** the block (reduces spectral leakage from analyzing a finite,
+   non-periodic slice of audio) — standard practice for spectrum analysis.
+4. **`kiss_fftr`** (real FFT) → `kFftSize/2+1` complex frequency bins.
+5. **Log-spaced band grouping**: bins are averaged into `barCount` bands spaced
+   logarithmically from 40Hz to `min(nyquist, 16kHz)` — matches how the spectrum is
+   perceived (a linear bin→bar mapping would crush the entire low end into a
+   handful of bars while treble smears across dozens).
+6. **dB-scale + clamp** each band into `[0,1]` (empirically-chosen -60dB/0dB
+   floor/ceiling, not exposed directly), after first adding a gain offset
+   (`gainDb`) derived from `appConfig.audioVisualizerSensitivity` — `0.5`
+   (default) contributes `0dB` (no change from the original mapping); the
+   ±18dB range (`kMaxSensitivityBoostDb`) shifts where a given signal lands
+   within the fixed floor/ceiling rather than moving the floor/ceiling
+   themselves, since how much headroom typical music leaves below 0dBFS
+   varies a lot by mastering.
+7. **Decay**: `displayed = max(newLevel, previous - decayRate)`, where `decayRate`
+   derives from `appConfig.audioVisualizerDecaySpeed` — bars fall smoothly instead
+   of jittering every block. The single biggest factor in how "alive" the
+   visualizer feels.
+8. **Peak-hold**: a second, much-more-slowly-decaying value per bar, snapping up
+   instantly to new highs.
+
+Buffer arrival happens on the FFmpeg decode thread; the `connect()` between
+`PlaybackEngine` (that thread) and `AudioVisualizerController` (main thread) uses
+ordinary `Qt::AutoConnection`, which already queues delivery onto the receiver's
+thread automatically — no manual `QMetaObject::invokeMethod` marshaling needed here,
+unlike `SystemVolumeController`'s COM-callback case (UC-16), because this is a
+regular Qt signal/slot connection, not a foreign (non-Qt) callback.
+
+`barLevels`/`peakLevels` (`Q_PROPERTY QVariantList`, shared `NOTIFY
+barLevelsChanged`) are **not** updated on every processed block — an internal
+`QTimer` at ~30fps (33ms) publishes whatever's accumulated since the last tick,
+decoupled from the raw block-processing rate (which can be considerably higher-
+frequency than useful for a UI update).
+
+### `AudioVisualizerWindow.qml`
+
+A `FloatingPane` specialization with **no `fixedAspectRatio`** (freely resizable,
+like `TagInfoWindow`) and a `minPaneWidth: 400` / `minPaneHeight: 200` floor. Purely
+a renderer — all analysis lives in the C++ controller. A `Row` of bar `Item`s, one
+per entry in `barModel` (`visualizer.barLevels`); each bar is a bottom-anchored
+`Rectangle` whose height is `parent.height * level`, plus a thin peak-hold
+`Rectangle` positioned via `anchors.bottomMargin: parent.height * peak` when
+`visualizerConfig.audioVisualizerPeakHoldEnabled`. Color comes from
+`visualizerConfig.audioVisualizerColor` (falls back to `Theme.primary` if unset).
+
+**Repeater model is a plain integer (bar count), not the level array itself** — a
+deliberate performance choice. The level array is reassigned wholesale ~30 times a
+second; if that array were bound directly as `Repeater.model`, Qt Quick would treat
+every reassignment as an entirely new list and recreate every delegate each tick.
+Binding `model: barsRow.barCount` (a stable integer that only changes when the user
+changes the bar-count setting) means delegates are created once; only their
+`height`/`anchors.bottomMargin` bindings — which read `barModel[index]` reactively —
+recompute each tick, which is far cheaper.
+
+Same placeholder idiom as `BigCoverWindow`/`TagInfoWindow` (gradient + "♫ NO TRACK")
+when `!engine.currentTitle`. `property var visualizer`/`engine`/`visualizerConfig`
+are all set via `Main.qml`'s `Loader.onLoaded` — the same Component-root
+scoping-gotcha fix applied to every pane in this family (see UC-17's `Main.qml
+wiring` section). This is the first pane to also need `AppConfig` directly (for
+visual settings, not playback data) — `BigCoverWindow`/`TagInfoWindow` never needed it.
+
+**Background-only pane opacity** (`visualizerConfig.audioVisualizerPaneOpacity`,
+0.0–1.0): applied to the pane's own `color` (a `Window.color` with an alpha channel
+below full makes only that window's clear/background translucent — see
+`WindowChrome` in UC-17 for the native prerequisite this actually needs on Windows)
+**and** to the no-track placeholder's gradient — both count as "the pane's
+background" for this setting. Deliberately **not** `Window.opacity` — that fades
+the entire window including its content, which would make the bars translucent
+too. Every bar/peak-tick `Rectangle` keeps its own fully-opaque `color` binding
+untouched, so they stay crisp at any background opacity, letting the user drop the
+pane anywhere (over the desktop, another window, etc.) with just the bars visible
+and no panel behind them.
+
+Two rounds were needed to get this fully invisible at 0%:
+```qml
+color: Qt.rgba(Theme.surfaceContainerLowest.r * paneOpacity,
+               Theme.surfaceContainerLowest.g * paneOpacity,
+               Theme.surfaceContainerLowest.b * paneOpacity,
+               paneOpacity)
+```
+- **The window's own clear color premultiplies RGB by `paneOpacity`, not just the
+  alpha channel.** DWM/Direct3D composition on Windows expects a
+  premultiplied-alpha convention for a composited window's clear color — at true
+  zero opacity the RGB channels must also be zero, or a compositor assuming
+  premultiplied input can render a faint residual tint instead of true
+  invisibility. This treatment is specific to the *window's own* clear color;
+  ordinary in-scene `Rectangle`s (including the placeholder below) are handled by
+  Qt Quick's own scenegraph alpha blending and don't need it — a plain
+  `Qt.rgba(r, g, b, paneOpacity)` (alpha only) is correct for those.
+- **The no-track placeholder's gradient was initially left hardcoded fully
+  opaque** (a deliberate scope decision when the setting was first built) — wrong
+  in practice, since the pane is easily open with nothing playing (right after
+  launch, between tracks), and in that state the opacity slider had *no visible
+  effect at all*. Fixed by scaling both `GradientStop` colors' alpha by
+  `paneOpacity` the same way the bars background is.
+
+**A stricter variant of the scoping gotcha, found and fixed after the pane shipped
+not opening at all**: this pane's own config property is named `visualizerConfig`,
+*not* `appConfig`, deliberately. It was originally named `appConfig` (matching the
+outer `id: appConfig` in `Main.qml`, the obvious name) — but `Main.qml`'s
+`Component.onCompleted` for this pane (the geometry-restore block, same shape as
+`BigCoverWindow`/`TagInfoWindow`'s) reads the bare identifier `appConfig` too, to
+check `appConfig.audioVisualizerPaneConfigured` and restore saved geometry. Both
+that `Component.onCompleted` code and the pane's own property live in the *same
+object's scope* — so once the pane declared a same-named property, ordinary QML
+scoping made every unqualified `appConfig` reference anywhere in that object
+(not just one declarative-binding position, unlike the original `BigCoverWindow`
+`engine` bug) resolve to the pane's *own*, not-yet-set `null` property instead of
+the outer `AppConfig` instance. `Component.onCompleted` runs before
+`Loader.onLoaded` gets a chance to assign the property, so `appConfig` read `null`
+there, `appConfig.audioVisualizerPaneConfigured` threw, and the handler silently
+aborted **before ever reaching `visible = true`** — the pane object was created but
+never shown, moved, or raised. Symptom: clicking the button did nothing visible.
+Unlike the `engine`-collision case (still present here too, but dormant — this
+pane's own `Component.onCompleted` never reads `engine`), this collision was live
+because the geometry-restore logic genuinely needs to read the shadowed name. Fix:
+rename the pane's own property so it can never collide with any `Main.qml` outer id,
+rather than trying to special-case the read (there's no way to make
+`Component.onCompleted` run after `onLoaded`). **Lesson for any future
+`FloatingPane` subclass**: never name a pane-local property identically to a
+`Main.qml` outer id if any code inside that pane's own scope — including
+`Component.onCompleted` — needs to read the *outer* value; rename the local
+property instead of trying to work around the shadowing.
+
+### `BottomBar.qml` / `Main.qml` wiring
+
+Identical pattern to UC-18's TAG INFORMATION wiring — the "AUDIO VISUALIZER" button
+already existed in `BottomBar`'s model array (confirmed still a pure placeholder,
+same starting state TAG INFORMATION was in) but had no `isXBtn` flag, signal, or
+`onClicked` branch until now. `signal audioVisualizerToggleRequested()` +
+`property bool audioVisualizerPaneOpen` (bound from `Main.qml`), `Main.qml`'s
+`audioVisualizerLoader` is a structural mirror of `tagInfoLoader` (default
+size 500×260 on first-ever-open), and `AudioVisualizerController` is instantiated
+once in `Main.qml` alongside `AutoPlayController`/`SystemVolumeController`.
+
+### `AppConfig` — settings + pane geometry persistence
+
+Two separate nested JSON objects, matching how pane geometry is already kept
+separate from feature settings elsewhere (`bigCoverPane` vs. nothing analogous,
+`tagInfoPane` vs. nothing analogous — this is the first pane with *both* kinds):
+- `"audioVisualizer"`: `barCount`/`color`/`decaySpeed`/`peakHoldEnabled`, each a
+  normal scalar `Q_PROPERTY` + dedicated `Q_INVOKABLE` setter — the
+  `autoPlayQueueHorizon`/`setAutoPlayQueueHorizon` convention, not the
+  single-geometry-setter one.
+- `"audioVisualizerPane"`: exact mirror of `tagInfoPane`'s geometry block.
+
+See the `AppConfig` public API table and Config file format section above for the
+full property list and JSON shape.
+
+### `SetupDialog.qml` — "AUDIO VISUALIZER" tab
+
+Fifth tab, appended to the existing tab-strip `Repeater`'s model array. Styled
+identically to the CROSSFADE/AUTO PLAY tabs it was built from: custom-styled
+`Slider`s (4px track / 16px handle, `Theme.secondary` accent) for bar count
+(8-64), decay speed (0.0-1.0), sensitivity (0-100%, displayed as a percentage,
+divided by 100 when calling `setAudioVisualizerSensitivity`; 50% is "no
+change" from the original fixed dB mapping — see the `AudioVisualizerController`
+pipeline above), and pane opacity (0-100%, displayed as a percentage,
+divided by 100 when calling `setAudioVisualizerPaneOpacity`), the same hand-rolled
+48×24 toggle track for peak-hold, and — for color — a fixed 16-column `Grid`
+(not `Row`; 32 swatches at 32px + 16px spacing no longer fit on one line at the
+dialog's content width, so `columns: 16` lays them out as two full rows of 16
+regardless of available width) of 32 preset swatch `Rectangle`s using the same
+"`Repeater` over an options array compared against one `AppConfig` value" idiom
+already used for `autoPlaySongRepeat`/`autoPlayTransportAccess`'s radio groups,
+just rendered as color chips instead of labeled circles. The 32 presets are the
+original 8 (4 of which already match Theme tokens — `Theme.secondary`,
+`Theme.primary`, `Theme.tertiary`, `Theme.fgSurface`) plus 24 additional
+saturated colors spread across the hue wheel, appended in a fixed order so
+existing selections stay stable. A full HSV/RGB color picker was deliberately
+not built for this first version — presets are simpler and consistent with
+starting small; a real picker is a reasonable later enhancement.
+
+### Known limitations (not fixed, not requested)
+
+- Crossfade audio mixing simplification — see the `PlaybackEngine` section above.
+- Only `Float`/`Int16` sample formats are handled; other formats are silently
+  skipped (no visible error, bars just stay flat).
+- dB floor/ceiling for level normalization (-60dB/0dB) are hardcoded constants,
+  not exposed as settings — only a ±18dB gain offset around them is, via the
+  Sensitivity setting.
+- Same as UC-17/UC-18: no live handling of screen-configuration changes while the
+  pane is open, and open/closed state is not persisted across app restarts.
 

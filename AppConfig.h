@@ -22,7 +22,12 @@
 //     "bigCoverPane": { "x": 100, "y": 100, "width": 400, "height": 400,
 //                       "screenName": "DISPLAY1" },
 //     "tagInfoPane": { "x": 100, "y": 100, "width": 500, "height": 230,
-//                      "screenName": "DISPLAY1" }
+//                      "screenName": "DISPLAY1" },
+//     "audioVisualizer": { "barCount": 24, "color": "#00DAF3",
+//                           "decaySpeed": 0.5, "peakHoldEnabled": true,
+//                           "paneOpacity": 1.0, "sensitivity": 0.5 },
+//     "audioVisualizerPane": { "x": 100, "y": 100, "width": 500, "height": 260,
+//                              "screenName": "DISPLAY1" }
 //   }
 // autoPlaySongRepeat allowed values: "once", "twice", "twiceIfNoneAvailable", "several".
 // autoPlayTransportAccess allowed values: "nothing", "playPause", "playPauseAndSelect"
@@ -83,6 +88,28 @@ class AppConfig : public QObject
     Q_PROPERTY(int  tagInfoPaneWidth      READ tagInfoPaneWidth      NOTIFY tagInfoPaneChanged)
     Q_PROPERTY(int  tagInfoPaneHeight     READ tagInfoPaneHeight     NOTIFY tagInfoPaneChanged)
 
+    // ── Audio visualizer settings (see AudioVisualizerController / UC-19) ──
+    Q_PROPERTY(int    audioVisualizerBarCount       READ audioVisualizerBarCount       NOTIFY audioVisualizerChanged)
+    Q_PROPERTY(QString audioVisualizerColor         READ audioVisualizerColor          NOTIFY audioVisualizerChanged)
+    Q_PROPERTY(double  audioVisualizerDecaySpeed    READ audioVisualizerDecaySpeed     NOTIFY audioVisualizerChanged)
+    // Gain offset applied before dB normalization — 0.5 is "no change" (today's
+    // default response); 1.0 boosts by +18dB, 0.0 cuts by -18dB. See
+    // AudioVisualizerController::processBlock.
+    Q_PROPERTY(double  audioVisualizerSensitivity   READ audioVisualizerSensitivity    NOTIFY audioVisualizerChanged)
+    Q_PROPERTY(bool    audioVisualizerPeakHoldEnabled READ audioVisualizerPeakHoldEnabled NOTIFY audioVisualizerChanged)
+    // Background-only opacity for the pane window itself (Window.color alpha) —
+    // never applied to the bars/peak ticks, which stay fully opaque regardless.
+    // See AudioVisualizerWindow.qml.
+    Q_PROPERTY(double  audioVisualizerPaneOpacity     READ audioVisualizerPaneOpacity    NOTIFY audioVisualizerChanged)
+
+    // ── Detachable "audio visualizer" pane geometry (see FloatingPane.qml / AudioVisualizerWindow.qml) ──
+    // Same READ-only + Q_INVOKABLE-setter convention as bigCoverPane/tagInfoPane above.
+    Q_PROPERTY(bool audioVisualizerPaneConfigured READ audioVisualizerPaneConfigured NOTIFY audioVisualizerPaneChanged)
+    Q_PROPERTY(int  audioVisualizerPaneX          READ audioVisualizerPaneX          NOTIFY audioVisualizerPaneChanged)
+    Q_PROPERTY(int  audioVisualizerPaneY          READ audioVisualizerPaneY          NOTIFY audioVisualizerPaneChanged)
+    Q_PROPERTY(int  audioVisualizerPaneWidth      READ audioVisualizerPaneWidth      NOTIFY audioVisualizerPaneChanged)
+    Q_PROPERTY(int  audioVisualizerPaneHeight     READ audioVisualizerPaneHeight     NOTIFY audioVisualizerPaneChanged)
+
 public:
     explicit AppConfig(QObject *parent = nullptr);
 
@@ -118,6 +145,19 @@ public:
     int  tagInfoPaneY()          const { return m_tagInfoPaneY;          }
     int  tagInfoPaneWidth()      const { return m_tagInfoPaneWidth;      }
     int  tagInfoPaneHeight()     const { return m_tagInfoPaneHeight;     }
+
+    int     audioVisualizerBarCount()         const { return m_audioVisualizerBarCount;         }
+    QString audioVisualizerColor()            const { return m_audioVisualizerColor;            }
+    double  audioVisualizerDecaySpeed()       const { return m_audioVisualizerDecaySpeed;       }
+    double  audioVisualizerSensitivity()      const { return m_audioVisualizerSensitivity;      }
+    bool    audioVisualizerPeakHoldEnabled()  const { return m_audioVisualizerPeakHoldEnabled;  }
+    double  audioVisualizerPaneOpacity()      const { return m_audioVisualizerPaneOpacity;      }
+
+    bool audioVisualizerPaneConfigured() const { return m_audioVisualizerPaneConfigured; }
+    int  audioVisualizerPaneX()          const { return m_audioVisualizerPaneX;          }
+    int  audioVisualizerPaneY()          const { return m_audioVisualizerPaneY;          }
+    int  audioVisualizerPaneWidth()      const { return m_audioVisualizerPaneWidth;      }
+    int  audioVisualizerPaneHeight()     const { return m_audioVisualizerPaneHeight;     }
 
     // ── Genre operations ─────────────────────────────────────────────────
     Q_INVOKABLE void addGenre(const QString &name);
@@ -177,6 +217,25 @@ public:
     Q_INVOKABLE void saveTagInfoPaneGeometry(int x, int y, int width, int height,
                                               const QString &screenName);
 
+    // ── Audio visualizer operations ──────────────────────────────────────
+    // Clamped to [8, 64].
+    Q_INVOKABLE void setAudioVisualizerBarCount(int count);
+    // No validation beyond non-empty — QML supplies a preset hex color string.
+    Q_INVOKABLE void setAudioVisualizerColor(const QString &color);
+    // Clamped to [0.0, 1.0].
+    Q_INVOKABLE void setAudioVisualizerDecaySpeed(double speed);
+    // Clamped to [0.0, 1.0]; 0.5 is "no change" — see the Q_PROPERTY comment above.
+    Q_INVOKABLE void setAudioVisualizerSensitivity(double sensitivity);
+    Q_INVOKABLE void setAudioVisualizerPeakHoldEnabled(bool enabled);
+    // Background-only pane opacity; clamped to [0.0, 1.0]. Never applied to the
+    // bars/peak ticks — see AudioVisualizerWindow.qml.
+    Q_INVOKABLE void setAudioVisualizerPaneOpacity(double opacity);
+
+    // ── Audio visualizer pane geometry ───────────────────────────────────
+    // Same calling convention as saveBigCoverPaneGeometry above.
+    Q_INVOKABLE void saveAudioVisualizerPaneGeometry(int x, int y, int width, int height,
+                                                      const QString &screenName);
+
     // ── Persistence ──────────────────────────────────────────────────────
     Q_INVOKABLE void save();
 
@@ -196,6 +255,8 @@ signals:
     void autoPlayTransportAccessChanged();
     void bigCoverPaneChanged();
     void tagInfoPaneChanged();
+    void audioVisualizerChanged();
+    void audioVisualizerPaneChanged();
 
 private:
     void    load();
@@ -236,4 +297,18 @@ private:
     int     m_tagInfoPaneWidth      = 500;
     int     m_tagInfoPaneHeight     = 230;
     QString m_tagInfoPaneScreenName;
+
+    int     m_audioVisualizerBarCount        = 24;
+    QString m_audioVisualizerColor           = QStringLiteral("#00DAF3");
+    double  m_audioVisualizerDecaySpeed      = 0.5;
+    double  m_audioVisualizerSensitivity     = 0.5;
+    bool    m_audioVisualizerPeakHoldEnabled = true;
+    double  m_audioVisualizerPaneOpacity     = 1.0;
+
+    bool    m_audioVisualizerPaneConfigured = false;
+    int     m_audioVisualizerPaneX          = 0;
+    int     m_audioVisualizerPaneY          = 0;
+    int     m_audioVisualizerPaneWidth      = 500;
+    int     m_audioVisualizerPaneHeight     = 260;
+    QString m_audioVisualizerPaneScreenName;
 };

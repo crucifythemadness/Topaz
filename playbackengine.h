@@ -7,6 +7,8 @@
 #include <QQmlEngine>
 #include <QMediaPlayer>
 #include <QAudioOutput>
+#include <QAudioBufferOutput>
+#include <QAudioBuffer>
 #include <QFutureWatcher>
 #include <QTimer>
 
@@ -192,6 +194,14 @@ signals:
     // neither queueCountChanged nor currentIndexChanged fires in that branch.
     void queueExhausted();
 
+    // Decoded PCM audio for whichever deck is currently active (m_activeDeck),
+    // for AudioVisualizerController to consume — see UC-19. Not QML-facing (no
+    // Q_PROPERTY), just a plain C++ signal; QAudioBuffer needs no meta-type
+    // registration since only a C++ slot connects to it. During a crossfade the
+    // standby deck's buffers are silently dropped (see UC-19's "Known
+    // limitations" — a deliberate simplification, not an oversight).
+    void audioBufferAvailable(const QAudioBuffer &buffer);
+
 private:
     void loadTrack(int index);
     void advanceToNext();
@@ -228,6 +238,10 @@ private:
     // m_players[m_activeDeck]/m_audioOutputs[m_activeDeck].
     QMediaPlayer              *m_players[2]        = { nullptr, nullptr };
     QAudioOutput               *m_audioOutputs[2]   = { nullptr, nullptr };
+    // Parallel to m_audioOutputs — decoded-buffer tap for the visualizer.
+    // Independent of m_audioOutputs (a player can have both simultaneously);
+    // doesn't touch normal playback in any way.
+    QAudioBufferOutput         *m_audioBufferOutputs[2] = { nullptr, nullptr };
     int                         m_activeDeck        = 0;
     QMediaPlayer              *m_player            = nullptr;
     QAudioOutput               *m_audioOutput       = nullptr;

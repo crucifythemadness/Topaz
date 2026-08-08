@@ -118,7 +118,7 @@ Popup {
                 spacing: 0
 
                 Repeater {
-                    model: ["GENRES", "FILE MONITORING", "CROSSFADE", "AUTO PLAY"]
+                    model: ["GENRES", "FILE MONITORING", "CROSSFADE", "AUTO PLAY", "AUDIO VISUALIZER"]
 
                     delegate: Item {
                         width:  tabLabel.implicitWidth + 32
@@ -1439,6 +1439,551 @@ Popup {
                     Item { Layout.fillHeight: true }   // push content to top
                 }
             } // end AUTO PLAY panel
+
+            // ────────────────────────────────────────────────────────────
+            // PANEL 5 — AUDIO VISUALIZER
+            // ────────────────────────────────────────────────────────────
+            Item {
+                anchors.fill: parent
+                visible: tabBar.currentTab === 4
+
+                ColumnLayout {
+                    anchors { fill: parent; margins: 24 }
+                    spacing: 40
+
+                    // ── Bar Count row ──────────────────────────────────
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Bar Count"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("How many bars the Audio Visualizer pane shows")
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(barCountSlider.value) + " bars"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "8"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: barCountSlider
+                                Layout.fillWidth: true
+                                from: 8
+                                to:   64
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.audioVisualizerBarCount : 24
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioVisualizerBarCount(
+                                            Math.round(value))
+                                }
+
+                                background: Rectangle {
+                                    x: barCountSlider.leftPadding
+                                    y: barCountSlider.topPadding
+                                       + barCountSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  barCountSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  barCountSlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: barCountSlider.leftPadding
+                                       + barCountSlider.visualPosition
+                                         * (barCountSlider.availableWidth - width)
+                                    y: barCountSlider.topPadding
+                                       + barCountSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "64"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Decay Speed row ────────────────────────────────
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Decay Speed"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("How quickly bars fall after a peak")
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: decaySpeedSlider.value.toFixed(2)
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "SLOW"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: decaySpeedSlider
+                                Layout.fillWidth: true
+                                from: 0.0
+                                to:   1.0
+                                stepSize: 0.05
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.audioVisualizerDecaySpeed : 0.5
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioVisualizerDecaySpeed(value)
+                                }
+
+                                background: Rectangle {
+                                    x: decaySpeedSlider.leftPadding
+                                    y: decaySpeedSlider.topPadding
+                                       + decaySpeedSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  decaySpeedSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  decaySpeedSlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: decaySpeedSlider.leftPadding
+                                       + decaySpeedSlider.visualPosition
+                                         * (decaySpeedSlider.availableWidth - width)
+                                    y: decaySpeedSlider.topPadding
+                                       + decaySpeedSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "FAST"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Sensitivity row ─────────────────────────────────
+                    // How high the bars react to a given signal level — gain
+                    // offset applied before AudioVisualizerController's dB
+                    // normalization. 50% matches the original, unmodified
+                    // response; higher pushes bars closer to full height on
+                    // loud passages, lower makes them noticeably less reactive.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Sensitivity"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("How high the bars react to the current signal — 50% matches the default response")
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(sensitivitySlider.value) + "%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "LOW"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: sensitivitySlider
+                                Layout.fillWidth: true
+                                from: 0
+                                to:   100
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.audioVisualizerSensitivity * 100 : 50
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioVisualizerSensitivity(value / 100)
+                                }
+
+                                background: Rectangle {
+                                    x: sensitivitySlider.leftPadding
+                                    y: sensitivitySlider.topPadding
+                                       + sensitivitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  sensitivitySlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  sensitivitySlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: sensitivitySlider.leftPadding
+                                       + sensitivitySlider.visualPosition
+                                         * (sensitivitySlider.availableWidth - width)
+                                    y: sensitivitySlider.topPadding
+                                       + sensitivitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "HIGH"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Peak Hold row ──────────────────────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Peak Hold"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text:    qsTr("Show a lingering marker at each bar's recent peak")
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Toggle switch — same visual pattern as the CROSSFADE
+                        // tab's on/off toggle.
+                        Rectangle {
+                            id: peakHoldTrack
+
+                            readonly property bool peakHoldOn:
+                                root.appConfig !== null && root.appConfig.audioVisualizerPeakHoldEnabled
+
+                            width: 48; height: 24
+                            radius: 12
+                            color: peakHoldOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: peakHoldTrack.peakHoldOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioVisualizerPeakHoldEnabled(
+                                            !root.appConfig.audioVisualizerPeakHoldEnabled)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Pane Opacity row ────────────────────────────────
+                    // Background-only opacity — the bars themselves always
+                    // stay fully opaque, only the pane's own background fades.
+                    // See AudioVisualizerWindow.qml.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Pane Opacity"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("How visible the pane's background is — the bars themselves always stay fully visible")
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(paneOpacitySlider.value) + "%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "0%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: paneOpacitySlider
+                                Layout.fillWidth: true
+                                from: 0
+                                to:   100
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.audioVisualizerPaneOpacity * 100 : 100
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioVisualizerPaneOpacity(value / 100)
+                                }
+
+                                background: Rectangle {
+                                    x: paneOpacitySlider.leftPadding
+                                    y: paneOpacitySlider.topPadding
+                                       + paneOpacitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  paneOpacitySlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  paneOpacitySlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: paneOpacitySlider.leftPadding
+                                       + paneOpacitySlider.visualPosition
+                                         * (paneOpacitySlider.availableWidth - width)
+                                    y: paneOpacitySlider.topPadding
+                                       + paneOpacitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "100%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Color row ───────────────────────────────────────
+                    // Preset swatches rather than a full HSV/RGB picker —
+                    // same "Repeater over an options array compared against
+                    // one AppConfig value" idiom as the AUTO PLAY radio
+                    // groups above, just rendered as color chips instead of
+                    // labeled circles.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text {
+                            text: "Color"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Grid {
+                            Layout.leftMargin: 24
+                            columns: 16   // 32 swatches → exactly two full rows
+                            spacing: 16
+
+                            Repeater {
+                                model: [
+                                    // Original 8 — kept as-is (4 already match
+                                    // Theme tokens: secondary/primary/tertiary/fgSurface)
+                                    "#00DAF3", "#44E2CD", "#D0BCFF", "#FFB869",
+                                    "#FF6B6B", "#7CFF6B", "#FFE066", "#E5E2E1",
+                                    // 24 additional presets — a saturated spread
+                                    // across the hue wheel for clear visual
+                                    // distinction against the pane's dark background
+                                    "#FF3B30", "#FF9500", "#FFCC00", "#34C759",
+                                    "#00C7BE", "#30B0C7", "#007AFF", "#5856D6",
+                                    "#AF52DE", "#FF2D55", "#FF6482", "#A2845E",
+                                    "#8E8E93", "#64D2FF", "#BF5AF2", "#32ADE6",
+                                    "#FFD60A", "#4CD964", "#FF7A45", "#C77DFF",
+                                    "#06D6A0", "#EF476F", "#FFD166", "#118AB2"
+                                ]
+
+                                delegate: Rectangle {
+                                    width: 32; height: 32
+                                    radius: 16
+                                    color: modelData
+                                    border.width: (root.appConfig && root.appConfig.audioVisualizerColor === modelData) ? 3 : 1
+                                    border.color: (root.appConfig && root.appConfig.audioVisualizerColor === modelData) ? Theme.fgSurface : Theme.outlineVariant
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (root.appConfig)
+                                                root.appConfig.setAudioVisualizerColor(modelData)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }   // push content to top
+                }
+            } // end AUDIO VISUALIZER panel
 
         } // content Item
     } // contentItem ColumnLayout

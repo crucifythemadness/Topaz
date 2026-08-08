@@ -136,6 +136,54 @@ ApplicationWindow {
         }
     }
 
+    // ── Detachable "audio visualizer" pane ───────────────────────────────
+    // Opened by toggling the "AUDIO VISUALIZER" button in BottomBar; see
+    // FloatingPane.qml / AudioVisualizerWindow.qml for the pane itself, and
+    // AudioVisualizerController (C++) for the FFT/analysis pipeline that
+    // feeds it. Mirrors the tagInfoLoader wiring above exactly (same
+    // engine-binding scoping gotcha applies — see the onLoaded comment
+    // above bigCoverLoader).
+    property bool audioVisualizerPaneOpen: false
+
+    Loader {
+        id: audioVisualizerLoader
+        active: root.audioVisualizerPaneOpen
+        onLoaded: {
+            if (item) {
+                item.engine           = engine
+                item.visualizer       = audioVisualizer
+                item.visualizerConfig = appConfig
+            }
+        }
+
+        sourceComponent: AudioVisualizerWindow {
+            id: audioVisualizerWindow
+
+            Component.onCompleted: {
+                if (appConfig.audioVisualizerPaneConfigured &&
+                    root.rectIntersectsAnyScreen(appConfig.audioVisualizerPaneX, appConfig.audioVisualizerPaneY,
+                                                  appConfig.audioVisualizerPaneWidth, appConfig.audioVisualizerPaneHeight)) {
+                    width  = appConfig.audioVisualizerPaneWidth
+                    height = appConfig.audioVisualizerPaneHeight
+                    x      = appConfig.audioVisualizerPaneX
+                    y      = appConfig.audioVisualizerPaneY
+                } else {
+                    width  = 500
+                    height = 260
+                    x = Screen.virtualX + (Screen.width  - width)  / 2
+                    y = Screen.virtualY + (Screen.height - height) / 2
+                }
+                visible = true
+                raise()
+                requestActivate()
+            }
+
+            onGeometrySettled: (x, y, width, height, screenName) =>
+                appConfig.saveAudioVisualizerPaneGeometry(x, y, width, height, screenName)
+            onCloseRequested: root.audioVisualizerPaneOpen = false
+        }
+    }
+
     // Shared data model — owns genre toggle state and mock library.
     // Passed as `lib` property to GenreBar, LibraryTree, AlbumBrowser.
     AppConfig  { id: appConfig }
@@ -151,6 +199,14 @@ ApplicationWindow {
 
     // Windows OS master volume control — see systemvolumecontroller.h.
     SystemVolumeController { id: systemVolume }
+
+    // Audio visualizer analysis pipeline — see UC-19 in the architecture doc.
+    // Passed as `visualizer` property to AudioVisualizerWindow.
+    AudioVisualizerController {
+        id: audioVisualizer
+        engine:    engine
+        appConfig: appConfig
+    }
 
     // AUTO PLAY session/policy controller — see UC-16 in the architecture doc.
     // Passed as `autoPlay` property to BottomBar, AlbumBrowser, PlaybackQueue, NowPlaying.
@@ -273,8 +329,10 @@ ApplicationWindow {
             autoPlayReady: libraryModel.ratingsReady
             autoPlay: autoPlay
             tagInfoPaneOpen: root.tagInfoPaneOpen
+            audioVisualizerPaneOpen: root.audioVisualizerPaneOpen
             onScanRequested: libraryModel.startFullScan()
             onTagInfoToggleRequested: root.tagInfoPaneOpen = !root.tagInfoPaneOpen
+            onAudioVisualizerToggleRequested: root.audioVisualizerPaneOpen = !root.audioVisualizerPaneOpen
         }
     }
 }

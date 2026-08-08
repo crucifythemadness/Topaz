@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(Topaz VERSION 0.1 LANGUAGES CXX RC)
+project(Topaz VERSION 0.1 LANGUAGES CXX C RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,6 +32,18 @@ qt_add_executable(topaz
     autoplaycontroller.cpp
     systemvolumecontroller.h
     systemvolumecontroller.cpp
+    windowchrome.h
+    windowchrome.cpp
+    audiovisualizercontroller.h
+    audiovisualizercontroller.cpp
+    # Vendored third-party (BSD-3-Clause) — see third_party/kissfft/LICENSES/
+    # BSD-3-Clause. Unmodified upstream sources; do not edit directly.
+    third_party/kissfft/kiss_fft.h
+    third_party/kissfft/kiss_fft.c
+    third_party/kissfft/kiss_fft_log.h
+    third_party/kissfft/_kiss_fft_guts.h
+    third_party/kissfft/kiss_fftr.h
+    third_party/kissfft/kiss_fftr.c
     app.rc
 )
 
@@ -61,6 +73,7 @@ qt_add_qml_module(topaz
         FloatingPane.qml
         BigCoverWindow.qml
         TagInfoWindow.qml
+        AudioVisualizerWindow.qml
     RESOURCES
         app.ico
 )
@@ -72,7 +85,7 @@ set_target_properties(topaz PROPERTIES
 
 target_link_libraries(topaz
     PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Multimedia Qt6::Concurrent Qt6::Widgets
-    PRIVATE ole32
+    PRIVATE ole32 dwmapi
 )
 
 include(GNUInstallDirs)

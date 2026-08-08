@@ -14,12 +14,20 @@ Rectangle {
     // response, same "dumb button, owner decides" split as scanRequested().
     signal tagInfoToggleRequested()
 
+    // Same split as tagInfoToggleRequested/tagInfoPaneOpen, for the AUDIO
+    // VISUALIZER button.
+    signal audioVisualizerToggleRequested()
+
     // Set by Main.qml when a scan is running; animates the scan button.
     property bool scanning: false
 
     // Set by Main.qml (bound to root.tagInfoPaneOpen) — drives the TAG
     // INFORMATION button's on/off color, mirroring the pane's actual state.
     property bool tagInfoPaneOpen: false
+
+    // Set by Main.qml (bound to root.audioVisualizerPaneOpen) — drives the
+    // AUDIO VISUALIZER button's on/off color, mirroring the pane's actual state.
+    property bool audioVisualizerPaneOpen: false
 
     // Set by Main.qml (bound to libraryModel.ratingsReady). AUTO PLAY only shows
     // as ready (green) once a scan has completed with rating enrichment applied.
@@ -56,6 +64,7 @@ Rectangle {
                 readonly property bool isScanBtn:     modelData.label === "SCAN DIRECTORIES"
                 readonly property bool isAutoPlayBtn: modelData.label === "AUTO PLAY"
                 readonly property bool isTagInfoBtn:  modelData.label === "TAG INFORMATION"
+                readonly property bool isAudioVisualizerBtn: modelData.label === "AUDIO VISUALIZER"
 
                 // AUTO PLAY is only ready once the library scan has completed
                 // AND (when Consider Genre is on) at least one genre is active
@@ -74,7 +83,9 @@ Rectangle {
                             ? Theme.tertiary
                             : (isTagInfoBtn && root.tagInfoPaneOpen)
                                 ? Theme.secondary
-                                : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
+                                : (isAudioVisualizerBtn && root.audioVisualizerPaneOpen)
+                                    ? Theme.secondary
+                                    : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
 
                 Rectangle {
                     anchors.fill: parent
@@ -115,6 +126,8 @@ Rectangle {
                             root.autoPlay.toggle()
                         else if (isTagInfoBtn)
                             root.tagInfoToggleRequested()
+                        else if (isAudioVisualizerBtn)
+                            root.audioVisualizerToggleRequested()
                     }
                 }
             }
