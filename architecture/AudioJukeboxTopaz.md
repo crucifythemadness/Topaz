@@ -2321,6 +2321,22 @@ the fix — was a genuine QML scoping gotcha, not a data or decode problem; `Ima
 `sourceSize`/`asynchronous: true` settled back to matching `NowPlaying`'s pattern
 once the actual cause was found.
 
+**Double-click to cycle horizontal position**: reuses `FloatingPane`'s generic
+`doubleClicked()` signal (see above) for a **4-state cycle**, a different shape of
+state machine than `TagInfoWindow`'s 2-state maximize/restore toggle (UC-18) — each
+double-click advances one step and wraps around: original position (captured lazily
+on the *first* double-click of this open, via an uncaptured/captured flag — not a
+separately persisted value, since a fresh `BigCoverWindow` instance is created by
+`Main.qml`'s `Loader` every time the pane opens, so "original" naturally means
+wherever *this* open started) → horizontally centered → flush right edge → flush
+left edge → back to original → repeats. Only `x` changes; `y`/`width`/`height` are
+never touched, since the pane is always square (`fixedAspectRatio: 1.0`) and the
+user resizes it manually — double-click repositioning and manual resizing don't
+interact. As with `TagInfoWindow`'s maximize, no special persistence handling is
+needed: `FloatingPane`'s existing debounced `geometrySettled` fires on these
+programmatic `x` changes exactly like a manual drag, so whichever state the pane is
+left in when closed is what's restored next time it opens.
+
 ### `Main.qml` wiring and geometry restore
 
 ```qml

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 
 // ── BigCoverWindow ────────────────────────────────────────────────────────
 // Detachable cover-art viewer — see FloatingPane.qml for the movable/
@@ -22,6 +23,29 @@ FloatingPane {
     // startSystemResize() can't be constrained mid-drag, so a fixed ratio
     // switches the resize grips to manual, JS-computed geometry instead).
     fixedAspectRatio: 1.0
+
+    // Double-click cycles the pane horizontally: original position (captured on
+    // the first double-click of this open) → centered → right edge → left edge
+    // → back to original → repeat. Reuses FloatingPane's generic doubleClicked()
+    // signal (see UC-17); only x changes — y/width/height are never touched here,
+    // resizing stays entirely manual.
+    property int  _hPositionState: 0   // 0 = original, 1 = center, 2 = right, 3 = left
+    property real _restoreX: 0
+    property bool _restoreXCaptured: false
+
+    onDoubleClicked: {
+        if (!_restoreXCaptured) {
+            _restoreX = x
+            _restoreXCaptured = true
+        }
+        _hPositionState = (_hPositionState + 1) % 4
+        switch (_hPositionState) {
+        case 1: x = Screen.virtualX + (Screen.width - width) / 2; break  // center
+        case 2: x = Screen.virtualX + Screen.width - width;        break  // right edge
+        case 3: x = Screen.virtualX;                                break  // left edge
+        case 0: x = _restoreX;                                      break  // original
+        }
+    }
 
     // Placeholder while no track / no cover is available yet.
     Rectangle {
