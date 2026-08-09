@@ -1,6 +1,6 @@
 ﻿import QtQuick
 
-// Bottom toolbar: Auto Play | Audio Visualizer | Tag Information | Scan Directories
+// Bottom toolbar: Auto Play | Audio Visualizer | Milkdrop | Tag Information | Scan Directories
 Rectangle {
     id: root
     height: 56
@@ -18,6 +18,9 @@ Rectangle {
     // VISUALIZER button.
     signal audioVisualizerToggleRequested()
 
+    // Same split again, for the MILKDROP button.
+    signal milkdropToggleRequested()
+
     // Set by Main.qml when a scan is running; animates the scan button.
     property bool scanning: false
 
@@ -28,6 +31,9 @@ Rectangle {
     // Set by Main.qml (bound to root.audioVisualizerPaneOpen) — drives the
     // AUDIO VISUALIZER button's on/off color, mirroring the pane's actual state.
     property bool audioVisualizerPaneOpen: false
+
+    // Same split again, for the MILKDROP button.
+    property bool milkdropPaneOpen: false
 
     // Set by Main.qml (bound to libraryModel.ratingsReady). AUTO PLAY only shows
     // as ready (green) once a scan has completed with rating enrichment applied.
@@ -53,18 +59,20 @@ Rectangle {
             model: [
                 { label: "AUTO PLAY",       icon: "\u25B6", active: root.autoPlayReady },
                 { label: "AUDIO VISUALIZER", icon: "\u2261", active: false },
+                { label: "MILKDROP",        icon: "\u2733", active: false },
                 { label: "TAG INFORMATION", icon: "\u24D8", active: false },
                 { label: "SCAN DIRECTORIES",icon: "\u29C9", active: false }
             ]
 
             delegate: Item {
-                width:  root.width / 4
+                width:  root.width / 5
                 height: root.height
 
                 readonly property bool isScanBtn:     modelData.label === "SCAN DIRECTORIES"
                 readonly property bool isAutoPlayBtn: modelData.label === "AUTO PLAY"
                 readonly property bool isTagInfoBtn:  modelData.label === "TAG INFORMATION"
                 readonly property bool isAudioVisualizerBtn: modelData.label === "AUDIO VISUALIZER"
+                readonly property bool isMilkdropBtn: modelData.label === "MILKDROP"
 
                 // AUTO PLAY is only ready once the library scan has completed
                 // AND (when Consider Genre is on) at least one genre is active
@@ -82,10 +90,12 @@ Rectangle {
                         : (isScanBtn && root.scanning)
                             ? Theme.tertiary
                             : (isTagInfoBtn && root.tagInfoPaneOpen)
-                                ? Theme.secondary
+                                ? Theme.tertiary
                                 : (isAudioVisualizerBtn && root.audioVisualizerPaneOpen)
-                                    ? Theme.secondary
-                                    : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
+                                    ? Theme.tertiary
+                                    : (isMilkdropBtn && root.milkdropPaneOpen)
+                                        ? Theme.tertiary
+                                        : modelData.active ? Theme.secondary : Theme.fgSurfaceVariant
 
                 Rectangle {
                     anchors.fill: parent
@@ -128,6 +138,8 @@ Rectangle {
                             root.tagInfoToggleRequested()
                         else if (isAudioVisualizerBtn)
                             root.audioVisualizerToggleRequested()
+                        else if (isMilkdropBtn)
+                            root.milkdropToggleRequested()
                     }
                 }
             }

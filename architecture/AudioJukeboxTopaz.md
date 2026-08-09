@@ -342,13 +342,16 @@ Topaz module
 │                         Loader { active: tagInfoPaneOpen; sourceComponent: TagInfoWindow {...} }  — see UC-18
 │                         property bool audioVisualizerPaneOpen  (toggled by BottomBar.onAudioVisualizerToggleRequested / AudioVisualizerWindow.onCloseRequested)
 │                         Loader { active: audioVisualizerPaneOpen; sourceComponent: AudioVisualizerWindow {...} }  — see UC-19
-├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY | AUDIO VISUALIZER, see UC-15 / UC-14 / UC-19)
+│                         property bool milkdropPaneOpen  (toggled by BottomBar.onMilkdropToggleRequested / MilkdropWindow.onCloseRequested)
+│                         Loader { active: milkdropPaneOpen; sourceComponent: MilkdropWindow {...} }  — see UC-20
+├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY | AUDIO VISUALIZER | MILKDROP, see UC-15 / UC-14 / UC-19 / UC-20)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
 ├── FloatingPane.qml    Reusable base Window for detachable panes (frameless, movable, resizable, right-click-to-close) — see "Detachable panes" below
 ├── BigCoverWindow.qml  FloatingPane specialization: shows only the current track's cover art
 ├── TagInfoWindow.qml   FloatingPane specialization: shows the current track's tag metadata, content scales with pane size — see UC-18
 ├── AudioVisualizerWindow.qml FloatingPane specialization: renders bumping bars from AudioVisualizerController's barLevels/peakLevels — see UC-19
+├── MilkdropWindow.qml  FloatingPane specialization: hosts a MilkdropView (C++ QQuickItem, owns the projectM render pipeline directly) — see UC-20
 ├── TopBar.qml          Header (logo | navigation tabs | loudspeaker icon + gear icon + avatar)  height 64 px
 │                         property var systemVolume  (bound to SystemVolumeController; drives the OS-Volume flyout, see below)
 │                         signal settingsRequested()  ← gear icon click
@@ -391,6 +394,7 @@ Topaz module
 └── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all; autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16)
                           signal tagInfoToggleRequested()  ← TAG INFORMATION button click; property tagInfoPaneOpen (bound from Main.qml) drives its on/off color — same "dumb button, owner decides" split as scanRequested()/scanning, see UC-18
                           signal audioVisualizerToggleRequested()  ← AUDIO VISUALIZER button click; property audioVisualizerPaneOpen (bound from Main.qml) drives its on/off color — same split, see UC-19
+                          signal milkdropToggleRequested()  ← MILKDROP button click; property milkdropPaneOpen (bound from Main.qml) drives its on/off color — same split, see UC-20
 ```
 
 ## LibraryModel Component
@@ -2283,6 +2287,27 @@ A frameless (`flags: Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowH
   "detect/emit, owner decides" split as `closeRequested()`/`geometrySettled()`. A
   pane that never adds an `onDoubleClicked` handler (e.g. `BigCoverWindow`) is
   completely unaffected — the signal just goes unheard.
+- **`cursorHidden` property**: `false` by default; when `true`, every
+  interactive `MouseArea` above (the move area and all eight resize grips)
+  shows `Qt.BlankCursor` instead of its own native shape. Same "generic base,
+  subclass decides meaning" split as `doubleClicked()` — `FloatingPane` has
+  no opinion on *when* to hide the cursor. First (and so far only) consumer:
+  `MilkdropWindow.qml`'s auto-hide-during-fullscreen-idle behavior (UC-20).
+  Needed because the move `MouseArea` alone already covers the whole pane, so
+  a pane's own content (added into `contentItem`, which is declared *before*
+  these `MouseArea`s and therefore stacks below them) has no way to override
+  their cursor from outside `FloatingPane.qml` itself.
+- **`mouseMoved()` signal**: emitted from the move `MouseArea`'s own
+  `onPositionChanged` (fires on pure hover too, not just drags —
+  `hoverEnabled: true`) on every movement over the pane's interior. Same
+  generic "detect/emit, subclass decides" split as `doubleClicked()`. First
+  consumer: `MilkdropWindow.qml`'s cursor-idle-reset logic (UC-20) — added
+  specifically because that logic's first attempt used a separately-declared
+  `HoverHandler`, which didn't reliably receive hover while stacked below
+  this same `MouseArea`; reusing the `MouseArea`'s own already-proven
+  movement detection (the same handler that reliably drives window dragging)
+  sidesteps that reliability question entirely. Only covers the move area's
+  extent, not the 8 resize grips at the pane's edges.
 - **Resize**: eight thin (8px) edge/corner `MouseArea`s with the matching cursor
   shape (`SizeHorCursor`/`SizeVerCursor`/`SizeFDiagCursor`/`SizeBDiagCursor`). When
   `fixedAspectRatio` (see below) is `0` (the default), pressing one calls
@@ -2960,4 +2985,387 @@ starting small; a real picker is a reasonable later enhancement.
   Sensitivity setting.
 - Same as UC-17/UC-18: no live handling of screen-configuration changes while the
   pane is open, and open/closed state is not persisted across app restarts.
+
+## UC-20 Milkdrop Audio Visualizer
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | User opens a detachable pane showing a real-time Milkdrop-compatible preset visualization, driven by the currently playing track's audio. |
+| **Actor** | User |
+| **Precondition** | Topaz is running. |
+| **Trigger** | User clicks the "MILKDROP" button in `BottomBar`. |
+
+Fourth pane built on the `FloatingPane.qml` base introduced for UC-17 — see that
+section for the shared chrome and UC-18/UC-19 for the toggle-button wiring pattern
+this one mirrors. No double-click behavior yet (deliberately deferred, same as
+UC-19's first round) — this section covers what's specific to Milkdrop: the second
+third-party dependency this codebase has taken on, why it can't render directly
+into Quick's own scenegraph, and the offscreen-render architecture that works
+around that.
+
+### `projectM` — second third-party dependency
+
+[projectM](https://github.com/projectM-visualizer/projectm) is the standard
+open-source, cross-platform re-implementation of Winamp's Milkdrop visualizer —
+LGPL-2.1+, actively maintained, pinned to release tag `v4.1.7`. Unlike KissFFT
+(UC-19, ~500 lines vendored directly into the repo), projectM is a full C++
+library pulled in via CMake `FetchContent` (`FetchContent_Declare(projectm
+GIT_REPOSITORY ... GIT_TAG v4.1.7)` in `CMakeLists.txt`) and built alongside
+Topaz rather than vendored — first use of `FetchContent` in this codebase.
+Built as a **shared library** (`BUILD_SHARED_LIBS` defaults `ON` in projectM's
+own CMakeLists, matching the LGPL requirement to keep it swappable/relinkable
+rather than statically baked into `Topaz.exe`). Produces
+`libprojectM-4d.dll`/`libprojectM-4-playlistd.dll` (its separate playlist-
+management library, `ENABLE_PLAYLIST` default `ON`), which land next to
+`Topaz.exe` because `CMAKE_RUNTIME_OUTPUT_DIRECTORY` is inherited from Topaz's
+own `qt_standard_project_setup()` — no manual deploy step needed.
+
+**Windows-only build wrinkle — GLEW**: projectM's Windows "OpenGL Core Profile"
+path (OpenGL ES is Linux/Android-only in their CMakeLists) requires
+`find_package(GLEW REQUIRED)`, which isn't part of the Qt/MinGW toolchain.
+GLEW's own git repository doesn't check in its generated `src/glew.c`/
+`include/GL/glew.h` (release-archive-only), so `CMakeLists.txt` fetches the
+official `glew-2.2.0.zip` release archive instead of the git repo, pointing
+`FetchContent_Declare`'s `SOURCE_SUBDIR` at GLEW's bundled `build/cmake`
+support directory, with `OVERRIDE_FIND_PACKAGE` so projectM's `find_package(GLEW)`
+transparently resolves to this fetched copy. Three follow-up fixes were needed
+because GLEW's raw CMakeLists.txt predates modern target-based CMake
+conventions: (1) it only defines plain `glew`/`glew_s` targets, not the
+namespaced `GLEW::glew` target projectM's CMakeLists checks for — added via
+`add_library(GLEW::glew ALIAS glew)`; (2) it sets its include directory via
+the old directory-scoped `include_directories()`, which doesn't propagate to
+targets linking against it from other directories (like projectM's
+`MilkdropPreset`) — fixed with an explicit
+`target_include_directories(glew INTERFACE $<BUILD_INTERFACE:...>)`; (3) it
+unconditionally redirects its own DLL output to `<build>/bin`, separate from
+where `Topaz.exe` and the projectM DLLs land — fixed by overriding
+`RUNTIME_OUTPUT_DIRECTORY` back to the build root after the target is created.
+
+**A fourth, unrelated build fix was needed**: projectM's generated
+`version.h` reads `CMAKE_PROJECT_VERSION_PATCH` (the *top-level* project's
+version — Topaz, once projectM is `FetchContent`'d as a subdirectory), and
+Topaz's own `project(Topaz VERSION 0.1 ...)` only declared a major.minor
+version, leaving the patch component unset/empty and breaking that
+substitution (`*patch = ;` — a compile error, not a configure-time one).
+Fixed by giving Topaz's own project version a full `0.1.0`.
+
+### The core architecture problem — why not render directly into Quick's scenegraph
+
+Qt6 Quick's graphics backend (`QQuickWindow::setGraphicsApi()`) is a
+**process-global** choice made once before any window is created — Topaz's
+existing `FloatingPane` windows rely on the default Direct3D11 RHI backend on
+Windows (established during UC-17/UC-18's `WindowChrome` translucency work).
+projectM's renderer issues **raw OpenGL calls** and needs its own current
+OpenGL context to render — it cannot be mixed directly into a D3D11-backed
+`QQuickWindow`'s scenegraph the way pre-Qt6 apps used to embed raw GL via
+`beforeRendering()` hooks.
+
+Two options were considered: force the *entire app* onto the OpenGL RHI
+backend (faster, direct scenegraph integration, but re-opens the exact
+translucency/DWM-border problem that took three debugging rounds to fix under
+D3D11 for the `AudioVisualizerWindow` opacity feature, for every existing
+pane, with no guarantee OpenGL behaves the same way); or give projectM a
+fully independent, invisible OpenGL context and bring its output into Quick as
+an ordinary texture. The second was chosen — zero risk to the D3D11
+translucency work already shipped, at the cost of a GPU→CPU→GPU round-trip
+per frame (kept cheap via a modest resolution/fps, see below).
+
+### `MilkdropView` — combined controller + render surface
+
+Unlike `AudioVisualizerController` (a non-visual `QObject` controller feeding
+small numeric arrays to separate QML-drawn bars, instantiated once in
+`Main.qml` and kept alive for the whole app), `MilkdropView` is a `QQuickItem`
+subclass that *is* the render surface, instantiated directly inside
+`MilkdropWindow.qml` — its render window must match its own pixel size, so
+controller and view are combined here, and its lifetime is deliberately tied
+to the pane's own `Loader` (created on open, destroyed on close), not kept
+alive for the whole app, since it owns real GPU/native resources (a
+never-shown `QWindow` + `QOpenGLContext`, the projectM instance).
+
+**Why a real (if never-shown) `QWindow`, not `QOffscreenSurface`**: the
+first working version used `QOffscreenSurface` with a custom
+`QOpenGLFramebufferObject` as the render target — the intuitive choice for
+"invisible offscreen rendering." It silently produced nothing but
+transparent-black frames. Reading projectM's actual `ProjectM.cpp` source
+(v4.1.7, the pinned tag) explained why:
+```cpp
+m_activePreset->RenderFrame(audioData, renderContext);
+
+// ToDo: Allow external apps to provide a custom target framebuffer.
+glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+glViewport(0, 0, renderContext.viewportSizeX, renderContext.viewportSizeY);
+```
+`projectm_opengl_render_frame()` (the only render entry point available in
+v4.1.7 — the FBO-targeted variant was added in 4.2.0, unreleased at the time
+of writing) **unconditionally rebinds framebuffer 0** at the end of its own
+render pass, regardless of what was bound beforehand — a custom FBO bound
+before calling it never receives the real output, which is exactly what the
+`toImage()` readback kept confirming (always the FBO's untouched cleared
+state). Switching to rendering straight into framebuffer 0 fixes this, but
+`QOffscreenSurface` isn't a valid target for that either — Qt's own docs
+state its framebuffer's pixels are "not accessible," it's documented for
+resource creation only (textures, FBOs), not direct readback. A real
+`QWindow` (`setSurfaceType(QWindow::OpenGLSurface)`, `create()`'d but never
+`show()`n) has a genuine, readable default framebuffer, exactly like
+projectM's own SDL2 reference frontend (which renders into a real, if
+possibly minimized, window) — visibility and "has a real renderable native
+surface" are independent properties in Qt.
+
+Pipeline:
+1. **Lazy init** (`ensureInitialized()`, called from both `itemChange` on
+   first attach to a window and `geometryChange`, idempotent): creates the
+   never-shown `QWindow` + an independent `QOpenGLContext` (OpenGL 3.3 core
+   profile), makes it current, then calls **`glewInit()`** before touching
+   projectM at all. This step is easy to miss and caused a real crash the
+   first time this pane shipped: libprojectM's renderer resolves every
+   extended OpenGL call (FBOs, shaders, textures — see `projectM-opengl.h`,
+   which `#include <GL/glew.h>` on Windows) through GLEW's global
+   function-pointer table, but never calls `glewInit()` itself — confirmed by
+   checking projectM's own reference frontends: the Qt one
+   (`frontend-qt`, itself only partly maintained upstream) doesn't call it
+   either, but the actively-maintained, Windows-CI-tested SDL2 frontend
+   (`frontend-sdl-cpp/src/SDLRenderingWindow.cpp`) does, explicitly, right
+   after creating its GL context — confirming it's the embedding
+   application's responsibility. Skipping it means the very first extended GL
+   call inside projectM's renderer jumps through an uninitialized null
+   pointer — an unconditional crash on first render, regardless of presets
+   (`glewExperimental = GL_TRUE` is also set first, a known GLEW
+   requirement for reliable core-profile detection). Only once `glewInit()`
+   succeeds does this step call `projectm_create()` (requires an
+   already-current GL context) and `projectm_playlist_create()`.
+2. **Surface sizing** (`resizeSurface()`): resizes the render `QWindow`
+   itself to the item's pixel size × `devicePixelRatio` (no custom FBO to
+   recreate); `projectm_set_window_size()` kept in sync — projectM's own
+   `RenderFrame()` sets `glViewport` from that value itself (see the source
+   excerpt above), so nothing else needs to touch the viewport manually.
+3. **Audio feed** (`onAudioBufferAvailable`): subscribes to the *same*
+   `PlaybackEngine::audioBufferAvailable` signal `AudioVisualizerController`
+   already uses (UC-19) — `PlaybackEngine` doesn't know or care how many
+   listeners it has. Sample extraction (mono downmix, `Float`/`Int16` only)
+   directly reuses `AudioVisualizerController::appendSamples`'s pattern, but
+   feeds `projectm_pcm_add_float()` instead of running an FFT — projectM does
+   its own internal spectral/beat analysis.
+4. **Render tick** (`onRenderTick`, ~30fps `QTimer` — half the bars
+   visualizer's implicit ~60fps ceiling, since this path costs a full
+   readback+upload rather than a plain `QVariantList` publish): makes the
+   render context current, applies live `AppConfig` settings (read every
+   tick, never cached — same convention `PlaybackEngine`/
+   `AudioVisualizerController` already use), rescans the preset playlist only
+   if the configured folder list actually changed (real filesystem I/O,
+   unlike the cheap parameter setters). **Populating the playlist alone
+   doesn't display anything** — `projectm_playlist_add_path()` only makes
+   presets available, it doesn't load or activate one. Confirmed by checking
+   projectM's own SDL2 reference frontend (`ProjectMWrapper.cpp`), which has
+   a dedicated `DisplayInitialPreset()` step for exactly this; `rebuildPresetList()`
+   mirrors it — once the (non-empty) playlist is rebuilt, it calls
+   `projectm_playlist_play_next()` (shuffle on) or `projectm_playlist_set_position(0, ...)`
+   (shuffle off) to actually kick off display. Worth remembering if
+   preset-navigation controls (skip forward/back) are added later — they'd
+   reuse these same `play_next`/`play_previous` calls. Every tick then calls
+   `projectm_opengl_render_frame()` directly (no FBO to bind — it renders
+   straight into the render `QWindow`'s own framebuffer 0, per the finding
+   above) and reads the result back manually: `glReadPixels()` into a
+   `QImage(Format_RGBA8888)` sized to `m_renderSize`, then
+   `QImage::flipped(Qt::Vertical)` (OpenGL's origin is bottom-left, QImage's
+   is top-left — `QOpenGLFramebufferObject::toImage()` used to handle this
+   automatically when a custom FBO was still in the picture; done manually
+   now) becomes the latest frame; `update()` schedules a scenegraph repaint.
+5. **`updatePaintNode()`**: uploads the latest `QImage` as a
+   `QSGTexture` (`window()->createTextureFromImage()`) into a
+   `QSGSimpleTextureNode` — Quick's own D3D11 backend only ever sees an
+   ordinary texture upload, never a raw GL call.
+
+No presets are bundled with Topaz — the de facto standard pack
+(`presets-cream-of-the-crop`, ~10K community-authored `.milk` files) is a
+separate, large, mixed-per-author-licensed repository, not appropriate to
+vendor. Instead, the "Preset Folders" list in the Setup dialog (see below)
+lets the user point at a preset pack they've downloaded themselves —
+documented behavior, not a gap: the pane will render nothing until at least
+one folder with `.milk` files is configured. Since `projectm_playlist_add_path()`
+scans recursively, it doesn't matter whether the configured folder is the
+pack's root or its `Presets` subfolder directly — both find the same `.milk`
+files. `rebuildPresetList()` additionally probes for a sibling `Textures` (or
+`textures`) folder next to each configured folder and, if found, registers it
+via `projectm_set_texture_search_paths()` — the common pack layout is
+`Presets/` + `Textures/` side by side, and presets referencing custom
+textures render broken without this.
+
+### `MilkdropWindow.qml`
+
+Structurally mirrors `AudioVisualizerWindow.qml` minus the opacity feature
+(not requested for this pane). Explicitly sets `color: Theme.surfaceContainerLowest` on the root
+`FloatingPane` — `Window.color` defaults to **white** in Qt Quick when never
+set, and `FloatingPane.qml` itself doesn't set a default either; every
+sibling pane sets this explicitly (`BigCoverWindow.qml`/`TagInfoWindow.qml`),
+and this one shipped without it for a round, which was invisible while the
+opaque "NO TRACK" placeholder covered the window but showed as a solid white
+pane the moment a track played and only `MilkdropView`'s (non-fully-opaque)
+render output remained. `property var milkdropConfig: null` — deliberately
+not named `appConfig`, same `Component.onCompleted`-runs-before-`Loader.onLoaded`
+scoping gotcha documented on `AudioVisualizerWindow.qml`'s `visualizerConfig`
+property (see UC-19). A `MilkdropView { anchors.fill: parent; ... }` fills the
+pane, hidden (and therefore not rendering — `onRenderTick` checks
+`isVisible()`, so hiding the item fully stops the animation, not just the
+display of it) behind one of two placeholders depending on why nothing is
+showing. Three mutually-exclusive states, driven by two properties:
+`hasTrack` (`engine.currentTitle.length > 0` — a track is *loaded*) and
+`isPlaying` (`engine.isPlaying` — it's *actively playing*, backed by
+`PlaybackEngine`'s `QMediaPlayer::PlayingState` check). `currentTitle` stays
+set to the last track after it pauses or the queue ends (so `NowPlaying` can
+keep showing it), so `hasTrack` alone doesn't mean "playing" — an earlier
+version gated the visualizer on `hasTrack` alone and kept animating
+indefinitely after the last track ended or the user paused, which was a real
+bug, not intended behavior:
+- `!hasTrack` → "♫ NO TRACK" (nothing ever loaded).
+- `hasTrack && !isPlaying` → "⏸ PAUSED" (loaded, but paused or the queue
+  ended — same placeholder for both, since both are simply "not currently
+  playing").
+- `hasTrack && isPlaying` → `MilkdropView` itself, actually rendering.
+
+**Double-click position cycle**: exact behavioral mirror of
+`BigCoverWindow.qml`'s toggle (UC-17) — original position (captured on first
+double-click) → centered → right edge → left edge → back to original →
+repeat, driven by `FloatingPane`'s generic `doubleClicked()` signal. Only `x`
+changes; `y`/width/height are untouched, resizing stays manual. No
+`fixedAspectRatio` here (unlike `BigCoverWindow`'s square-cover constraint —
+Milkdrop has no aspect requirement).
+
+**F10 fullscreen toggle**: a `Shortcut { sequence: "F10" }` (default
+`Qt.WindowShortcut` context, so it fires while this pane is the active
+window) — first press saves the pane's current `x`/`y`/`width`/`height` and
+sets geometry to fill the screen (`Screen.virtualX/virtualY` +
+`Screen.width/height` — manual geometry, not Qt's native
+`Window.FullScreen` visibility mode, for consistency with how every other
+multi-screen geometry calculation in this codebase already works); a second
+press restores exactly what was saved. Independent of the double-click cycle
+above — no shared state — so it restores whatever geometry was active right
+before F10 was pressed, whether that came from manual dragging or from the
+double-click cycle. First use of `Shortcut`/keyboard-triggered behavior on
+any detachable pane in this codebase; a reasonable pattern to reuse if a
+future pane wants the same treatment.
+
+**Auto-hide cursor during fullscreen idle**: a 2-second, non-repeating
+`Timer` sets `FloatingPane`'s generic `cursorHidden` property (see UC-17)
+`true` once it fires; `FloatingPane`'s `mouseMoved()` signal (see UC-17)
+resets the timer and un-hides the cursor on any movement while
+`_isFullscreen` is `true`. The first version of this used a separately
+declared `HoverHandler` instead — it didn't reliably receive hover events
+while nested below `FloatingPane`'s own full-pane move `MouseArea` in the
+item stack (a `PointerHandler`-under-`MouseArea` reliability question this
+codebase can't fully resolve without live testing), so the cursor never came
+back once hidden. Switching to `mouseMoved()` — emitted directly from that
+same move `MouseArea`'s `onPositionChanged`, the exact handler that already
+reliably drives window dragging — sidesteps the question by reusing
+already-proven event delivery instead of a second, independent path. Known
+minor gap: `mouseMoved()` only covers the move area's extent, not the 8
+resize-grip strips at the pane's very edges, so movement confined entirely
+within an 8px edge strip won't reset the idle timer — accepted as
+not worth solving further (resize grips are barely relevant on a fullscreen
+pane). The F10 handler starts the timer fresh on entering fullscreen and
+stops it (forcing `cursorHidden` back to `false`) on exiting — the cursor is
+never hidden outside fullscreen.
+
+### `BottomBar.qml` / `Main.qml` wiring
+
+Exact mirror of UC-19's `audioVisualizerPaneOpen`/`audioVisualizerLoader`
+pattern: `milkdropToggleRequested()` signal + `milkdropPaneOpen` property in
+`BottomBar.qml` (fifth toolbar button, row now divided five ways instead of
+four), `root.milkdropPaneOpen` + `milkdropLoader` in `Main.qml` with the same
+geometry-restore-or-center-default `Component.onCompleted` block (default
+560×360). The one structural difference from the audio-visualizer Loader:
+there's no separate controller instantiated in `Main.qml` to pass in (no
+`MilkdropController` — see above), so `onLoaded` only sets `item.engine` and
+`item.milkdropConfig`.
+
+### `AppConfig` — `milkdrop`/`milkdropPane` persistence
+
+Same READ-only-`Q_PROPERTY` + dedicated `Q_INVOKABLE`-setter convention as
+every other settings group in this file:
+
+| Property / method | Detail |
+|---|---|
+| `milkdropPresetFolders` / `addMilkdropPresetFolder(path)` / `removeMilkdropPresetFolderAt(index)` / `clearMilkdropPresetFolders()` | Flat list of plain path strings (no per-folder subfolder toggle, unlike the music `folders` list — always scanned recursively). Accepts plain paths or `file://` URLs, same as `addFolder`. |
+| `milkdropShuffleEnabled` / `setMilkdropShuffleEnabled(enabled)` | Default `true`; forwarded to `projectm_playlist_set_shuffle`. |
+| `milkdropPresetDuration` / `setMilkdropPresetDuration(seconds)` | Default `20.0`; clamped `[5, 120]`; forwarded to `projectm_set_preset_duration`. |
+| `milkdropBeatSensitivity` / `setMilkdropBeatSensitivity(sensitivity)` | Default `1.0`; clamped `[0.0, 4.0]` (projectM's own scale); forwarded to `projectm_set_beat_sensitivity`. |
+| `milkdropHardCutsEnabled` / `setMilkdropHardCutsEnabled(enabled)` | Default `false`; forwarded to `projectm_set_hard_cut_enabled`. |
+| `milkdropHardCutSensitivity` / `setMilkdropHardCutSensitivity(sensitivity)` | Default `0.6`; clamped `[0.0, 1.0]`; forwarded to `projectm_set_hard_cut_sensitivity`. |
+| `milkdropPresetLocked` / `setMilkdropPresetLocked(locked)` | Default `false`; forwarded to `projectm_set_preset_locked` — disables all automatic preset transitions. |
+| `milkdropShowPresetName` / `setMilkdropShowPresetName(enabled)` | Default `true`; toggles `MilkdropWindow.qml`'s fading current-preset-name toast (see below) — purely a display setting, doesn't touch projectM itself. |
+| `milkdropPaneConfigured` / `milkdropPaneX/Y/Width/Height` / `saveMilkdropPaneGeometry(...)` | Read-only geometry, same convention as `audioVisualizerPane*` (defaults `560`×`360`, `configured` starts `false`). |
+
+JSON shape (nested, matching the `audioVisualizer`/`audioVisualizerPane` split):
+
+```json
+"milkdrop": { "presetFolders": ["C:/Presets"], "shuffleEnabled": true,
+              "presetDuration": 20.0, "beatSensitivity": 1.0,
+              "hardCutsEnabled": false, "hardCutSensitivity": 0.6,
+              "presetLocked": false, "showPresetName": true },
+"milkdropPane": { "x": 100, "y": 100, "width": 560, "height": 360,
+                   "screenName": "DISPLAY1" }
+```
+
+### `SetupDialog.qml` — "MILKDROP" tab
+
+Sixth tab. A preset-folder add/remove list (same delegate/button pattern as
+FILE MONITORING's folder list, minus the subfolders-toggle column), a
+Shuffle toggle, Preset Duration slider (5–120s), Beat Sensitivity slider
+(0.0–4.0), Hard Cuts toggle + Hard Cut Sensitivity slider (0–100%), a
+Lock Preset toggle, and a Show Preset Name toggle — all built from the same
+`Slider`/toggle-track components already established in the AUDIO VISUALIZER
+tab, so no new QML idioms.
+
+### Current preset name toast
+
+`MilkdropView` already registers `projectm_playlist_set_preset_switched_event_callback`
+for diagnostic logging (see below); that same callback now also derives a
+display name — `projectm_playlist_item(m_playlist, index)` returns the
+switched-to preset's file path (freed via `projectm_playlist_free_string()`,
+same call projectM's own SDL2 reference frontend uses), wrapped in
+`QFileInfo(...).completeBaseName()` to strip the directory and `.milk`
+extension (deliberately no further parsing of community preset-pack naming
+conventions, e.g. embedded "(by Author)" credits — kept simple on purpose).
+Exposed as `Q_PROPERTY(QString currentPresetName ...)`. Runs on the GUI
+thread already (same thread `onRenderTick`/`rebuildPresetList` run on, no
+cross-thread marshaling needed). `MilkdropWindow.qml` shows it as a
+bottom-center toast — `Text.style: Text.Outline` for legibility over
+arbitrary preset visuals rather than a background `Rectangle` — that snaps
+to full opacity on every `currentPresetNameChanged` (gated on
+`AppConfig.milkdropShowPresetName`) and fades out (`Behavior on opacity`,
+1000ms) after a 5000ms hold `Timer`, mirroring projectM's own reference
+frontends' toast timing convention. Also gated on `mdWindow.isPlaying` so a
+toast mid-fade doesn't linger visibly over the "PAUSED" placeholder if
+playback pauses mid-fade.
+
+### Known limitations (not fixed, not requested)
+
+- No bundled presets — see above; the pane renders nothing until the user
+  configures at least one preset folder.
+- Offscreen readback costs a GPU→CPU→GPU round-trip every render tick; kept
+  to ~30fps to stay cheap, but this is a real, unmeasured performance cost
+  worth revisiting if it turns out to matter on lower-end hardware.
+- Same audio-tap crossfade simplification as UC-19 (only the active deck's
+  buffer is fed in — see `PlaybackEngine` section under UC-19).
+- Only `Float`/`Int16` sample formats are handled, same as UC-19.
+- No mesh size / target FPS / aspect-correction settings exposed yet — left
+  at projectM's own defaults for this first version. Texture search paths
+  are handled automatically (sibling `Textures`/`textures` folder
+  convention, see above) rather than as a separate user-facing setting.
+- `projectm_opengl_render_frame_fbo()` (the more explicit FBO-targeted render
+  call) isn't used because it requires projectM ≥4.2.0, unreleased at the
+  time of writing — the current never-shown-`QWindow`-plus-`glReadPixels`
+  approach works around this on v4.1.7, but the `_fbo` variant would be a
+  cleaner, likely more efficient replacement once a newer stable tag exists;
+  revisit then.
+- `MilkdropView::logDiagnostic()` writes to both `qWarning()` and a
+  `milkdrop_debug.log` file next to `Topaz.exe` — added because Topaz is a
+  `WIN32_EXECUTABLE` with no console, so `qWarning()` alone is invisible
+  however the app is normally launched. Along with the playlist
+  preset-switched/failed callbacks and a periodic pixel-sample log in
+  `onRenderTick()`, this was what actually made diagnosing the
+  wrong-framebuffer bug above possible — worth keeping for any future
+  "renders nothing" reports rather than removing it once things work.
+- Same as UC-17/UC-18/UC-19: no live handling of screen-configuration changes
+  while the pane is open, and open/closed state is not persisted across app
+  restarts.
 

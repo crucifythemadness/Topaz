@@ -338,6 +338,118 @@ void AppConfig::saveAudioVisualizerPaneGeometry(int x, int y, int width, int hei
     save();
 }
 
+// ── Milkdrop settings ────────────────────────────────────────────────────────
+
+void AppConfig::addMilkdropPresetFolder(const QString &rawPath)
+{
+    // Accept both plain paths and file:// URLs — same convention as addFolder.
+    QUrl url(rawPath);
+    const QString path = url.isLocalFile() ? url.toLocalFile() : rawPath.trimmed();
+    if (path.isEmpty())
+        return;
+
+    for (const QVariant &v : std::as_const(m_milkdropPresetFolders)) {
+        if (v.toString() == path)
+            return;
+    }
+
+    m_milkdropPresetFolders.append(path);
+    emit milkdropChanged();
+    save();
+}
+
+void AppConfig::removeMilkdropPresetFolderAt(int index)
+{
+    if (index < 0 || index >= m_milkdropPresetFolders.size())
+        return;
+    m_milkdropPresetFolders.removeAt(index);
+    emit milkdropChanged();
+    save();
+}
+
+void AppConfig::clearMilkdropPresetFolders()
+{
+    if (m_milkdropPresetFolders.isEmpty())
+        return;
+    m_milkdropPresetFolders.clear();
+    emit milkdropChanged();
+    save();
+}
+
+void AppConfig::setMilkdropShuffleEnabled(bool enabled)
+{
+    if (m_milkdropShuffleEnabled == enabled) return;
+    m_milkdropShuffleEnabled = enabled;
+    emit milkdropChanged();
+    save();
+}
+
+void AppConfig::setMilkdropPresetDuration(double seconds)
+{
+    seconds = qBound(5.0, seconds, 120.0);
+    if (qFuzzyCompare(m_milkdropPresetDuration, seconds)) return;
+    m_milkdropPresetDuration = seconds;
+    emit milkdropChanged();
+    save();
+}
+
+void AppConfig::setMilkdropBeatSensitivity(double sensitivity)
+{
+    sensitivity = qBound(0.0, sensitivity, 4.0);
+    if (qFuzzyCompare(m_milkdropBeatSensitivity, sensitivity)) return;
+    m_milkdropBeatSensitivity = sensitivity;
+    emit milkdropChanged();
+    save();
+}
+
+void AppConfig::setMilkdropHardCutsEnabled(bool enabled)
+{
+    if (m_milkdropHardCutsEnabled == enabled) return;
+    m_milkdropHardCutsEnabled = enabled;
+    emit milkdropChanged();
+    save();
+}
+
+void AppConfig::setMilkdropHardCutSensitivity(double sensitivity)
+{
+    sensitivity = qBound(0.0, sensitivity, 1.0);
+    if (qFuzzyCompare(m_milkdropHardCutSensitivity, sensitivity)) return;
+    m_milkdropHardCutSensitivity = sensitivity;
+    emit milkdropChanged();
+    save();
+}
+
+void AppConfig::setMilkdropPresetLocked(bool locked)
+{
+    if (m_milkdropPresetLocked == locked) return;
+    m_milkdropPresetLocked = locked;
+    emit milkdropChanged();
+    save();
+}
+
+void AppConfig::setMilkdropShowPresetName(bool enabled)
+{
+    if (m_milkdropShowPresetName == enabled) return;
+    m_milkdropShowPresetName = enabled;
+    emit milkdropChanged();
+    save();
+}
+
+// ── Milkdrop pane geometry ───────────────────────────────────────────────────
+
+void AppConfig::saveMilkdropPaneGeometry(int x, int y, int width, int height,
+                                          const QString &screenName)
+{
+    m_milkdropPaneConfigured = true;
+    m_milkdropPaneX          = x;
+    m_milkdropPaneY          = y;
+    m_milkdropPaneWidth      = width;
+    m_milkdropPaneHeight     = height;
+    m_milkdropPaneScreenName = screenName;
+    emit milkdropPaneChanged();
+    save();
+}
+
 // ── Persistence ───────────────────────────────────────────────────────────
 
 void AppConfig::load()
@@ -430,6 +542,26 @@ void AppConfig::load()
     m_audioVisualizerPaneWidth      = audioVisualizerPane[QStringLiteral("width")].toInt(500);
     m_audioVisualizerPaneHeight     = audioVisualizerPane[QStringLiteral("height")].toInt(260);
     m_audioVisualizerPaneScreenName = audioVisualizerPane[QStringLiteral("screenName")].toString();
+
+    const QJsonObject milkdrop = root[QStringLiteral("milkdrop")].toObject();
+    const QJsonArray milkdropFoldersArr = milkdrop[QStringLiteral("presetFolders")].toArray();
+    for (const QJsonValue &v : milkdropFoldersArr)
+        m_milkdropPresetFolders.append(v.toString());
+    m_milkdropShuffleEnabled = milkdrop[QStringLiteral("shuffleEnabled")].toBool(true);
+    m_milkdropPresetDuration = milkdrop[QStringLiteral("presetDuration")].toDouble(20.0);
+    m_milkdropBeatSensitivity = milkdrop[QStringLiteral("beatSensitivity")].toDouble(1.0);
+    m_milkdropHardCutsEnabled = milkdrop[QStringLiteral("hardCutsEnabled")].toBool(false);
+    m_milkdropHardCutSensitivity = milkdrop[QStringLiteral("hardCutSensitivity")].toDouble(0.6);
+    m_milkdropPresetLocked = milkdrop[QStringLiteral("presetLocked")].toBool(false);
+    m_milkdropShowPresetName = milkdrop[QStringLiteral("showPresetName")].toBool(true);
+
+    m_milkdropPaneConfigured = root.contains(QStringLiteral("milkdropPane"));
+    const QJsonObject milkdropPane = root[QStringLiteral("milkdropPane")].toObject();
+    m_milkdropPaneX          = milkdropPane[QStringLiteral("x")].toInt(0);
+    m_milkdropPaneY          = milkdropPane[QStringLiteral("y")].toInt(0);
+    m_milkdropPaneWidth      = milkdropPane[QStringLiteral("width")].toInt(560);
+    m_milkdropPaneHeight     = milkdropPane[QStringLiteral("height")].toInt(360);
+    m_milkdropPaneScreenName = milkdropPane[QStringLiteral("screenName")].toString();
 }
 
 void AppConfig::save()
@@ -510,6 +642,30 @@ void AppConfig::save()
         audioVisualizerPane[QStringLiteral("height")]     = m_audioVisualizerPaneHeight;
         audioVisualizerPane[QStringLiteral("screenName")] = m_audioVisualizerPaneScreenName;
         root[QStringLiteral("audioVisualizerPane")] = audioVisualizerPane;
+    }
+
+    QJsonObject milkdrop;
+    QJsonArray milkdropFoldersArr;
+    for (const QVariant &v : std::as_const(m_milkdropPresetFolders))
+        milkdropFoldersArr.append(v.toString());
+    milkdrop[QStringLiteral("presetFolders")]      = milkdropFoldersArr;
+    milkdrop[QStringLiteral("shuffleEnabled")]     = m_milkdropShuffleEnabled;
+    milkdrop[QStringLiteral("presetDuration")]     = m_milkdropPresetDuration;
+    milkdrop[QStringLiteral("beatSensitivity")]    = m_milkdropBeatSensitivity;
+    milkdrop[QStringLiteral("hardCutsEnabled")]    = m_milkdropHardCutsEnabled;
+    milkdrop[QStringLiteral("hardCutSensitivity")] = m_milkdropHardCutSensitivity;
+    milkdrop[QStringLiteral("presetLocked")]       = m_milkdropPresetLocked;
+    milkdrop[QStringLiteral("showPresetName")]     = m_milkdropShowPresetName;
+    root[QStringLiteral("milkdrop")] = milkdrop;
+
+    if (m_milkdropPaneConfigured) {
+        QJsonObject milkdropPane;
+        milkdropPane[QStringLiteral("x")]          = m_milkdropPaneX;
+        milkdropPane[QStringLiteral("y")]          = m_milkdropPaneY;
+        milkdropPane[QStringLiteral("width")]      = m_milkdropPaneWidth;
+        milkdropPane[QStringLiteral("height")]     = m_milkdropPaneHeight;
+        milkdropPane[QStringLiteral("screenName")] = m_milkdropPaneScreenName;
+        root[QStringLiteral("milkdropPane")] = milkdropPane;
     }
 
     QFile f(configFilePath());

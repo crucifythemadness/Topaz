@@ -39,6 +39,13 @@ Window {
     property int minPaneHeight: 120
     property int gripSize: 8
 
+    // When true, every interactive area below shows a blank cursor instead
+    // of its own native shape. Purely a display toggle — FloatingPane has no
+    // opinion on *when* to hide it, same "generic base, subclass decides
+    // meaning" split as doubleClicked() below. First consumer: MilkdropWindow.qml's
+    // auto-hide-cursor-during-fullscreen-idle behavior (see UC-20).
+    property bool cursorHidden: false
+
     // 0 (default) = free resize via native startSystemResize(). Otherwise the
     // width/height ratio to maintain while resizing (e.g. 1.0 for a square
     // pane) — see "Aspect-locked resize" below. Generic on purpose: any
@@ -78,6 +85,14 @@ Window {
     // subclass. Unhandled by any pane that doesn't declare an onDoubleClicked
     // handler, so this is a no-op for panes that don't opt in.
     signal doubleClicked()
+    // Emitted on every mouse movement over the pane (hover or drag alike —
+    // see the move MouseArea's hoverEnabled below) via the same handler that
+    // already reliably drives window dragging. Generic on purpose, same
+    // split as doubleClicked(); first consumer: MilkdropWindow.qml's
+    // auto-hide-cursor-during-fullscreen-idle behavior (see UC-20), which
+    // needs a proven-reliable movement signal rather than a separately
+    // stacked hover mechanism.
+    signal mouseMoved()
 
     Item {
         id: contentItem
@@ -91,12 +106,13 @@ Window {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
+        cursorShape: pane.cursorHidden ? Qt.BlankCursor : Qt.PointingHandCursor
 
         property bool _moveStarted: false
 
         onPressed: (mouse) => { _moveStarted = false }
         onPositionChanged: (mouse) => {
+            pane.mouseMoved()
             // Only start the native move once real movement is seen while the
             // left button is held — NOT on the raw press itself. An earlier
             // version called startSystemMove() unconditionally on every press,
@@ -164,7 +180,7 @@ Window {
         anchors { top: parent.top; left: parent.left; right: parent.right
                   leftMargin: pane.gripSize; rightMargin: pane.gripSize }
         height: pane.gripSize
-        cursorShape: Qt.SizeVerCursor
+        cursorShape: pane.cursorHidden ? Qt.BlankCursor : Qt.SizeVerCursor
         onPressed: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.beginAspectResize(topGrip, mouse)
             else pane.startSystemResize(Qt.TopEdge)
@@ -178,7 +194,7 @@ Window {
         anchors { bottom: parent.bottom; left: parent.left; right: parent.right
                   leftMargin: pane.gripSize; rightMargin: pane.gripSize }
         height: pane.gripSize
-        cursorShape: Qt.SizeVerCursor
+        cursorShape: pane.cursorHidden ? Qt.BlankCursor : Qt.SizeVerCursor
         onPressed: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.beginAspectResize(bottomGrip, mouse)
             else pane.startSystemResize(Qt.BottomEdge)
@@ -192,7 +208,7 @@ Window {
         anchors { left: parent.left; top: parent.top; bottom: parent.bottom
                   topMargin: pane.gripSize; bottomMargin: pane.gripSize }
         width: pane.gripSize
-        cursorShape: Qt.SizeHorCursor
+        cursorShape: pane.cursorHidden ? Qt.BlankCursor : Qt.SizeHorCursor
         onPressed: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.beginAspectResize(leftGrip, mouse)
             else pane.startSystemResize(Qt.LeftEdge)
@@ -206,7 +222,7 @@ Window {
         anchors { right: parent.right; top: parent.top; bottom: parent.bottom
                   topMargin: pane.gripSize; bottomMargin: pane.gripSize }
         width: pane.gripSize
-        cursorShape: Qt.SizeHorCursor
+        cursorShape: pane.cursorHidden ? Qt.BlankCursor : Qt.SizeHorCursor
         onPressed: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.beginAspectResize(rightGrip, mouse)
             else pane.startSystemResize(Qt.RightEdge)
@@ -219,7 +235,7 @@ Window {
         id: topLeftGrip
         anchors { top: parent.top; left: parent.left }
         width: pane.gripSize; height: pane.gripSize
-        cursorShape: Qt.SizeFDiagCursor
+        cursorShape: pane.cursorHidden ? Qt.BlankCursor : Qt.SizeFDiagCursor
         onPressed: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.beginAspectResize(topLeftGrip, mouse)
             else pane.startSystemResize(Qt.TopEdge | Qt.LeftEdge)
@@ -232,7 +248,7 @@ Window {
         id: bottomRightGrip
         anchors { bottom: parent.bottom; right: parent.right }
         width: pane.gripSize; height: pane.gripSize
-        cursorShape: Qt.SizeFDiagCursor
+        cursorShape: pane.cursorHidden ? Qt.BlankCursor : Qt.SizeFDiagCursor
         onPressed: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.beginAspectResize(bottomRightGrip, mouse)
             else pane.startSystemResize(Qt.BottomEdge | Qt.RightEdge)
@@ -245,7 +261,7 @@ Window {
         id: topRightGrip
         anchors { top: parent.top; right: parent.right }
         width: pane.gripSize; height: pane.gripSize
-        cursorShape: Qt.SizeBDiagCursor
+        cursorShape: pane.cursorHidden ? Qt.BlankCursor : Qt.SizeBDiagCursor
         onPressed: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.beginAspectResize(topRightGrip, mouse)
             else pane.startSystemResize(Qt.TopEdge | Qt.RightEdge)
@@ -258,7 +274,7 @@ Window {
         id: bottomLeftGrip
         anchors { bottom: parent.bottom; left: parent.left }
         width: pane.gripSize; height: pane.gripSize
-        cursorShape: Qt.SizeBDiagCursor
+        cursorShape: pane.cursorHidden ? Qt.BlankCursor : Qt.SizeBDiagCursor
         onPressed: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.beginAspectResize(bottomLeftGrip, mouse)
             else pane.startSystemResize(Qt.BottomEdge | Qt.LeftEdge)

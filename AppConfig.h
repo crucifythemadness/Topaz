@@ -27,7 +27,13 @@
 //                           "decaySpeed": 0.5, "peakHoldEnabled": true,
 //                           "paneOpacity": 1.0, "sensitivity": 0.5 },
 //     "audioVisualizerPane": { "x": 100, "y": 100, "width": 500, "height": 260,
-//                              "screenName": "DISPLAY1" }
+//                              "screenName": "DISPLAY1" },
+//     "milkdrop": { "presetFolders": ["C:/Presets"], "shuffleEnabled": true,
+//                   "presetDuration": 20.0, "beatSensitivity": 1.0,
+//                   "hardCutsEnabled": false, "hardCutSensitivity": 0.6,
+//                   "presetLocked": false, "showPresetName": true },
+//     "milkdropPane": { "x": 100, "y": 100, "width": 560, "height": 360,
+//                        "screenName": "DISPLAY1" }
 //   }
 // autoPlaySongRepeat allowed values: "once", "twice", "twiceIfNoneAvailable", "several".
 // autoPlayTransportAccess allowed values: "nothing", "playPause", "playPauseAndSelect"
@@ -110,6 +116,24 @@ class AppConfig : public QObject
     Q_PROPERTY(int  audioVisualizerPaneWidth      READ audioVisualizerPaneWidth      NOTIFY audioVisualizerPaneChanged)
     Q_PROPERTY(int  audioVisualizerPaneHeight     READ audioVisualizerPaneHeight     NOTIFY audioVisualizerPaneChanged)
 
+    // ── Milkdrop visualizer settings (see MilkdropView / UC-20) ────────────
+    Q_PROPERTY(QVariantList milkdropPresetFolders    READ milkdropPresetFolders    NOTIFY milkdropChanged)
+    Q_PROPERTY(bool         milkdropShuffleEnabled   READ milkdropShuffleEnabled   NOTIFY milkdropChanged)
+    Q_PROPERTY(double       milkdropPresetDuration   READ milkdropPresetDuration   NOTIFY milkdropChanged)
+    Q_PROPERTY(double       milkdropBeatSensitivity  READ milkdropBeatSensitivity  NOTIFY milkdropChanged)
+    Q_PROPERTY(bool         milkdropHardCutsEnabled  READ milkdropHardCutsEnabled  NOTIFY milkdropChanged)
+    Q_PROPERTY(double       milkdropHardCutSensitivity READ milkdropHardCutSensitivity NOTIFY milkdropChanged)
+    Q_PROPERTY(bool         milkdropPresetLocked     READ milkdropPresetLocked     NOTIFY milkdropChanged)
+    Q_PROPERTY(bool         milkdropShowPresetName   READ milkdropShowPresetName   NOTIFY milkdropChanged)
+
+    // ── Detachable "milkdrop" pane geometry (see FloatingPane.qml / MilkdropWindow.qml) ──
+    // Same READ-only + Q_INVOKABLE-setter convention as audioVisualizerPane above.
+    Q_PROPERTY(bool milkdropPaneConfigured READ milkdropPaneConfigured NOTIFY milkdropPaneChanged)
+    Q_PROPERTY(int  milkdropPaneX          READ milkdropPaneX          NOTIFY milkdropPaneChanged)
+    Q_PROPERTY(int  milkdropPaneY          READ milkdropPaneY          NOTIFY milkdropPaneChanged)
+    Q_PROPERTY(int  milkdropPaneWidth      READ milkdropPaneWidth      NOTIFY milkdropPaneChanged)
+    Q_PROPERTY(int  milkdropPaneHeight     READ milkdropPaneHeight     NOTIFY milkdropPaneChanged)
+
 public:
     explicit AppConfig(QObject *parent = nullptr);
 
@@ -158,6 +182,21 @@ public:
     int  audioVisualizerPaneY()          const { return m_audioVisualizerPaneY;          }
     int  audioVisualizerPaneWidth()      const { return m_audioVisualizerPaneWidth;      }
     int  audioVisualizerPaneHeight()     const { return m_audioVisualizerPaneHeight;     }
+
+    QVariantList milkdropPresetFolders()      const { return m_milkdropPresetFolders;      }
+    bool         milkdropShuffleEnabled()     const { return m_milkdropShuffleEnabled;     }
+    double       milkdropPresetDuration()     const { return m_milkdropPresetDuration;     }
+    double       milkdropBeatSensitivity()    const { return m_milkdropBeatSensitivity;    }
+    bool         milkdropHardCutsEnabled()    const { return m_milkdropHardCutsEnabled;    }
+    double       milkdropHardCutSensitivity() const { return m_milkdropHardCutSensitivity; }
+    bool         milkdropPresetLocked()       const { return m_milkdropPresetLocked;       }
+    bool         milkdropShowPresetName()     const { return m_milkdropShowPresetName;     }
+
+    bool milkdropPaneConfigured() const { return m_milkdropPaneConfigured; }
+    int  milkdropPaneX()          const { return m_milkdropPaneX;          }
+    int  milkdropPaneY()          const { return m_milkdropPaneY;          }
+    int  milkdropPaneWidth()      const { return m_milkdropPaneWidth;      }
+    int  milkdropPaneHeight()     const { return m_milkdropPaneHeight;     }
 
     // ── Genre operations ─────────────────────────────────────────────────
     Q_INVOKABLE void addGenre(const QString &name);
@@ -236,6 +275,31 @@ public:
     Q_INVOKABLE void saveAudioVisualizerPaneGeometry(int x, int y, int width, int height,
                                                       const QString &screenName);
 
+    // ── Milkdrop operations ──────────────────────────────────────────────
+    // rawPath may be a plain path or a file:// URL — both are accepted, same
+    // as addFolder above. Always scanned recursively by MilkdropView; no
+    // per-folder subfolder toggle for this first version.
+    Q_INVOKABLE void addMilkdropPresetFolder(const QString &rawPath);
+    Q_INVOKABLE void removeMilkdropPresetFolderAt(int index);
+    Q_INVOKABLE void clearMilkdropPresetFolders();
+    Q_INVOKABLE void setMilkdropShuffleEnabled(bool enabled);
+    // Seconds a preset is shown before an automatic soft cut. Clamped to [5, 120].
+    Q_INVOKABLE void setMilkdropPresetDuration(double seconds);
+    // Clamped to [0.0, 4.0] — projectM's own beat-detection sensitivity scale.
+    Q_INVOKABLE void setMilkdropBeatSensitivity(double sensitivity);
+    Q_INVOKABLE void setMilkdropHardCutsEnabled(bool enabled);
+    // Volume-difference threshold that triggers a hard cut; clamped to [0.0, 1.0].
+    Q_INVOKABLE void setMilkdropHardCutSensitivity(double sensitivity);
+    // Disables all automatic preset transitions (hard and soft cuts) while true.
+    Q_INVOKABLE void setMilkdropPresetLocked(bool locked);
+    // Whether MilkdropWindow.qml shows the fading current-preset-name toast.
+    Q_INVOKABLE void setMilkdropShowPresetName(bool enabled);
+
+    // ── Milkdrop pane geometry ───────────────────────────────────────────
+    // Same calling convention as saveBigCoverPaneGeometry above.
+    Q_INVOKABLE void saveMilkdropPaneGeometry(int x, int y, int width, int height,
+                                               const QString &screenName);
+
     // ── Persistence ──────────────────────────────────────────────────────
     Q_INVOKABLE void save();
 
@@ -257,6 +321,8 @@ signals:
     void tagInfoPaneChanged();
     void audioVisualizerChanged();
     void audioVisualizerPaneChanged();
+    void milkdropChanged();
+    void milkdropPaneChanged();
 
 private:
     void    load();
@@ -311,4 +377,21 @@ private:
     int     m_audioVisualizerPaneWidth      = 500;
     int     m_audioVisualizerPaneHeight     = 260;
     QString m_audioVisualizerPaneScreenName;
+
+    // Each entry is a plain path string (no per-folder options, unlike m_folders).
+    QVariantList m_milkdropPresetFolders;
+    bool         m_milkdropShuffleEnabled     = true;
+    double       m_milkdropPresetDuration     = 20.0;
+    double       m_milkdropBeatSensitivity    = 1.0;
+    bool         m_milkdropHardCutsEnabled    = false;
+    double       m_milkdropHardCutSensitivity = 0.6;
+    bool         m_milkdropPresetLocked       = false;
+    bool         m_milkdropShowPresetName     = true;
+
+    bool    m_milkdropPaneConfigured = false;
+    int     m_milkdropPaneX          = 0;
+    int     m_milkdropPaneY          = 0;
+    int     m_milkdropPaneWidth      = 560;
+    int     m_milkdropPaneHeight     = 360;
+    QString m_milkdropPaneScreenName;
 };

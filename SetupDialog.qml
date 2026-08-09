@@ -26,6 +26,7 @@ Popup {
     // ── Internal selection state ─────────────────────────────────────────
     property int selectedGenreIndex:  -1
     property int selectedFolderIndex: -1
+    property int selectedMilkdropFolderIndex: -1
 
     // ── Geometry ─────────────────────────────────────────────────────────
     anchors.centerIn: Overlay.overlay
@@ -118,7 +119,7 @@ Popup {
                 spacing: 0
 
                 Repeater {
-                    model: ["GENRES", "FILE MONITORING", "CROSSFADE", "AUTO PLAY", "AUDIO VISUALIZER"]
+                    model: ["GENRES", "FILE MONITORING", "CROSSFADE", "AUTO PLAY", "AUDIO VISUALIZER", "MILKDROP"]
 
                     delegate: Item {
                         width:  tabLabel.implicitWidth + 32
@@ -156,6 +157,7 @@ Popup {
                                 tabBar.currentTab       = index
                                 root.selectedGenreIndex  = -1
                                 root.selectedFolderIndex = -1
+                                root.selectedMilkdropFolderIndex = -1
                             }
                         }
                     }
@@ -511,7 +513,7 @@ Popup {
                                             Layout.fillWidth: true
                                             text: modelData.path
                                             font.family:    Theme.fontFamilyMono
-                                            font.pixelSize: Theme.monoSm
+                                            font.pixelSize: Theme.monoLg
                                             color: Theme.fgSurface
                                             elide: Text.ElideMiddle
                                             verticalAlignment: Text.AlignVCenter
@@ -1985,6 +1987,640 @@ Popup {
                 }
             } // end AUDIO VISUALIZER panel
 
+            // ────────────────────────────────────────────────────────────
+            // PANEL 6 — MILKDROP
+            // ────────────────────────────────────────────────────────────
+            Item {
+                anchors.fill: parent
+                visible: tabBar.currentTab === 5
+
+                ColumnLayout {
+                    anchors { fill: parent; margins: 24 }
+                    spacing: 20
+
+                    // ── Preset folder list ──────────────────────────────
+                    Text {
+                        text: "Preset Folders"
+                        font.family:    Theme.fontFamilyBody
+                        font.pixelSize: Theme.titleMd
+                        font.weight:    Font.Bold
+                        color: Theme.fgSurface
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 140
+
+                        Text {
+                            anchors.centerIn: parent
+                            visible: !root.appConfig || root.appConfig.milkdropPresetFolders.length === 0
+                            text: "No preset folders configured.\nClick ADD FOLDER to point at a downloaded .milk preset pack."
+                            horizontalAlignment: Text.AlignHCenter
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.labelLg
+                            color: Theme.fgSurfaceVariant
+                        }
+
+                        ScrollView {
+                            anchors.fill: parent
+                            visible: root.appConfig !== null
+                                     && root.appConfig.milkdropPresetFolders.length > 0
+                            clip: true
+
+                            ListView {
+                                id: milkdropFolderList
+                                model: root.appConfig ? root.appConfig.milkdropPresetFolders : []
+                                spacing: 3
+
+                                delegate: Rectangle {
+                                    width:  milkdropFolderList.width
+                                    height: 38
+                                    radius: Theme.radiusSm
+
+                                    readonly property bool isSelected:
+                                        root.selectedMilkdropFolderIndex === index
+
+                                    color: isSelected
+                                           ? Theme.p10
+                                           : mdRowHover.containsMouse
+                                             ? Theme.surfaceContainerHigh
+                                             : Theme.surfaceContainer
+
+                                    Text {
+                                        anchors {
+                                            fill: parent
+                                            leftMargin: 12; rightMargin: 12
+                                        }
+                                        text: modelData
+                                        font.family:    Theme.fontFamilyMono
+                                        font.pixelSize: Theme.monoLg
+                                        color: Theme.fgSurface
+                                        elide: Text.ElideMiddle
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    MouseArea {
+                                        id: mdRowHover
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.selectedMilkdropFolderIndex =
+                                            (root.selectedMilkdropFolderIndex === index) ? -1 : index
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Rectangle {
+                            width: 130; height: 32
+                            radius: Theme.radiusSm
+                            color: addMdFHover.containsMouse
+                                   ? Theme.primaryContainer
+                                   : Theme.surfaceContainerHigh
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "ADD FOLDER"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelSm
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWide
+                                color: addMdFHover.containsMouse
+                                       ? Theme.fgPrimaryContainer : Theme.primary
+                            }
+                            MouseArea {
+                                id: addMdFHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape:  Qt.PointingHandCursor
+                                onClicked:    milkdropFolderDialog.open()
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            width: 162; height: 32
+                            radius: Theme.radiusSm
+                            opacity: root.selectedMilkdropFolderIndex >= 0 ? 1.0 : 0.35
+                            color: delMdFHover.containsMouse
+                                   && root.selectedMilkdropFolderIndex >= 0
+                                   ? Theme.errorContainer
+                                   : Theme.surfaceContainerHigh
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "DELETE SELECTED"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelSm
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWide
+                                color: Theme.error
+                            }
+                            MouseArea {
+                                id: delMdFHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape:  root.selectedMilkdropFolderIndex >= 0
+                                              ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: {
+                                    if (root.selectedMilkdropFolderIndex >= 0 && root.appConfig) {
+                                        root.appConfig.removeMilkdropPresetFolderAt(root.selectedMilkdropFolderIndex)
+                                        root.selectedMilkdropFolderIndex = -1
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Shuffle row ──────────────────────────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Shuffle Presets"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            id: shuffleTrack
+                            readonly property bool shuffleOn:
+                                root.appConfig !== null && root.appConfig.milkdropShuffleEnabled
+                            width: 48; height: 24
+                            radius: 12
+                            color: shuffleOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: shuffleTrack.shuffleOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setMilkdropShuffleEnabled(
+                                            !root.appConfig.milkdropShuffleEnabled)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Preset Duration row ──────────────────────────────
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Preset Duration"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(presetDurationSlider.value) + "s"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "5s"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: presetDurationSlider
+                                Layout.fillWidth: true
+                                from: 5
+                                to:   120
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.milkdropPresetDuration : 20
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setMilkdropPresetDuration(value)
+                                }
+
+                                background: Rectangle {
+                                    x: presetDurationSlider.leftPadding
+                                    y: presetDurationSlider.topPadding
+                                       + presetDurationSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  presetDurationSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  presetDurationSlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: presetDurationSlider.leftPadding
+                                       + presetDurationSlider.visualPosition
+                                         * (presetDurationSlider.availableWidth - width)
+                                    y: presetDurationSlider.topPadding
+                                       + presetDurationSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "120s"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Beat Sensitivity row ─────────────────────────────
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Beat Sensitivity"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: beatSensitivitySlider.value.toFixed(2)
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "LOW"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: beatSensitivitySlider
+                                Layout.fillWidth: true
+                                from: 0.0
+                                to:   4.0
+                                stepSize: 0.1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.milkdropBeatSensitivity : 1.0
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setMilkdropBeatSensitivity(value)
+                                }
+
+                                background: Rectangle {
+                                    x: beatSensitivitySlider.leftPadding
+                                    y: beatSensitivitySlider.topPadding
+                                       + beatSensitivitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  beatSensitivitySlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  beatSensitivitySlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: beatSensitivitySlider.leftPadding
+                                       + beatSensitivitySlider.visualPosition
+                                         * (beatSensitivitySlider.availableWidth - width)
+                                    y: beatSensitivitySlider.topPadding
+                                       + beatSensitivitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "HIGH"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Hard Cuts row ─────────────────────────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Hard Cuts"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text:    qsTr("Beat-triggered instant preset changes, instead of always smoothly transitioning")
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            id: hardCutsTrack
+                            readonly property bool hardCutsOn:
+                                root.appConfig !== null && root.appConfig.milkdropHardCutsEnabled
+                            width: 48; height: 24
+                            radius: 12
+                            color: hardCutsOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: hardCutsTrack.hardCutsOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setMilkdropHardCutsEnabled(
+                                            !root.appConfig.milkdropHardCutsEnabled)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Hard Cut Sensitivity row ──────────────────────────
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Hard Cut Sensitivity"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(hardCutSensitivitySlider.value) + "%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "0%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: hardCutSensitivitySlider
+                                Layout.fillWidth: true
+                                from: 0
+                                to:   100
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.milkdropHardCutSensitivity * 100 : 60
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setMilkdropHardCutSensitivity(value / 100)
+                                }
+
+                                background: Rectangle {
+                                    x: hardCutSensitivitySlider.leftPadding
+                                    y: hardCutSensitivitySlider.topPadding
+                                       + hardCutSensitivitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  hardCutSensitivitySlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  hardCutSensitivitySlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: hardCutSensitivitySlider.leftPadding
+                                       + hardCutSensitivitySlider.visualPosition
+                                         * (hardCutSensitivitySlider.availableWidth - width)
+                                    y: hardCutSensitivitySlider.topPadding
+                                       + hardCutSensitivitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "100%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Preset Locked row ─────────────────────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Lock Preset"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text:    qsTr("Disables all automatic preset transitions — stays on the current preset")
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            id: presetLockedTrack
+                            readonly property bool lockedOn:
+                                root.appConfig !== null && root.appConfig.milkdropPresetLocked
+                            width: 48; height: 24
+                            radius: 12
+                            color: lockedOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: presetLockedTrack.lockedOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setMilkdropPresetLocked(
+                                            !root.appConfig.milkdropPresetLocked)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Show Preset Name row ──────────────────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Show Preset Name"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text:    qsTr("Briefly shows the preset name in the pane on every switch, then fades out")
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            id: showPresetNameTrack
+                            readonly property bool showOn:
+                                root.appConfig !== null && root.appConfig.milkdropShowPresetName
+                            width: 48; height: 24
+                            radius: 12
+                            color: showOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: showPresetNameTrack.showOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setMilkdropShowPresetName(
+                                            !root.appConfig.milkdropShowPresetName)
+                                }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }   // push content to top
+                }
+            } // end MILKDROP panel
+
         } // content Item
     } // contentItem ColumnLayout
 
@@ -1995,6 +2631,15 @@ Popup {
         onAccepted: {
             if (root.appConfig)
                 root.appConfig.addFolder(selectedFolder.toString(), true)
+        }
+    }
+
+    FolderDialog {
+        id: milkdropFolderDialog
+        title: "Select Preset Folder"
+        onAccepted: {
+            if (root.appConfig)
+                root.appConfig.addMilkdropPresetFolder(selectedFolder.toString())
         }
     }
 

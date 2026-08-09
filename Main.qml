@@ -184,6 +184,53 @@ ApplicationWindow {
         }
     }
 
+    // ── Detachable "milkdrop" pane ────────────────────────────────────────
+    // Opened by toggling the "MILKDROP" button in BottomBar; see
+    // FloatingPane.qml / MilkdropWindow.qml for the pane itself, and
+    // MilkdropView (C++) for the projectM render pipeline it owns directly
+    // (unlike audioVisualizerLoader above, there's no separate long-lived
+    // controller object here — see UC-20). Mirrors audioVisualizerLoader's
+    // wiring otherwise, including the same engine-binding scoping gotcha.
+    property bool milkdropPaneOpen: false
+
+    Loader {
+        id: milkdropLoader
+        active: root.milkdropPaneOpen
+        onLoaded: {
+            if (item) {
+                item.engine         = engine
+                item.milkdropConfig = appConfig
+            }
+        }
+
+        sourceComponent: MilkdropWindow {
+            id: milkdropWindow
+
+            Component.onCompleted: {
+                if (appConfig.milkdropPaneConfigured &&
+                    root.rectIntersectsAnyScreen(appConfig.milkdropPaneX, appConfig.milkdropPaneY,
+                                                  appConfig.milkdropPaneWidth, appConfig.milkdropPaneHeight)) {
+                    width  = appConfig.milkdropPaneWidth
+                    height = appConfig.milkdropPaneHeight
+                    x      = appConfig.milkdropPaneX
+                    y      = appConfig.milkdropPaneY
+                } else {
+                    width  = 560
+                    height = 360
+                    x = Screen.virtualX + (Screen.width  - width)  / 2
+                    y = Screen.virtualY + (Screen.height - height) / 2
+                }
+                visible = true
+                raise()
+                requestActivate()
+            }
+
+            onGeometrySettled: (x, y, width, height, screenName) =>
+                appConfig.saveMilkdropPaneGeometry(x, y, width, height, screenName)
+            onCloseRequested: root.milkdropPaneOpen = false
+        }
+    }
+
     // Shared data model — owns genre toggle state and mock library.
     // Passed as `lib` property to GenreBar, LibraryTree, AlbumBrowser.
     AppConfig  { id: appConfig }
@@ -330,9 +377,11 @@ ApplicationWindow {
             autoPlay: autoPlay
             tagInfoPaneOpen: root.tagInfoPaneOpen
             audioVisualizerPaneOpen: root.audioVisualizerPaneOpen
+            milkdropPaneOpen: root.milkdropPaneOpen
             onScanRequested: libraryModel.startFullScan()
             onTagInfoToggleRequested: root.tagInfoPaneOpen = !root.tagInfoPaneOpen
             onAudioVisualizerToggleRequested: root.audioVisualizerPaneOpen = !root.audioVisualizerPaneOpen
+            onMilkdropToggleRequested: root.milkdropPaneOpen = !root.milkdropPaneOpen
         }
     }
 }
