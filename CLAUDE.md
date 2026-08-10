@@ -38,6 +38,67 @@ cmake --build build
 Run the built binary at `build/Topaz.exe` (or use the "Run topaz (Qt Quick)" launch
 config in `.vscode/launch.json`, which builds first via the CMake preLaunchTask).
 
+### Release build / deployment
+
+`build/` is left as a Debug tree for day-to-day VS Code work (CMake Tools writes
+`CMAKE_BUILD_TYPE=Debug` there by default). For a Release build, use a **separate**
+build directory — same toolchain, `-DCMAKE_BUILD_TYPE=Release` added — so it doesn't
+force VS Code to reconfigure/rebuild the Debug tree:
+
+```sh
+cmake -B build-release -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=C:/Qt/6.10.2/mingw_64 \
+  -DCMAKE_MAKE_PROGRAM=C:/Qt/Tools/Ninja/ninja.exe \
+  -DCMAKE_C_COMPILER=C:/Qt/Tools/mingw1310_64/bin/gcc.exe \
+  -DCMAKE_CXX_COMPILER=C:/Qt/Tools/mingw1310_64/bin/g++.exe \
+  -DCMAKE_RC_COMPILER=C:/Qt/Tools/mingw1310_64/bin/windres.exe
+cmake --build build-release --target topaz
+```
+
+This produces optimized, non-`d`-suffixed `libprojectM-4.dll` / `libprojectM-4-playlist.dll`
+/ `glew32.dll` alongside `Topaz.exe` in `build-release/` (same `RUNTIME_OUTPUT_DIRECTORY`
+convention as the Debug tree — see `CMakeLists.txt`'s GLEW section). KissFFT needs no DLL;
+it's vendored source compiled directly into `Topaz.exe` (`third_party/kissfft/`).
+
+To assemble a minimal, self-contained deploy folder (`/deploy/`, gitignored) — just what's
+needed to run `Topaz.exe` on another machine, nothing from the build tree's object files/
+CMake cache:
+
+```sh
+mkdir deploy
+cp build-release/Topaz.exe build-release/libprojectM-4.dll \
+   build-release/libprojectM-4-playlist.dll build-release/glew32.dll deploy/
+C:/Qt/6.10.2/mingw_64/bin/windeployqt6.exe --qmldir . --compiler-runtime deploy/Topaz.exe
+mkdir deploy/Topaz
+cp build-release/Topaz/qmldir build-release/Topaz/topaz.qmltypes deploy/Topaz/
+```
+
+`windeployqt6` pulls in every Qt DLL actually used (including the Multimedia FFmpeg
+backend's `avcodec-*`/`avformat-*`/`avutil-*`/`swresample-*`/`swscale-*`), the QML
+modules/plugins the app imports, the platform plugin, and (via `--compiler-runtime`)
+the MinGW runtime DLLs (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`, `libwinpthread-1.dll`).
+It does not know about `libprojectM`/GLEW since those aren't Qt — hence the manual copy
+step above.
+
+**The last two lines are not optional — the app fails to start without them.**
+`qt_add_qml_module` generates a companion `Topaz/` directory next to `Topaz.exe` in
+*every* build tree (`build-release/Topaz/`), containing a `qmldir` whose `prefer
+:/Topaz/` line redirects module resolution to the QML resources actually compiled
+into the exe. `QQmlApplicationEngine` always searches the app's own directory for a
+`<ModuleName>/qmldir` as part of resolving `engine.loadFromModule("Topaz", "Main")`
+(`main.cpp`) — that's how it finds the module when running in-place from
+`build/`/`build-release/`. Copy `Topaz.exe` alone into a fresh folder without this,
+and that search comes up empty: the app exits immediately (`QCoreApplication::exit(-1)`
+from `objectCreationFailed` in `main.cpp`) with `Module "Topaz" contains no type named
+"Main"` — silently, since it's a `WIN32_EXECUTABLE` with no attached console, so nothing
+appears on stderr unless you set `QT_FORCE_STDERR_LOGGING=1` first. Only `qmldir` +
+`topaz.qmltypes` are actually needed at runtime (confirmed by testing) — the loose
+`.qml` files `qt_add_qml_module` also copies into that folder are for IDE tooling
+(Qt Creator/`qmlls`) only and can be left out of the deploy folder.
+
+Re-run all of this after each Release rebuild; nothing here is incremental.
+
 There is no test suite in this repository.
 
 ## Architecture

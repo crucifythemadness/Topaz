@@ -103,7 +103,30 @@ User clicks an album row in `LibraryTree`:
 2. `TopBar` emits `settingsRequested()`.
 3. `Main.qml` handles `onSettingsRequested` → calls `setupDialog.open()`.
 4. `SetupDialog` opens as a modal popup centered on the application window with a dark scrim behind it.
-5. Dialog opens on the **GENRES** tab by default.
+5. Dialog opens on the **GENRES** tab by default. The dialog can be dragged
+   to another position by pressing and dragging its header (the "SETUP"
+   title bar) — a `MouseArea` there (`SetupDialog.qml`, declared before the
+   header's close-✕ button so it doesn't intercept that click) tracks the
+   press-to-move delta and writes it directly to the `Popup`'s `x`/`y`.
+   Centering deliberately uses plain `x`/`y` bindings against
+   `Overlay.overlay`'s size (`x: Overlay.overlay ? (Overlay.overlay.width -
+   width) / 2 : 0`, and similarly for `y`) rather than `anchors.centerIn:
+   Overlay.overlay` (still used by `MessageBox.qml`/`NewPlaylistDialog.qml`,
+   which aren't draggable): `Popup.anchors.centerIn` is backed by
+   `QQuickPopupAnchors`, which keeps reasserting `x`/`y` from C++ rather
+   than through a plain overridable QML binding, so it fights any manual
+   drag and the popup never visibly moves — ordinary `x`/`y` bindings behave
+   like normal `Item` bindings and get cleanly broken by the drag's direct
+   assignment. This position is intentionally **not** persisted anywhere in
+   `AppConfig` — `onAboutToShow` recomputes `x`/`y` from `Overlay.overlay`'s
+   current size every time the dialog opens, so it always comes back
+   centered regardless of where it was left (and picks up a window resize
+   that happened while it was closed). Contrast with the `FloatingPane`-
+   based panes (`MilkdropWindow`, etc.), which persist dragged geometry via
+   `geometrySettled()`/`AppConfig.saveLayout()` (see UC-17/UC-19/UC-20) —
+   `SetupDialog` deliberately does not, and being a `Popup` rather than a
+   separate `Window`, it can't use `FloatingPane`'s `Window.startSystemMove()`
+   mechanism anyway.
 6. User switches tabs or closes the dialog with the ✕ button.
 
 ---

@@ -29,7 +29,14 @@ Popup {
     property int selectedMilkdropFolderIndex: -1
 
     // ── Geometry ─────────────────────────────────────────────────────────
-    anchors.centerIn: Overlay.overlay
+    // Deliberately NOT anchors.centerIn: Popup's anchors.centerIn is backed
+    // by QQuickPopupAnchors, which keeps reasserting x/y from C++ (not a
+    // plain QML binding) — it fights the header drag MouseArea below and
+    // the popup never visibly moves. Plain x/y bindings behave like normal
+    // Item bindings and get cleanly overridden by the drag's direct
+    // assignment, same as everywhere else in QML.
+    x: Overlay.overlay ? (Overlay.overlay.width  - width)  / 2 : 0
+    y: Overlay.overlay ? (Overlay.overlay.height - height) / 2 : 0
     width:  920   // widened so genreManageGrid's cells grow ~20% for longer genre names
     height: 760   // grown to fit the AUTO PLAY tab's 8th settings row (Exceptions,
                   // a single-row 3-option radio group)
@@ -37,6 +44,15 @@ Popup {
 
     modal: true
     closePolicy: Popup.NoAutoClose
+
+    // Dragging the header (below) moves this Popup via direct x/y
+    // assignment, which breaks the bindings above — recompute them here on
+    // every open so the dialog always reopens centered and the dragged
+    // position is never persisted (no AppConfig involvement).
+    onAboutToShow: {
+        x = Overlay.overlay ? (Overlay.overlay.width  - width)  / 2 : 0
+        y = Overlay.overlay ? (Overlay.overlay.height - height) / 2 : 0
+    }
 
     // Dark scrim behind the dialog
     Overlay.modal: Rectangle {
@@ -58,6 +74,26 @@ Popup {
             height: 56
             color:  Theme.surfaceContainerHigh
             radius: Theme.radiusLg
+
+            // Drag-to-move — declared first so it sits underneath the close
+            // button's own MouseArea below (later siblings win input in
+            // overlapping regions), leaving the ✕ click unaffected.
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+
+                property real pressX: 0
+                property real pressY: 0
+
+                onPressed: (mouse) => { pressX = mouse.x; pressY = mouse.y }
+                onPositionChanged: (mouse) => {
+                    if (pressed) {
+                        root.x += mouse.x - pressX
+                        root.y += mouse.y - pressY
+                    }
+                }
+            }
 
             // Square off the bottom corners so they sit flush against content
             Rectangle {
