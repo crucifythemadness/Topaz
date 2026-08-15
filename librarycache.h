@@ -12,7 +12,9 @@
 //   "tracks": [
 //     {
 //       "id":           "uuid-string",
-//       "filePath":     "/absolute/path/track.flac",
+//       "volume":       "MusicDrive",
+//       "relPath":      "/Music/track.flac",
+//       "rawPath":      "D:/Music/track.flac",
 //       "fileName":     "track.flac",
 //       "title":        "Track Title",
 //       "artist":       "Artist Name",
@@ -31,6 +33,15 @@
 //     }, ...
 //   ]
 // }
+//
+// "volume"/"relPath"/"rawPath" replace what used to be a single absolute
+// "filePath" — see volumepath.h (VolumePath). load() resolves each entry's
+// in-memory TrackInfo::filePath via VolumePath::quickPath(), a zero-
+// filesystem-I/O match against currently mounted volumes: load() runs
+// synchronously on the main thread for an instant startup UI, at up to
+// 12K+ tracks, so it must never call QFileInfo::exists() per track — real
+// existence verification happens in the async statCheck that always follows
+// immediately after (see LibraryModel::loadCacheAndStartStatCheck()).
 class LibraryCache
 {
 public:
@@ -38,6 +49,8 @@ public:
     static QString cacheFilePath();
 
     // Load and deserialise the cache.  Returns an empty list on any error.
+    // Tracks whose volume can't be matched among currently mounted volumes
+    // are silently skipped (see quickPath() note above).
     static QList<TrackInfo> load();
 
     // Serialise and write the cache atomically (write to .tmp, then rename).

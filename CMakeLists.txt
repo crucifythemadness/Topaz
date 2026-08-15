@@ -62,6 +62,8 @@ qt_add_executable(topaz
     trackinfo.h
     tagreader.h
     tagreader.cpp
+    volumepath.h
+    volumepath.cpp
     librarycache.h
     librarycache.cpp
     ratingcache.h

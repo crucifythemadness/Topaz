@@ -1,5 +1,6 @@
 #include "playlistmanager.h"
 #include "tagreader.h"
+#include "volumepath.h"
 
 #include <QDir>
 #include <QFile>
@@ -15,7 +16,7 @@
 namespace {
 
 struct XspfEntry {
-    QString location, title, creator, album, trackNum, duration;
+    QString location, volume, title, creator, album, trackNum, duration;
 };
 
 // Parse all <track> entries from an XSPF file.
@@ -42,6 +43,7 @@ QList<XspfEntry> parseXspfFile(const QString &path, QString &outTitle)
                 cur = {};
             } else if (inTrack) {
                 if      (n == QLatin1String("location")) cur.location = xml.readElementText();
+                else if (n == QLatin1String("volume"))   cur.volume   = xml.readElementText();
                 else if (n == QLatin1String("title"))    cur.title    = xml.readElementText();
                 else if (n == QLatin1String("creator"))  cur.creator  = xml.readElementText();
                 else if (n == QLatin1String("album"))    cur.album    = xml.readElementText();
@@ -83,6 +85,8 @@ bool writeXspfFile(const QString &path,
         xml.writeStartElement(QStringLiteral("track"));
         if (!e.location.isEmpty())
             xml.writeTextElement(QStringLiteral("location"), e.location);
+        if (!e.volume.isEmpty())
+            xml.writeTextElement(QStringLiteral("volume"), e.volume);
         if (!e.title.isEmpty())
             xml.writeTextElement(QStringLiteral("title"), e.title);
         if (!e.creator.isEmpty())
@@ -108,36 +112,6 @@ bool writeXspfFile(const QString &path,
 }
 
 } // namespace
-
-// ── resolveLocation (file-level helper) ─────────────────────────────────
-// Resolves a stored XSPF location to an absolute local path.
-// Locations are stored without a drive letter (e.g. "/Music/foo.flac").
-// Checks every mounted volume on the system and returns the first path
-// that actually exists on disk.  Returns an empty string when not found.
-static QString resolveLocation(const QString &location)
-{
-    if (location.isEmpty()) return {};
-
-    // Already absolute with drive letter — validate and return
-    if (location.length() >= 2 && location[1] == QChar(':')) {
-        return QFile::exists(location) ? location : QString{};
-    }
-
-    // Relative path — probe each mounted volume (QStorageInfo covers all real drives)
-    const QList<QStorageInfo> volumes = QStorageInfo::mountedVolumes();
-    for (const QStorageInfo &vol : volumes) {
-        if (!vol.isValid() || !vol.isReady())
-            continue;
-        QString root = vol.rootPath();
-        // rootPath() ends with '/' or '\\' on Windows — strip it to avoid double slash
-        if (root.endsWith('/') || root.endsWith('\\')
-            ) root.chop(1);
-        const QString candidate = root + location;
-        if (QFile::exists(candidate))
-            return candidate;
-    }
-    return {};
-}
 
 PlaylistManager::PlaylistManager(QObject *parent)
     : QObject(parent)
@@ -193,16 +167,6 @@ QString PlaylistManager::createPlaylist(const QString &name,
 
 // ── Private helpers ───────────────────────────────────────────────────────
 
-// static
-QString PlaylistManager::locationForPath(const QString &filePath)
-{
-    // Strip Windows drive letter so the path starts with "/"
-    // e.g. "C:/Music/foo.flac" → "/Music/foo.flac"
-    if (filePath.length() >= 2 && filePath[1] == QChar(':'))
-        return filePath.mid(2);
-    return filePath;
-}
-
 QByteArray PlaylistManager::buildXspf(const QString &title,
                                        const QVariantList &tracks) const
 {
@@ -227,11 +191,15 @@ QByteArray PlaylistManager::buildXspf(const QString &title,
 
         xml.writeStartElement(QStringLiteral("track"));
 
-        // <location> — relative path without drive letter
+        // <location>/<volume> — volume-relative path, see VolumePath (volumepath.h)
         const QString fp = m.value(QStringLiteral("filePath")).toString();
-        if (!fp.isEmpty())
+        if (!fp.isEmpty()) {
+            const VolumePath vp = VolumePath::fromAbsolutePath(fp);
             xml.writeTextElement(QStringLiteral("location"),
-                                 locationForPath(fp));
+                                 vp.relativePath.isEmpty() ? vp.rawPath : vp.relativePath);
+            if (!vp.volumeName.isEmpty())
+                xml.writeTextElement(QStringLiteral("volume"), vp.volumeName);
+        }
 
         // <title>
         const QString t = m.value(QStringLiteral("title")).toString();
@@ -279,7 +247,12 @@ bool PlaylistManager::appendTrack(const QString &nameWithExt,
     QList<XspfEntry> entries = parseXspfFile(path, title);
 
     XspfEntry e;
-    e.location = locationForPath(map.value(QStringLiteral("filePath")).toString());
+    {
+        const VolumePath vp = VolumePath::fromAbsolutePath(
+            map.value(QStringLiteral("filePath")).toString());
+        e.location = vp.relativePath.isEmpty() ? vp.rawPath : vp.relativePath;
+        e.volume   = vp.volumeName;
+    }
 
     const QString t = map.value(QStringLiteral("title")).toString();
     e.title = t.isEmpty()
@@ -317,7 +290,8 @@ bool PlaylistManager::removeTrackByPath(const QString &nameWithExt,
     QString title;
     QList<XspfEntry> entries = parseXspfFile(path, title);
 
-    const QString loc = locationForPath(filePath);
+    const VolumePath vp = VolumePath::fromAbsolutePath(filePath);
+    const QString loc = vp.relativePath.isEmpty() ? vp.rawPath : vp.relativePath;
     const int before  = entries.size();
 
     entries.erase(
@@ -361,9 +335,16 @@ QVariantMap PlaylistManager::loadPlaylist(const QString &filePath)
     QString xspfTitle;
     const QList<XspfEntry> entries = parseXspfFile(localPath, xspfTitle);
 
+    // Fetched once for the whole playlist, not per track.
+    const QList<QStorageInfo> mounted = QStorageInfo::mountedVolumes();
+
     QVariantList tracks;
     for (const XspfEntry &e : entries) {
-        const QString resolved = resolveLocation(e.location);
+        VolumePath vp;
+        vp.volumeName   = e.volume;
+        vp.relativePath = e.location;
+        vp.rawPath      = e.location; // in case it was written as a raw fallback path
+        const QString resolved = vp.resolve(mounted);
         if (resolved.isEmpty())
             continue;   // file not found on any mounted volume — skip silently
 

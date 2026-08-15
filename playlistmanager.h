@@ -12,9 +12,11 @@
 // Playlists are stored in:
 //   <AppConfigLocation>/playlists/<name>.xml
 //
-// Track locations in the XSPF file are written as absolute paths with
-// the Windows drive letter stripped (e.g. "C:/Music/foo.flac" →
-// "/Music/foo.flac") so playlists are portable across drive-letter changes.
+// Track locations are written as a volume-anchored pair — <location> holds a
+// path relative to the containing volume's root, <volume> holds that volume's
+// label (via VolumePath, see volumepath.h) — so playlists stay portable across
+// drive-letter reassignment and across platforms (Windows/Linux), not just
+// drive-letter changes. <volume> is omitted when the volume has no label.
 //
 // Instantiated in Main.qml:  PlaylistManager { id: playlistManager }
 class PlaylistManager : public QObject
@@ -62,8 +64,9 @@ public:
                                       const QVariantList &tracks);
 
     // Loads an XSPF playlist file (accepts both a local path and a file:// URL).
-    // For each <track>, tries to resolve the stored relative location
-    // (no drive letter) by checking every mounted volume.  Tracks whose file
+    // For each <track>, resolves the stored <volume>/<location> pair back to an
+    // absolute path via VolumePath::resolve() (tries the named volume first,
+    // then falls back to probing every mounted volume). Tracks whose file
     // cannot be found are silently skipped.
     //
     // Returns a QVariantMap with:
@@ -77,7 +80,4 @@ public:
 private:
     QByteArray buildXspf(const QString &title,
                           const QVariantList &tracks) const;
-
-    // Strips Windows drive letter: "C:/Music/x.flac" → "/Music/x.flac"
-    static QString locationForPath(const QString &filePath);
 };

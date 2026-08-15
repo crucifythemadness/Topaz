@@ -191,9 +191,14 @@ User clicks an album row in `LibraryTree`:
 3. User selects a directory and confirms.
 4. `FolderDialog.onAccepted` calls `appConfig.addFolder(selectedFolder, true)`.
 5. `AppConfig` converts the `file://` URL to a local path via `QUrl::toLocalFile()`,
-   performs a duplicate check, appends `{ "path": ..., "includeSubfolders": true }`, emits
-   `foldersChanged`, and auto-saves.
+   converts it to a volume-anchored `VolumePath` (`volumepath.h`), performs a
+   duplicate check by `(volume, relPath)`, appends the entry with
+   `includeSubfolders: true`, emits `foldersChanged`, and auto-saves.
 6. The new row appears in the folder list with the **SUBFOLDERS** checkbox ticked.
+   If the folder's volume is later unmounted (disk unplugged, moved elsewhere),
+   the row dims and shows a "not connected" indicator instead of removing itself
+   from the list — `AppConfig::folders()` still returns the entry, just with an
+   empty resolved `path` and `available: false` (see "Config file format" below).
 
 ### Normal Flow — Toggle subfolders
 
@@ -623,7 +628,9 @@ Stored alongside `Topaz.config` in `QStandardPaths::AppConfigLocation`.
   "tracks": [
     {
       "id":           "550e8400-e29b-41d4-a716-446655440000",
-      "filePath":     "C:/Music/Electronic/Techno/Artist/Album/01_Track.flac",
+      "volume":       "MusicDrive",
+      "relPath":      "/Electronic/Techno/Artist/Album/01_Track.flac",
+      "rawPath":      "D:/Music/Electronic/Techno/Artist/Album/01_Track.flac",
       "fileName":     "01_Track.flac",
       "title":        "Track Title",
       "artist":       "Artist Name",
@@ -643,6 +650,20 @@ Stored alongside `Topaz.config` in `QStandardPaths::AppConfigLocation`.
   ]
 }
 ```
+
+**Path storage**: `volume`/`relPath` replace what used to be a single absolute
+`filePath`, anchored on the track's volume label via `VolumePath`
+(`volumepath.h`) — the same scheme `AppConfig` uses for monitored folders and
+`PlaylistManager` for XSPF `<location>`/`<volume>`. `rawPath` is kept only as a
+last-resort fallback for unlabeled volumes. `LibraryCache::save()` captures this
+from the just-scanned `TrackInfo.filePath` (always a live absolute path at that
+point); `LibraryCache::load()` resolves it back via `VolumePath::quickPath()` — an
+in-memory match against currently mounted volumes with **no filesystem access**,
+since `load()` runs synchronously on the main thread for the instant-startup
+cache display (see below) at up to 12K+ tracks, and a `QFileInfo::exists()` stat
+call per track there would stall it. A track whose volume isn't currently
+mounted is skipped from the loaded set (the async `statCheck` that always
+follows immediately after would prune it a moment later anyway).
 
 **Cover storage**: `coverThumb` is populated for the first track of each
 `(albumArtist, album)` pair; all other tracks have an empty string.
@@ -769,8 +790,10 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
         "Drone"
     ],
     "folders": [
-        { "path": "C:/Music/Electronic", "includeSubfolders": true  },
-        { "path": "C:/Music/Jazz",       "includeSubfolders": false }
+        { "volume": "MusicDrive", "relPath": "/Electronic", "rawPath": "D:/Music/Electronic",
+          "includeSubfolders": true  },
+        { "volume": "MusicDrive", "relPath": "/Jazz",       "rawPath": "D:/Music/Jazz",
+          "includeSubfolders": false }
     ],
     "windowWidth":        1920,
     "windowHeight":       1080,
@@ -807,6 +830,19 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
 }
 ```
 
+Each folder is anchored on its volume's **label** rather than a Windows drive
+letter (`VolumePath`, `volumepath.h`) — `volume`/`relPath` are what's actually
+resolved at runtime; `rawPath` is kept only as a last-resort fallback for
+unlabeled volumes. This means a monitored folder keeps working after its drive
+is reassigned a different letter or remounted elsewhere (including under a
+future Linux build's mount points). `AppConfig::folders()` computes two
+non-persisted fields fresh on every call — `path` (the currently resolved
+absolute path, or `""` if the volume isn't mounted right now) and `available`
+(`bool`) — which `SetupDialog`'s FILE MONITORING tab uses to dim a folder row
+and show a "not connected" indicator instead of a broken path (see UC-04).
+`LibraryScanner` simply skips folders with an empty `path`, same as it always
+has for any other unreachable folder.
+
 Settings are grouped into a nested object per `SetupDialog` tab (`crossfade`,
 `autoPlay`, `audioVisualizer`); genres/folders/window-layout stay flat at the top
 level. The `AppConfig` property/method names (`crossfadeEnabled`, `crossfadeSeconds`,
@@ -823,7 +859,7 @@ what "configured" means — absent means that pane has never been positioned yet
 | `addGenre(name)` | Append genre (deduplicates case-insensitively); auto-saves. |
 | `removeGenreAt(index)` | Remove genre by index; auto-saves. |
 | `clearGenres()` | Remove all genres; auto-saves. |
-| `addFolder(rawPath, includeSubfolders)` | Append folder (deduplicates by path); auto-saves. |
+| `addFolder(rawPath, includeSubfolders)` | Converts `rawPath` to a volume-anchored `VolumePath` (`volumepath.h`) and appends it (deduplicates by `(volume, relPath)`); auto-saves. |
 | `removeFolderAt(index)` | Remove folder by index; auto-saves. |
 | `clearFolders()` | Remove all folders; auto-saves. |
 | `setFolderSubfolders(index, flag)` | Toggle the includeSubfolders flag; auto-saves. |
@@ -1556,17 +1592,25 @@ mapping:
 |---|---|---|
 | `<playlist version="1" xmlns="http://xspf.org/ns/0/">` | — | Root element |
 | `<title>` | Playlist name | Entered by user |
-| `<track>/<location>` | `TrackInfo.filePath` | Drive letter stripped: `C:/Music/x.flac` → `/Music/x.flac` |
+| `<track>/<location>` | `TrackInfo.filePath` | Volume-relative: `D:/Music/x.flac` → `/Music/x.flac`, root stripped via `VolumePath` (`volumepath.h`) |
+| `<track>/<volume>` | `TrackInfo.filePath` | The containing volume's label (`QStorageInfo::name()`); omitted when the volume is unlabeled |
 | `<track>/<title>` | `TrackInfo.title` | Falls back to file name if empty |
 | `<track>/<creator>` | `TrackInfo.albumArtist` or `TrackInfo.artist` | XSPF maps `creator` to track artist |
 | `<track>/<album>` | `TrackInfo.album` | |
 | `<track>/<trackNum>` | `TrackInfo.track` | Omitted when 0 |
 | `<track>/<duration>` | `TrackInfo.duration` | Milliseconds, as required by XSPF |
 
-**Location portability**: the Windows drive letter is stripped so that playlists
-can be loaded even if the drive letter changes (e.g. external drive reassigned
-from `E:` to `F:`).  When loading a playlist (future), Topaz will search
-configured folders for the relative path.
+**Location portability**: paths are anchored to the volume's **label**, not a
+Windows drive letter, via the shared `VolumePath` helper (`volumepath.h`) also
+used by `AppConfig` (monitored folders) and `LibraryCache` (scanned tracks). This
+means playlists survive a drive-letter reassignment (e.g. external drive moved
+from `E:` to `F:`) *and* work unchanged on a future Linux build, where volumes
+have no drive letter at all — `QStorageInfo::name()`/`rootPath()` behave the same
+way there (label via udev/blkid, a `/media/<user>/<label>`-style mount point).
+`<volume>` is an optional hint only: `loadPlaylist()` always falls back to probing
+every mounted volume for the stored relative path if the named volume isn't found
+(renamed, unlabeled, or a different machine), so old playlists written before the
+`<volume>` element existed still load correctly.
 
 ### Public API
 
@@ -1576,9 +1620,9 @@ configured folders for the relative path.
 | `playlistExists(name)` | `true` when `<name>.xml` already exists in the playlist folder. |
 | `createPlaylist(name, tracks)` | Write a new XSPF file. Returns empty string on success or a human-readable error string (name empty, already exists, write failure). Receives the track list from `PlaybackEngine.trackList()`. |
 | `appendTrack(nameWithExt, map)` | Parse the existing XSPF file, append one `<track>` entry, and rewrite. `nameWithExt` includes the `.xml` extension. Accepts both `"number"` and `"trackNumber"` map keys for the track number. Returns `true` on success. |
-| `removeTrackByPath(nameWithExt, filePath)` | Parse the existing XSPF file, remove the first `<track>` whose `<location>` matches the stripped `filePath`, and rewrite. Returns `true` when a track was removed. |
+| `removeTrackByPath(nameWithExt, filePath)` | Parse the existing XSPF file, remove the first `<track>` whose `<location>` matches the volume-relative form of `filePath`, and rewrite. Returns `true` when a track was removed. |
 | `rewritePlaylist(nameWithExt, tracks)` | Overwrite the entire XSPF file with the given ordered track list. Used after any reorder operation (`moveUp`, `moveDown`, `moveTrack`) and when the playlist lock is turned off. The playlist `<title>` is derived from the file's base name. Returns `true` on success. |
-| `loadPlaylist(filePath)` | Accepts a local path or a `file://` URL. Parses the XSPF, resolves every relative `<location>` (no drive letter) by checking all mounted volumes via `QStorageInfo::mountedVolumes()`. Tracks whose file cannot be found on any volume are silently skipped. Returns a `QVariantMap` with `"fileName"` (base name + `.xml`) and `"tracks"` (QVariantList of resolved track maps ready for `PlaybackEngine.addTracks()`). |
+| `loadPlaylist(filePath)` | Accepts a local path or a `file://` URL. Parses the XSPF, resolves each `<volume>`/`<location>` pair back to an absolute path via `VolumePath::resolve()` (tries the named volume first, then probes every volume mounted via `QStorageInfo::mountedVolumes()`, fetched once for the whole playlist). Tracks whose file cannot be found on any volume are silently skipped. Returns a `QVariantMap` with `"fileName"` (base name + `.xml`) and `"tracks"` (QVariantList of resolved track maps ready for `PlaybackEngine.addTracks()`). |
 
 ### Example output
 
@@ -1589,6 +1633,7 @@ configured folders for the relative path.
   <trackList>
     <track>
       <location>/Music/Techno/Artist/Album/01_Track.flac</location>
+      <volume>MusicDrive</volume>
       <title>Track Title</title>
       <creator>Album Artist</creator>
       <album>Album Name</album>
@@ -1641,8 +1686,10 @@ This is valid XSPF and no special handling is required.
 
 - **No system dialog**: errors are reported via a themed in-app `MessageBox`
   popup, consistent with the rest of the UI.
-- **Relative location**: the drive letter is stripped from all `<location>`
-  entries so playlists are portable when the music drive letter changes.
+- **Relative location**: every `<location>` is written relative to its volume's
+  root (via `VolumePath`), with an optional `<volume>` label hint, so playlists
+  stay portable when the music drive letter changes — or across platforms
+  entirely, since the same scheme has no drive-letter dependency at all.
 - **Automatic sync on every queue mutation**: tracks added to the queue **are** appended to the XSPF automatically (`PlaybackEngine` → `PlaylistManager.appendTrack`). Tracks removed are removed (`PlaylistManager.removeTrackByPath`). Tracks reordered trigger a full rewrite (`PlaylistManager.rewritePlaylist`). All sync calls are guarded by `playlistLocked`.
 - **Playlist lock**: the `PlaybackQueue` header shows a **LOCK PLAYLIST** toggle (animated thumb switch) whenever a playlist is active. When locked (toggled right), all sync calls are suppressed. When unlocked, the XSPF is immediately rewritten to match the current queue. The lock is reset automatically on `clearQueue()` or when a new playlist becomes active. This allows the user to load a playlist as a starting point, rearrange tracks freely for one-time listening, then decide whether to keep the changes by unlocking.
 
@@ -1691,7 +1738,7 @@ This is valid XSPF and no special handling is required.
 5. User selects an `.xml` file and confirms.
 6. `loadPlaylistDialog.onAccepted` calls `playlistManager.loadPlaylist(selectedFile)`.
 7. `PlaylistManager.loadPlaylist()` parses the XSPF, then for each `<track>`:
-   a. Calls `resolveLocation(location)` which iterates `QStorageInfo::mountedVolumes()` and prepends each volume root to the relative path.
+   a. Builds a `VolumePath` from the entry's `<volume>`/`<location>` and calls `.resolve(mounted)` (`mounted` fetched once for the whole playlist) — tries the named volume's root first, then falls back to prepending every mounted volume's root to the relative path.
    b. If the resulting absolute path exists → included in the result.
    c. If not found on any volume → silently skipped.
 8. `engine.addTracks(result.tracks)` adds the found tracks to the queue.  Because the queue was empty, `PlaybackEngine` auto-plays the first track.
@@ -1707,7 +1754,7 @@ Only the found tracks are added; the missing ones are silently omitted.  The loa
 
 ### Design decisions
 
-- **Path resolution via `QStorageInfo`**: probing only real mounted volumes (not all 26 drive letters) is both faster and more reliable.  The relative path format `/Music/foo.flac` is prepended with each volume root in turn.
+- **Path resolution via `QStorageInfo`**: probing only real mounted volumes (not all 26 drive letters) is both faster and more reliable, and is the same cross-platform API on Linux. `VolumePath::resolve()` first tries the volume named in `<volume>` (fast path), then falls back to prepending every mounted volume's root to the relative path format (e.g. `/Music/foo.flac`) in turn — the same fallback the code always used, now shared with `AppConfig` and `LibraryCache` via `volumepath.h` rather than being playlist-specific.
 - **TagReader call on load**: XSPF does not store bitrate or exact duration. During `loadPlaylist()`, `TagReader::read(path, false)` is called for each resolved file to retrieve the actual bitrate, duration, and any tag fields that were absent or empty in the XSPF. Cover thumbnail generation is skipped (`generateCoverThumb = false`) to keep loading fast; the `NowPlaying` panel loads the cover asynchronously from the audio file via `TagReader::readRawCover` when the track starts playing.
 
 ---

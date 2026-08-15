@@ -528,6 +528,7 @@ Popup {
                                     width:  folderList.width
                                     height: 38
                                     radius: Theme.radiusSm
+                                    opacity: modelData.available === false ? 0.5 : 1.0
 
                                     readonly property bool isSelected:
                                         root.selectedFolderIndex === index
@@ -547,10 +548,14 @@ Popup {
 
                                         Text {
                                             Layout.fillWidth: true
-                                            text: modelData.path
+                                            text: modelData.available
+                                                  ? modelData.path
+                                                  : "⚠ " + modelData.volume
+                                                    + " not connected " + modelData.relPath
                                             font.family:    Theme.fontFamilyMono
                                             font.pixelSize: Theme.monoLg
-                                            color: Theme.fgSurface
+                                            color: modelData.available
+                                                   ? Theme.fgSurface : Theme.fgSurfaceVariant
                                             elide: Text.ElideMiddle
                                             verticalAlignment: Text.AlignVCenter
                                         }

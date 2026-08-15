@@ -1,4 +1,5 @@
 #include "appconfig.h"
+#include "volumepath.h"
 
 #include <QDir>
 #include <QFile>
@@ -7,6 +8,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QStandardPaths>
+#include <QStorageInfo>
 #include <QUrl>
 #include <cmath>
 
@@ -35,7 +37,23 @@ QStringList AppConfig::genres() const
 
 QVariantList AppConfig::folders() const
 {
-    return m_folders;
+    // m_folders persists {volume, relPath, rawPath, includeSubfolders}; each
+    // returned entry additionally carries a freshly resolved "path" (absolute,
+    // empty if the volume isn't currently mounted) and "available" flag, so QML
+    // and LibraryScanner keep seeing a ready-to-use absolute path.
+    const QList<QStorageInfo> mounted = QStorageInfo::mountedVolumes();
+
+    QVariantList result;
+    result.reserve(m_folders.size());
+    for (const QVariant &v : std::as_const(m_folders)) {
+        QVariantMap entry = v.toMap();
+        const VolumePath vp = VolumePath::fromVariantMap(entry);
+        const QString path = vp.resolve(mounted);
+        entry[QStringLiteral("path")]      = path;
+        entry[QStringLiteral("available")] = !path.isEmpty();
+        result.append(entry);
+    }
+    return result;
 }
 
 // ── Genre operations ──────────────────────────────────────────────────────
@@ -83,14 +101,22 @@ void AppConfig::addFolder(const QString &rawPath, bool includeSubfolders)
     if (path.isEmpty())
         return;
 
-    // Deduplicate
+    const VolumePath vp = VolumePath::fromAbsolutePath(path);
+
+    // Deduplicate by (volume, relPath) — fall back to rawPath when relPath
+    // couldn't be determined (no containing volume identified).
     for (const QVariant &v : std::as_const(m_folders)) {
-        if (v.toMap().value(QStringLiteral("path")).toString() == path)
+        const QVariantMap existing = v.toMap();
+        if (!vp.relativePath.isEmpty()) {
+            if (existing.value(QStringLiteral("volume")).toString() == vp.volumeName
+                && existing.value(QStringLiteral("relPath")).toString() == vp.relativePath)
+                return;
+        } else if (existing.value(QStringLiteral("rawPath")).toString() == vp.rawPath) {
             return;
+        }
     }
 
-    QVariantMap entry;
-    entry[QStringLiteral("path")]              = path;
+    QVariantMap entry = vp.toVariantMap();
     entry[QStringLiteral("includeSubfolders")] = includeSubfolders;
     m_folders.append(entry);
     emit foldersChanged();
@@ -476,8 +502,7 @@ void AppConfig::load()
     const QJsonArray foldersArr = root[QStringLiteral("folders")].toArray();
     for (const QJsonValue &v : foldersArr) {
         const QJsonObject fo = v.toObject();
-        QVariantMap entry;
-        entry[QStringLiteral("path")]              = fo[QStringLiteral("path")].toString();
+        QVariantMap entry = fo.toVariantMap();
         entry[QStringLiteral("includeSubfolders")] = fo[QStringLiteral("includeSubfolders")].toBool(false);
         m_folders.append(entry);
     }
@@ -574,13 +599,8 @@ void AppConfig::save()
     root[QStringLiteral("genres")] = genresArr;
 
     QJsonArray foldersArr;
-    for (const QVariant &v : std::as_const(m_folders)) {
-        const QVariantMap m = v.toMap();
-        QJsonObject fo;
-        fo[QStringLiteral("path")]              = m[QStringLiteral("path")].toString();
-        fo[QStringLiteral("includeSubfolders")] = m[QStringLiteral("includeSubfolders")].toBool();
-        foldersArr.append(fo);
-    }
+    for (const QVariant &v : std::as_const(m_folders))
+        foldersArr.append(QJsonObject::fromVariantMap(v.toMap()));
     root[QStringLiteral("folders")] = foldersArr;
 
     root[QStringLiteral("windowWidth")]        = m_windowWidth;

@@ -12,7 +12,13 @@
 // Schema:
 //   {
 //     "genres":  [ "Techno", "IDM", ... ],
-//     "folders": [ { "path": "C:/Music", "includeSubfolders": true }, ... ],
+//     "folders": [ { "volume": "MusicDrive", "relPath": "/Music", "rawPath": "D:/Music",
+//                    "includeSubfolders": true }, ... ],
+//                  // Anchored on the volume label (VolumePath, see volumepath.h) rather
+//                  // than a drive letter, so a folder still resolves after the disk is
+//                  // reassigned a different letter or remounted elsewhere (incl. Linux).
+//                  // "path" and "available" are NOT persisted — folders() computes them
+//                  // fresh from currently mounted volumes on every call.
 //     "crossfade": { "enabled": false, "seconds": 5.0 },
 //     "autoPlay":  { "queueHorizon": 5, "titleAddingIntervalSeconds": 30,
 //                    "considerGenre": false,

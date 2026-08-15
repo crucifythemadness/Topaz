@@ -1,4 +1,5 @@
 #include "librarycache.h"
+#include "volumepath.h"
 
 #include <QDir>
 #include <QFile>
@@ -6,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
+#include <QStorageInfo>
 
 // ─────────────────────────────────────────────────────────────────────────
 static QString appDataDir()
@@ -40,12 +42,22 @@ QList<TrackInfo> LibraryCache::load()
     QList<TrackInfo> tracks;
     tracks.reserve(arr.size());
 
+    // Fetched once for the whole batch — see the class-comment note on why
+    // this must stay filesystem-I/O-free at 12K+ track scale.
+    const QList<QStorageInfo> mounted = QStorageInfo::mountedVolumes();
+
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
+
+        const VolumePath vp = VolumePath::fromVariantMap(o.toVariantMap());
+        const QString filePath = vp.quickPath(mounted);
+        if (filePath.isEmpty())
+            continue; // volume not currently mounted — skip, like a deleted file
+
         TrackInfo t;
         t.id           = QUuid::fromString(o[QStringLiteral("id")].toString());
         if (t.id.isNull()) t.id = QUuid::createUuid();
-        t.filePath     = o[QStringLiteral("filePath")].toString();
+        t.filePath     = filePath;
         t.fileName     = o[QStringLiteral("fileName")].toString();
         t.title        = o[QStringLiteral("title")].toString();
         t.artist       = o[QStringLiteral("artist")].toString();
@@ -71,9 +83,12 @@ bool LibraryCache::save(const QList<TrackInfo> &tracks)
     QJsonArray arr;
 
     for (const TrackInfo &t : tracks) {
-        QJsonObject o;
+        // t.filePath is always a live, just-scanned absolute path here, so this
+        // capture is always accurate (unlike load(), which must resolve it back).
+        const VolumePath vp = VolumePath::fromAbsolutePath(t.filePath);
+
+        QJsonObject o = QJsonObject::fromVariantMap(vp.toVariantMap());
         o[QStringLiteral("id")]           = t.id.toString(QUuid::WithoutBraces);
-        o[QStringLiteral("filePath")]     = t.filePath;
         o[QStringLiteral("fileName")]     = t.fileName;
         o[QStringLiteral("title")]        = t.title;
         o[QStringLiteral("artist")]       = t.artist;
