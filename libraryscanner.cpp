@@ -6,7 +6,10 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
+#include <QThread>
+#include <QThreadPool>
 #include <QTimer>
+#include <QtConcurrent>
 
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -52,25 +55,26 @@ void LibraryScanner::onDebounceTimeout()
 
 // ── Internal scan helpers ─────────────────────────────────────────────────
 
-// Returns the album key used for cover-deduplication.
+// Returns the album key used for cover-deduplication. Includes genre (case-
+// insensitively, matching this file's other genre comparisons) so that two
+// same-named albums filed under different genres — e.g. a duplicate rip
+// classified both "Alt. Rock" and "Punk Rock" — are treated as distinct
+// albums, each resolving its own cover, instead of colliding into one slot
+// (matches the genre-scoping LibraryModel::buildLibraryTree() already uses).
 static inline QString albumKey(const TrackInfo &t)
 {
-    return t.albumArtist + QChar('|') + t.album;
+    return t.genre.trimmed().toLower() + QChar('|') + t.albumArtist + QChar('|') + t.album;
 }
 
-void LibraryScanner::scanDirectory(
-    const QString              &dirPath,
-    bool                        recursive,
-    const QSet<QString>        &configuredGenresLower,
-    const QHash<QString,QUuid> &existingIds,
-    const QHash<QString,qint64>&existingModified,
-    const QHash<QString,TrackInfo> &existingCache,
-    QSet<QString>              &seenAlbums,
-    QList<TrackInfo>            &result,
-    int                        &done,
-    int                         total)
+// Files handled per QtConcurrent::blockingMapped() batch — small enough to
+// keep cancellation checks and scanProgress updates feeling responsive
+// (close to the old per-file cadence), large enough to amortize thread-pool
+// dispatch overhead.
+static constexpr int kTagReadChunkSize = 200;
+
+QList<QFileInfo> LibraryScanner::discoverAudioFiles(const QString &dirPath, bool recursive) const
 {
-    const QStringList filters{ QStringLiteral("*.mp3"), QStringLiteral("*.flac"), QStringLiteral("*.opus") };
+    QList<QFileInfo> result;
     const QDir::Filters dirFilter =
         QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Readable;
 
@@ -78,72 +82,99 @@ void LibraryScanner::scanDirectory(
     const QFileInfoList entries = dir.entryInfoList(dirFilter);
 
     for (const QFileInfo &fi : entries) {
-        if (m_cancelRequested.load(std::memory_order_relaxed)) return;
+        if (m_cancelRequested.load(std::memory_order_relaxed)) return result;
 
         if (fi.isDir()) {
             if (recursive)
-                scanDirectory(fi.absoluteFilePath(), true,
-                              configuredGenresLower, existingIds,
-                              existingModified, existingCache,
-                              seenAlbums, result, done, total);
+                result.append(discoverAudioFiles(fi.absoluteFilePath(), true));
             continue;
         }
 
         const QString suffix = fi.suffix().toLower();
-        if (suffix != "mp3" && suffix != "flac" && suffix != "opus") continue;
+        if (suffix == "mp3" || suffix == "flac" || suffix == "opus")
+            result.append(fi);
+    }
+    return result;
+}
 
-        const QString path       = fi.absoluteFilePath();
-        const qint64  modifiedMs = fi.lastModified().toMSecsSinceEpoch();
+QList<TrackInfo> LibraryScanner::readTagsParallel(const QStringList &paths, QThreadPool &pool,
+                                                    int &done, int total)
+{
+    QList<TrackInfo> result;
+    result.reserve(paths.size());
 
-        // If the file is unchanged since last scan, reuse the cached entry.
-        if (existingModified.contains(path) && existingModified[path] == modifiedMs) {
-            const TrackInfo &cached = existingCache[path];
-            // Still check genre match (genre config may have changed)
-            if (configuredGenresLower.contains(cached.genre.trimmed().toLower()))
-                result.append(cached);
-            ++done;
-            emit scanProgress(done, total);
-            continue;
-        }
+    for (int i = 0; i < paths.size(); i += kTagReadChunkSize) {
+        if (m_cancelRequested.load(std::memory_order_relaxed)) break;
 
-        // New or changed file – read tags
-        const bool needCover = !seenAlbums.isEmpty(); // placeholder; real check below
-        Q_UNUSED(needCover)
+        const QStringList chunk = paths.mid(i, kTagReadChunkSize);
+        const QList<TrackInfo> chunkResult = QtConcurrent::blockingMapped<QList<TrackInfo>>(
+            &pool, chunk,
+            [](const QString &path) { return TagReader::read(path, false); });
 
-        TrackInfo info = TagReader::read(path, false); // cover decided below
-
-        // Genre filter
-        if (configuredGenresLower.isEmpty() ||
-            !configuredGenresLower.contains(info.genre.trimmed().toLower()))
-        {
-            ++done;
-            emit scanProgress(done, total);
-            continue;
-        }
-
-        // Assign stable UUID
-        info.id = existingIds.value(path, QUuid::createUuid());
-
-        // Cover thumbnail – one per (albumArtist, album)
-        const QString aKey = albumKey(info);
-        if (!seenAlbums.contains(aKey)) {
-            seenAlbums.insert(aKey);
-            // Re-read with cover extraction enabled
-            TrackInfo withCover = TagReader::read(path, true);
-            info.coverThumb = withCover.coverThumb;
-        }
-
-        result.append(info);
-        ++done;
+        result.append(chunkResult);
+        done += chunkResult.size();
         emit scanProgress(done, total);
+    }
+    return result;
+}
+
+void LibraryScanner::resolveCoverArt(QList<TrackInfo> &tracks, QThreadPool &pool)
+{
+    if (m_cancelRequested.load(std::memory_order_relaxed)) return;
+
+    // Albums that already have a cover somewhere in the merged set (most
+    // commonly, a reused cache entry) don't need a fresh one.
+    QSet<QString> albumsWithCover;
+    for (const TrackInfo &t : std::as_const(tracks)) {
+        if (!t.coverThumb.isEmpty())
+            albumsWithCover.insert(albumKey(t));
+    }
+
+    // Deterministic representative per remaining album: lexicographically
+    // smallest filePath — order-independent, unlike the old "whoever's
+    // processed first" (which only worked because that loop was sequential).
+    QHash<QString, int> representativeIndex; // albumKey -> index into tracks
+    for (int i = 0; i < tracks.size(); ++i) {
+        const TrackInfo &t = tracks.at(i);
+        const QString aKey = albumKey(t);
+        if (albumsWithCover.contains(aKey)) continue;
+
+        const auto it = representativeIndex.constFind(aKey);
+        if (it == representativeIndex.constEnd() || t.filePath < tracks.at(it.value()).filePath)
+            representativeIndex[aKey] = i;
+    }
+
+    if (representativeIndex.isEmpty()) return;
+
+    QStringList repPaths;
+    repPaths.reserve(representativeIndex.size());
+    for (auto it = representativeIndex.constBegin(); it != representativeIndex.constEnd(); ++it)
+        repPaths.append(tracks.at(it.value()).filePath);
+
+    const QList<TrackInfo> withCovers = QtConcurrent::blockingMapped<QList<TrackInfo>>(
+        &pool, repPaths,
+        [](const QString &path) { return TagReader::read(path, true); });
+
+    QHash<QString, QString> coverByPath; // filePath -> coverThumb
+    for (const TrackInfo &t : withCovers)
+        coverByPath[t.filePath] = t.coverThumb;
+
+    for (auto it = representativeIndex.constBegin(); it != representativeIndex.constEnd(); ++it) {
+        TrackInfo &t = tracks[it.value()];
+        t.coverThumb = coverByPath.value(t.filePath);
     }
 }
 
-// ── Public scan entry points ──────────────────────────────────────────────
-
-void LibraryScanner::fullScan(QStringList  genres,
-                               QVariantList folders,
-                               QList<TrackInfo> existingCache)
+// ── Shared scan pipeline ────────────────────────────────────────────────
+//
+// fullScan() and statCheck() have always had near-identical "walk configured
+// folders, reuse unchanged cached entries verbatim, read the rest" semantics
+// — the only real historical difference was statCheck()'s extra pass that
+// re-read tags for every already-known file instead of just new ones (a
+// wiring bug, since fixed by unifying on this single pipeline). Both public
+// slots now delegate here.
+void LibraryScanner::performScan(QStringList genres, QVariantList folders,
+                                  QList<TrackInfo> existingCache)
 {
     m_cancelRequested.store(false, std::memory_order_relaxed);
 
@@ -151,10 +182,9 @@ void LibraryScanner::fullScan(QStringList  genres,
     m_lastFolders = folders;
     m_lastCache   = existingCache;
 
-    // Build lookup maps from existing cache for stable IDs and cached entries
-    QHash<QString, QUuid>      existingIds;
-    QHash<QString, qint64>     existingModified;
-    QHash<QString, TrackInfo>  existingCacheMap;
+    QHash<QString, QUuid>     existingIds;
+    QHash<QString, qint64>    existingModified;
+    QHash<QString, TrackInfo> existingCacheMap;
     for (const TrackInfo &t : std::as_const(existingCache)) {
         existingIds[t.filePath]      = t.id;
         existingModified[t.filePath] = t.lastModified;
@@ -165,56 +195,77 @@ void LibraryScanner::fullScan(QStringList  genres,
     for (const QString &g : std::as_const(genres))
         configuredGenresLower.insert(g.trimmed().toLower());
 
-    // Count total audio files for progress reporting
-    int total = 0;
+    // 1. Discover every audio file currently on disk in the configured
+    //    folders. A cached entry whose path never shows up here (deleted, or
+    //    its folder removed from configuration) is simply never re-added to
+    //    the result below — that's the deletion-detection mechanism.
+    QList<QFileInfo> discovered;
     QStringList rootDirs;
     for (const QVariant &v : std::as_const(folders)) {
+        if (m_cancelRequested.load(std::memory_order_relaxed)) return;
         const QVariantMap m    = v.toMap();
         const QString     path = m[QStringLiteral("path")].toString();
         if (path.isEmpty()) continue;
         rootDirs.append(path);
-
         const bool recursive = m[QStringLiteral("includeSubfolders")].toBool();
-        std::function<void(const QString &)> countFiles;
-        countFiles = [&](const QString &dir) {
-            const QDir d(dir);
-            const QFileInfoList entries =
-                d.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-            for (const QFileInfo &fi : entries) {
-                if (fi.isDir() && recursive) { countFiles(fi.absoluteFilePath()); continue; }
-                const QString suf = fi.suffix().toLower();
-                if (suf == "mp3" || suf == "flac" || suf == "opus") ++total;
-            }
-        };
-        countFiles(path);
+        discovered.append(discoverAudioFiles(path, recursive));
     }
-
-    QList<TrackInfo> result;
-    result.reserve(qMax(total, existingCache.size()));
-    QSet<QString> seenAlbums;
-    int done = 0;
-
-    emit scanProgress(0, total);
-
-    for (const QVariant &v : std::as_const(folders)) {
-        if (m_cancelRequested.load(std::memory_order_relaxed)) break;
-        const QVariantMap m    = v.toMap();
-        const QString     path = m[QStringLiteral("path")].toString();
-        if (path.isEmpty()) continue;
-        const bool recursive = m[QStringLiteral("includeSubfolders")].toBool();
-        scanDirectory(path, recursive,
-                      configuredGenresLower,
-                      existingIds, existingModified, existingCacheMap,
-                      seenAlbums, result, done, total);
-    }
-
-    // Shutting down mid-scan: skip writing a partial cache and don't bother
-    // signaling completion — the app is already tearing down.
     if (m_cancelRequested.load(std::memory_order_relaxed)) return;
 
-    // Backfill any missing ratingId (e.g. a Topaz.library.json predating this
-    // feature) and (re-)apply persisted ratings from Topaz.rating.json — the
-    // latter is always authoritative, so this also picks up external edits.
+    // 2. Classify against the real existingModified map: unchanged files
+    //    reuse their cached entry verbatim (no tag read at all); new/changed
+    //    files queue for a fresh parallel tag read.
+    QList<TrackInfo> result;
+    result.reserve(discovered.size());
+    QStringList needsRead;
+    needsRead.reserve(discovered.size());
+
+    for (const QFileInfo &fi : std::as_const(discovered)) {
+        const QString path       = fi.absoluteFilePath();
+        const qint64  modifiedMs = fi.lastModified().toMSecsSinceEpoch();
+
+        if (existingModified.contains(path) && existingModified.value(path) == modifiedMs) {
+            const TrackInfo cached = existingCacheMap.value(path);
+            if (configuredGenresLower.contains(cached.genre.trimmed().toLower()))
+                result.append(cached);
+        } else {
+            needsRead.append(path);
+        }
+    }
+
+    // 3. Parallel tag-read for new/changed files only. Pool size capped
+    //    conservatively — this is disk-I/O-bound work, and concurrent random
+    //    reads can be net slower than sequential on spinning/external drives.
+    QThreadPool pool;
+    pool.setMaxThreadCount(qMin(QThread::idealThreadCount(), 4));
+
+    int       done  = result.size();
+    const int total = discovered.size();
+    emit scanProgress(done, total);
+
+    const QList<TrackInfo> freshlyRead = readTagsParallel(needsRead, pool, done, total);
+    if (m_cancelRequested.load(std::memory_order_relaxed)) return;
+
+    for (const TrackInfo &raw : freshlyRead) {
+        if (configuredGenresLower.isEmpty() ||
+            !configuredGenresLower.contains(raw.genre.trimmed().toLower()))
+            continue;
+
+        TrackInfo info = raw;
+        info.id = existingIds.value(info.filePath, QUuid::createUuid());
+        result.append(info);
+    }
+
+    // 4. Resolve album cover art — one deterministic, order-independent pass
+    //    (see resolveCoverArt()) instead of the old fully sequential,
+    //    processing-order-dependent dedup.
+    resolveCoverArt(result, pool);
+    if (m_cancelRequested.load(std::memory_order_relaxed)) return;
+
+    // 5. Rating enrichment: backfill any missing ratingId (e.g. a
+    //    Topaz.library.json predating this feature) and (re-)apply persisted
+    //    ratings from Topaz.rating.json — the latter is always authoritative,
+    //    so this also picks up external edits.
     const QHash<QUuid, int> ratings = RatingCache::load();
     for (TrackInfo &t : result) {
         if (t.ratingId.isNull())
@@ -227,116 +278,16 @@ void LibraryScanner::fullScan(QStringList  genres,
     emit scanCompleted(result);
 }
 
-void LibraryScanner::statCheck(QStringList  genres,
-                                QVariantList folders,
+// ── Public scan entry points ──────────────────────────────────────────────
+
+void LibraryScanner::fullScan(QStringList genres, QVariantList folders,
+                               QList<TrackInfo> existingCache)
+{
+    performScan(std::move(genres), std::move(folders), std::move(existingCache));
+}
+
+void LibraryScanner::statCheck(QStringList genres, QVariantList folders,
                                 QList<TrackInfo> existingCache)
 {
-    m_cancelRequested.store(false, std::memory_order_relaxed);
-
-    m_lastGenres  = genres;
-    m_lastFolders = folders;
-    m_lastCache   = existingCache;
-
-    QHash<QString, QUuid>      existingIds;
-    QHash<QString, qint64>     existingModified;
-    QHash<QString, TrackInfo>  existingCacheMap;
-    for (const TrackInfo &t : std::as_const(existingCache)) {
-        existingIds[t.filePath]      = t.id;
-        existingModified[t.filePath] = t.lastModified;
-        existingCacheMap[t.filePath] = t;
-    }
-
-    QSet<QString> configuredGenresLower;
-    for (const QString &g : std::as_const(genres))
-        configuredGenresLower.insert(g.trimmed().toLower());
-
-    // 1. Validate existing cache entries (remove deleted / re-read changed files)
-    QList<TrackInfo> result;
-    result.reserve(existingCache.size());
-    QSet<QString> seenAlbums;
-    QSet<QString> stillPresentPaths;
-
-    for (const TrackInfo &t : std::as_const(existingCache)) {
-        if (m_cancelRequested.load(std::memory_order_relaxed)) return;
-
-        const QFileInfo fi(t.filePath);
-        if (!fi.exists()) continue; // deleted
-        if (!configuredGenresLower.contains(t.genre.trimmed().toLower())) continue;
-
-        if (fi.lastModified().toMSecsSinceEpoch() != t.lastModified) {
-            // Changed – re-read tags
-            const QString aKey = albumKey(t);
-            const bool needCover = !seenAlbums.contains(aKey);
-            TrackInfo updated = TagReader::read(t.filePath, needCover);
-            updated.id = t.id;
-            if (!configuredGenresLower.contains(updated.genre.trimmed().toLower())) continue;
-            if (needCover) seenAlbums.insert(aKey);
-            result.append(updated);
-        } else {
-            const QString aKey = albumKey(t);
-            if (!seenAlbums.contains(aKey)) {
-                seenAlbums.insert(aKey);
-                if (t.coverThumb.isEmpty()) {
-                    // Cover was missing last time – try again
-                    TrackInfo withCover = TagReader::read(t.filePath, true);
-                    TrackInfo updated = t;
-                    updated.coverThumb = withCover.coverThumb;
-                    result.append(updated);
-                    continue;
-                }
-            }
-            result.append(t);
-        }
-        stillPresentPaths.insert(t.filePath);
-    }
-
-    // 2. Find new files in configured folders
-    int done = result.size();
-    const int total = done; // progress is approximate for stat-check
-    QStringList rootDirs;
-    for (const QVariant &v : std::as_const(folders)) {
-        if (m_cancelRequested.load(std::memory_order_relaxed)) break;
-        const QVariantMap m    = v.toMap();
-        const QString     path = m[QStringLiteral("path")].toString();
-        if (path.isEmpty()) continue;
-        rootDirs.append(path);
-
-        // Temporarily remove known files from the existingModified map so
-        // scanDirectory picks up genuinely new files.
-        QHash<QString, qint64> newFilesOnly;   // empty → triggers tag read for all
-        const bool recursive = m[QStringLiteral("includeSubfolders")].toBool();
-        scanDirectory(path, recursive,
-                      configuredGenresLower,
-                      existingIds, newFilesOnly, existingCacheMap,
-                      seenAlbums, result, done, total);
-    }
-
-    // Shutting down mid-scan: skip writing a partial cache and don't bother
-    // signaling completion — the app is already tearing down.
-    if (m_cancelRequested.load(std::memory_order_relaxed)) return;
-
-    // Deduplicate (scanDirectory may encounter files already in result)
-    QSet<QString> seen;
-    QList<TrackInfo> deduped;
-    deduped.reserve(result.size());
-    for (const TrackInfo &t : std::as_const(result)) {
-        if (!seen.contains(t.filePath)) {
-            seen.insert(t.filePath);
-            deduped.append(t);
-        }
-    }
-
-    // Backfill any missing ratingId (e.g. a Topaz.library.json predating this
-    // feature) and (re-)apply persisted ratings from Topaz.rating.json — the
-    // latter is always authoritative, so this also picks up external edits.
-    const QHash<QUuid, int> ratings = RatingCache::load();
-    for (TrackInfo &t : deduped) {
-        if (t.ratingId.isNull())
-            t.ratingId = TrackInfo::computeRatingId(t.albumArtist, t.artist, t.album, t.title);
-        t.rating = ratings.value(t.ratingId, 0);
-    }
-
-    LibraryCache::save(deduped);
-    updateWatcher(rootDirs);
-    emit scanCompleted(deduped);
+    performScan(std::move(genres), std::move(folders), std::move(existingCache));
 }

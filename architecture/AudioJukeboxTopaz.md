@@ -239,14 +239,40 @@ User clicks an album row in `LibraryTree`:
 1. `BottomBar` emits `scanRequested()`.
 2. `Main.qml` calls `libraryModel.startFullScan()`.
 3. `LibraryModel` copies genres + folders from `AppConfig`, emits `_requestFullScan` to worker thread.
-4. `LibraryScanner.fullScan()` runs on the worker thread:
-   a. Recursively walks each configured folder (respecting `includeSubfolders`).
-   b. For each `*.mp3` / `*.flac` / `*.opus` file: calls `TagReader::read()`.
-   c. Compares the file's genre tag (case-insensitive trim) against configured genres. Skips unmatched files.
-   d. Assigns a stable UUID (reused from cache if path is known).
-   e. For the first track of each (albumArtist, album) pair: extracts and scales a 160×160 JPEG thumbnail.
-   f. Emits `scanProgress(done, total)` periodically.
-5. Scanner saves result to `Topaz.library.json` via `LibraryCache::save()`.
+4. `LibraryScanner.fullScan()` delegates to the shared `performScan()` pipeline on
+   the worker thread (`statCheck()` delegates to the same pipeline — see the
+   Startup stat-check flow below; the two have always had near-identical
+   semantics, so both are now thin wrappers around one implementation):
+   a. **Discover** — recursively walks each configured folder (respecting
+      `includeSubfolders`), listing every `*.mp3`/`*.flac`/`*.opus` file
+      currently on disk. Pure filesystem listing, no tag reads.
+   b. **Classify** — for each discovered file, compares its `lastModified`
+      against the existing cache: unchanged files reuse their cached
+      `TrackInfo` verbatim (no tag read at all); new/changed files are queued.
+      A cached entry whose file didn't show up in the discovery walk (deleted,
+      or its folder removed from configuration) is simply never re-added —
+      this is also how deletions are detected (see the stat-check flow below).
+   c. **Parallel tag-read** — the queued set is read via `TagReader::read()`
+      in parallel over a small `QThreadPool` (capped at `min(4, core count)` —
+      this is disk-I/O-bound work, not CPU-bound, so more threads isn't
+      always better, especially on external/spinning drives), in chunks of
+      ~200 files so cancellation and `scanProgress(done, total)` stay
+      responsive between chunks. Each file's genre tag (case-insensitive
+      trim) is compared against configured genres; unmatched files are
+      dropped. Freshly-read entries get a stable UUID (reused from cache if
+      the path is already known).
+   d. **Resolve cover art** — one pass, after reused-cache and freshly-read
+      entries are merged: for every `(genre, albumArtist, album)` triple —
+      genre is part of the key so two same-named albums filed under
+      different genres (e.g. a duplicate rip classified both "Alt. Rock" and
+      "Punk Rock") resolve their own covers independently rather than
+      colliding into one — with no cover anywhere in the merged set yet,
+      deterministically picks the
+      entry with the lexicographically smallest file path as representative
+      (order-independent — unlike walking file-by-file, which only worked
+      because it was strictly sequential) and re-reads just those
+      representatives in parallel with cover extraction enabled.
+5. Scanner saves the result to `Topaz.library.json` via `LibraryCache::save()`.
 6. Scanner emits `scanCompleted(tracks)`.
 7. `LibraryModel.onScanCompleted()` calls `beginResetModel/endResetModel`, replaces `m_tracks`, emits `libraryRefreshed()`.
 8. `LibraryData._rebuildTree()` fires → `LibraryTree` and `AlbumBrowser` update.
@@ -255,11 +281,17 @@ User clicks an album row in `LibraryTree`:
 
 1. `Main.qml Component.onCompleted` → `libraryModel.loadCacheAndStartStatCheck()`.
 2. Cache is read synchronously from `Topaz.library.json` → displayed immediately (step 1 of hybrid strategy).
-3. `statCheck` is dispatched to worker thread.
-4. Worker validates each cached entry (file still exists, `lastModified` unchanged).
-5. New files found in configured folders are scanned and added.
-6. Deleted files are removed from the result.
-7. Updated cache is saved and `scanCompleted` emitted.
+3. `statCheck` is dispatched to worker thread, delegating to the same
+   `performScan()` pipeline described above.
+4. The discover → classify step (4a/4b above) is what validates each cached
+   entry: still-present, unchanged files are reused as-is (no tag read);
+   files no longer found on disk are dropped (deleted); new/changed files are
+   queued for the parallel tag-read (4c). Only genuinely new or changed files
+   are ever re-read — a prior version of this method accidentally re-read
+   every file on every stat-check due to a wiring bug; fixed by unifying on
+   this single classify-against-the-real-cache step.
+5. Cover art is resolved (4d), the updated cache is saved, and `scanCompleted`
+   is emitted.
 
 ### Empty-State Rules
 
@@ -429,9 +461,13 @@ Topaz module
 
 `LibraryModel` is a C++ `QAbstractListModel` subclass marked `QML_ELEMENT`.
 It owns a `LibraryScanner` worker that lives on a dedicated `QThread`.  All
-heavy I/O (tag reading, directory walking, JSON serialisation) runs on the
-worker thread; the main thread only receives light result copies via Qt's
-queued-connection mechanism.
+heavy I/O (tag reading, directory walking, JSON serialisation) runs off the
+main thread; the main thread only receives light result copies via Qt's
+queued-connection mechanism. Tag reading itself is further fanned out across
+a small `QThreadPool` (via `QtConcurrent`) spawned from the worker thread —
+see `LibraryScanner::readTagsParallel()`/`resolveCoverArt()` — so scan time
+scales with available cores (bounded conservatively; this is disk-I/O-bound
+work), not just with track count.
 
 ### C++ class overview
 
@@ -440,7 +476,7 @@ queued-connection mechanism.
 | `TrackInfo` | `trackinfo.h` | Flat data struct; the single record type in the library |
 | `TagReader` | `tagreader.h/cpp` | Zero-dependency ID3v2 + FLAC + Opus tag reader; cover thumbnail generator |
 | `LibraryCache` | `librarycache.h/cpp` | Atomic read/write of `Topaz.library.json` |
-| `LibraryScanner` | `libraryscanner.h/cpp` | Worker: directory walk, genre filter, QFileSystemWatcher |
+| `LibraryScanner` | `libraryscanner.h/cpp` | Worker: directory walk, parallel tag-reading (`QtConcurrent`/`QThreadPool`), genre filter, QFileSystemWatcher |
 | `LibraryModel` | `librarymodel.h/cpp` | QAbstractListModel + Q_INVOKABLE query helpers exposed to QML |
 | `PlaylistManager` | `playlistmanager.h/cpp` | XSPF playlist file creation; path-portability helpers |
 | `SystemVolumeController` | `systemvolumecontroller.h/cpp` | Windows OS master-volume control via Core Audio COM |
@@ -575,8 +611,9 @@ first shipped.
 `METADATA_BLOCK_PICTURE` comment (Opus — a base64-encoded block using the identical
 binary layout as FLAC's PICTURE block, decoded and parsed via the shared
 `TagReader::parsePictureBlock()` helper), scaled to 160×160 JPEG via `QImage`, encoded
-as Base64. Only one thumbnail is generated per `(albumArtist, album)` pair; all other
-tracks in the same album store an empty `coverThumb`. Passed to `AlbumCard` as a
+as Base64. Only one thumbnail is generated per `(genre, albumArtist, album)`
+triple; all other tracks in the same album (and same genre) store an empty
+`coverThumb`. Passed to `AlbumCard` as a
 `data:image/jpeg;base64,…` URL.
 
 `parsePictureBlock()` and the `VORBIS_COMMENT` vendor-string skip in `readFlac()` both
@@ -665,8 +702,10 @@ call per track there would stall it. A track whose volume isn't currently
 mounted is skipped from the loaded set (the async `statCheck` that always
 follows immediately after would prune it a moment later anyway).
 
-**Cover storage**: `coverThumb` is populated for the first track of each
-`(albumArtist, album)` pair; all other tracks have an empty string.
+**Cover storage**: `coverThumb` is populated for one representative track of
+each `(genre, albumArtist, album)` triple (genre included so a same-named
+album filed under two different genres gets its own cover instead of the two
+colliding); all other tracks have an empty string.
 An average JPEG thumbnail (160×160, quality 80) is ≈ 10 KB; Base64-encoded ≈ 14 KB.
 For 500 albums: ≈ 7 MB total cache size — well within acceptable range.
 
@@ -706,15 +745,22 @@ Main.qml → libraryModel.startFullScan()
    │  emit _requestFullScan (queued → worker thread)
    ▼
 LibraryScanner.fullScan() [worker thread]
-   ├── walk folders (recursive per config)
-   ├── for each *.mp3 / *.flac / *.opus:
-   │     TagReader::read(path, needCover)
-   │     genre filter (case-insensitive match)
-   │     assign stable UUID from cache or new QUuid
-   │     deduplicate covers: one thumb per (albumArtist, album)
-   │     emit scanProgress(done, total)
-   ├── LibraryCache::save(result) → Topaz.library.json
-   └── emit scanCompleted(tracks)
+   └── performScan()  (shared by fullScan() and statCheck())
+        ├── discoverAudioFiles() per folder (recursive per config) — plain
+        │     directory listing, no tag reads
+        ├── classify each discovered file against the cache:
+        │     unchanged → reuse cached TrackInfo verbatim
+        │     new/changed → queue for parallel read
+        │     (cached entries not rediscovered = deleted, simply dropped)
+        ├── readTagsParallel() — TagReader::read(path, false) over a bounded
+        │     QThreadPool, chunked (~200 files/chunk)
+        │     genre filter (case-insensitive match) applied per result
+        │     assign stable UUID from cache or new QUuid
+        │     emit scanProgress(done, total) between chunks
+        ├── resolveCoverArt() — one deterministic representative track per
+        │     (genre, albumArtist, album) re-read in parallel with cover extraction
+        ├── LibraryCache::save(result) → Topaz.library.json
+        └── emit scanCompleted(tracks)
           │ (queued → main thread)
           ▼
 LibraryModel.onScanCompleted()
@@ -740,10 +786,10 @@ libraryModel.loadCacheAndStartStatCheck()
    │     applyTracks() → libraryRefreshed() → UI displays cached data
    │
    └── Step 2: emit _requestStatCheck (queued → worker thread)
-               LibraryScanner.statCheck()
-               │  validate each cached entry (file exists, lastModified unchanged)
-               │  find new files in configured folders
-               │  remove deleted entries
+               LibraryScanner.statCheck() → performScan(), same pipeline as
+               fullScan() above — the discover/classify step is what
+               validates cached entries (unchanged → reused as-is, missing →
+               dropped) and finds new/changed files, all in one pass
                └── emit scanCompleted → model refresh (only if changes found)
 ```
 
@@ -1799,7 +1845,12 @@ Only the found tracks are added; the missing ones are silently omitted.  The loa
 
 1. The application's normal shutdown path destroys the QML object tree, including `LibraryModel`.
 2. `LibraryModel::~LibraryModel()` detects the worker thread is still running and calls `LibraryScanner::cancelScan()` — a thread-safe, non-queued call that sets an atomic flag directly, without waiting for the worker's event loop.
-3. The scan loop inside `LibraryScanner::scanDirectory()` (and the cache-validation loop at the top of `statCheck()`) checks this flag once per file and returns as soon as it's set (checkpoint latency ≈ one file's tag-read), unwinding out of `fullScan()`/`statCheck()` without writing a partial result to `Topaz.library.json` and without emitting `scanCompleted()`.
+3. `LibraryScanner::performScan()` (the shared pipeline behind both `fullScan()`
+   and `statCheck()`) checks this flag between each stage — during the
+   directory-discovery walk, between each `readTagsParallel()` chunk (≈ 200
+   files), and before `resolveCoverArt()`'s cover-reread batch — and returns
+   as soon as it's set, unwinding without writing a partial result to
+   `Topaz.library.json` and without emitting `scanCompleted()`.
 4. `LibraryModel` then calls `QThread::quit()` and waits (up to 3 s) for the now-unwound worker thread to exit its event loop.
 5. Once the thread has stopped, `LibraryModel`'s destructor completes and the application closes normally.
 
@@ -1810,7 +1861,7 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
 ### Design notes
 
 - Cancellation uses a plain `std::atomic<bool>` (`LibraryScanner::m_cancelRequested`) polled by the worker loop, not a queued signal/slot — a queued call would never be processed while the worker thread is busy inside a long-running `fullScan()`/`statCheck()` call, since queued slots only run when that thread's event loop is free.
-- The flag is reset to `false` at the start of both `fullScan()` and `statCheck()`, so a cancellation triggered by one shutdown attempt doesn't permanently block a future scan.
+- The flag is reset to `false` at the start of `performScan()` (shared by both `fullScan()` and `statCheck()`), so a cancellation triggered by one shutdown attempt doesn't permanently block a future scan.
 - This only guards application shutdown; it does not add a user-facing "cancel scan" control to the UI.
 
 ---

@@ -30,8 +30,10 @@ struct TrackInfo
     qint64  lastModified = 0;   // QDateTime::toMSecsSinceEpoch
 
     // Base64-encoded JPEG thumbnail 160×160.
-    // Only populated for one representative track per (albumArtist, album) pair;
-    // all other tracks in the same album store an empty string.
+    // Only populated for one representative track per (genre, albumArtist, album)
+    // triple — genre included so a same-named album filed under two different
+    // genres gets its own cover instead of colliding into one slot; all other
+    // tracks in the same album (and genre) store an empty string.
     QString coverThumb;
 
     int    rating   = 0;     // user rating 1-10; 0 = not rated yet

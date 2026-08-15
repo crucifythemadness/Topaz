@@ -301,7 +301,12 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
         if (filterArtist && t.albumArtist.trimmed().toLower() != selectedArtistLower) continue;
         if (filterAlbum  && t.album.trimmed().toLower()       != selectedAlbumLower)  continue;
 
-        const QString key = t.albumArtist.toLower() + QChar('|') + t.album.toLower();
+        // Genre is part of the key so that two same-named albums filed under
+        // different genres (e.g. a duplicate rip classified both "Alt. Rock"
+        // and "Punk Rock") show as separate cards instead of colliding into
+        // one — matches buildLibraryTree()'s genre → artist → album scoping.
+        const QString key = t.genre.trimmed().toLower() + QChar('|')
+                           + t.albumArtist.toLower() + QChar('|') + t.album.toLower();
         auto it = keyToIndex.find(key);
         if (it == keyToIndex.end()) {
             keyToIndex.insert(key, albumAccum.size());
@@ -408,7 +413,9 @@ QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres
     QHash<QString, QString> albumCoverThumb;
     for (const TrackInfo &t : std::as_const(m_tracks)) {
         if (t.coverThumb.isEmpty()) continue;
-        const QString key = t.albumArtist.toLower() + QChar('|') + t.album.toLower();
+        // Genre included in the key — see filteredAlbums() for why.
+        const QString key = t.genre.trimmed().toLower() + QChar('|')
+                           + t.albumArtist.toLower() + QChar('|') + t.album.toLower();
         if (!albumCoverThumb.contains(key))
             albumCoverThumb.insert(key, t.coverThumb);
     }
@@ -420,7 +427,8 @@ QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres
         if (considerRating && t.rating < minimumRating)
             continue;
 
-        const QString key = t.albumArtist.toLower() + QChar('|') + t.album.toLower();
+        const QString key = t.genre.trimmed().toLower() + QChar('|')
+                           + t.albumArtist.toLower() + QChar('|') + t.album.toLower();
         const QString cover = albumCoverThumb.value(key);
 
         QVariantMap tm;
