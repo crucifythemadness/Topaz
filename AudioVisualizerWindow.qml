@@ -65,7 +65,6 @@ FloatingPane {
         anchors.fill: parent
         visible: !visWindow.hasTrack
         gradient: Gradient {
-            orientation: Gradient.Diagonal
             GradientStop {
                 position: 0.0
                 color: Qt.rgba(Theme.surfaceContainerHigh.r, Theme.surfaceContainerHigh.g,

@@ -142,7 +142,6 @@ FloatingPane {
         anchors.fill: parent
         visible: !mdWindow.hasTrack && !milkdropView.initFailed
         gradient: Gradient {
-            orientation: Gradient.Diagonal
             GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
             GradientStop { position: 1.0; color: Theme.surfaceBright }
         }
@@ -162,7 +161,6 @@ FloatingPane {
         anchors.fill: parent
         visible: mdWindow.hasTrack && !mdWindow.isPlaying && !milkdropView.initFailed
         gradient: Gradient {
-            orientation: Gradient.Diagonal
             GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
             GradientStop { position: 1.0; color: Theme.surfaceBright }
         }
@@ -186,7 +184,6 @@ FloatingPane {
         anchors.fill: parent
         visible: milkdropView.initFailed
         gradient: Gradient {
-            orientation: Gradient.Diagonal
             GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
             GradientStop { position: 1.0; color: Theme.surfaceBright }
         }

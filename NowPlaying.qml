@@ -69,7 +69,6 @@ Rectangle {
                     visible: coverImage.status !== Image.Ready
 
                     gradient: Gradient {
-                        orientation: Gradient.Diagonal
                         GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
                         GradientStop { position: 1.0; color: Theme.surfaceBright }
                     }
@@ -140,7 +139,7 @@ Rectangle {
                     text: root.engine ? root.engine.currentArtist.toUpperCase() : ""
                     font.family:        Theme.fontFamilyBody
                     font.pixelSize:     Theme.labelLg
-                    font.weight:        Font.SemiBold
+                    font.weight:        Font.DemiBold
                     font.letterSpacing: Theme.lsWide
                     color: Theme.secondary
                     bottomPadding: 12

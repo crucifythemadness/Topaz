@@ -128,7 +128,6 @@ FloatingPane {
         anchors.fill: parent
         visible: !tagInfo.hasTrack
         gradient: Gradient {
-            orientation: Gradient.Diagonal
             GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
             GradientStop { position: 1.0; color: Theme.surfaceBright }
         }
@@ -236,7 +235,7 @@ FloatingPane {
             text: tagInfo.engine ? tagInfo.engine.currentArtist.toUpperCase() : ""
             font.family:        Theme.fontFamilyBody
             font.pixelSize:     Math.max(10, Theme.labelLg * tagInfo.scaleFactor)
-            font.weight:        Font.SemiBold
+            font.weight:        Font.DemiBold
             font.letterSpacing: Theme.lsWide
             color: Theme.secondary
             elide: Text.ElideRight

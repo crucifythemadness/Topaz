@@ -52,7 +52,6 @@ FloatingPane {
         anchors.fill: parent
         visible: coverImage.status !== Image.Ready
         gradient: Gradient {
-            orientation: Gradient.Diagonal
             GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
             GradientStop { position: 1.0; color: Theme.surfaceBright }
         }

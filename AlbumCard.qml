@@ -73,7 +73,6 @@ Rectangle {
                     anchors.fill: parent
                     radius: Theme.radiusSm
                     gradient: Gradient {
-                        orientation: Gradient.Diagonal
                         GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
                         GradientStop { position: 1.0; color: Theme.surfaceBright }
                     }
@@ -124,7 +123,7 @@ Rectangle {
                 text: root.artistLabel.toUpperCase()
                 font.family:        Theme.fontFamilyBody
                 font.pixelSize:     Theme.labelMd
-                font.weight:        Font.SemiBold
+                font.weight:        Font.DemiBold
                 font.letterSpacing: Theme.lsWide
                 color: Theme.fgSurfaceVariant
                 elide: Text.ElideRight
