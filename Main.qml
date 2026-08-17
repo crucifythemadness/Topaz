@@ -271,6 +271,11 @@ ApplicationWindow {
         appConfig: appConfig
     }
 
+    // About Topaz dialog — opened by TopBar's rightmost (info) icon
+    AboutDialog {
+        id: aboutDialog
+    }
+
     // New-playlist dialog — opened by NowPlaying's + NEW button
     NewPlaylistDialog {
         id:              newPlaylistDialog
@@ -311,6 +316,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             systemVolume: systemVolume
             onSettingsRequested: setupDialog.open()
+            onAboutRequested:    aboutDialog.open()
         }
 
         GenreBar {

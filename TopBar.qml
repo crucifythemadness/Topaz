@@ -15,6 +15,9 @@ Rectangle {
     // Emitted when the user clicks the gear (⚙) icon
     signal settingsRequested()
 
+    // Emitted when the user clicks the About Topaz (ⓘ) icon
+    signal aboutRequested()
+
     // Ghost bottom border (10 % outlineVariant) -- satisfies the "no-line" rule
     Rectangle {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
@@ -279,23 +282,42 @@ Rectangle {
                 }
             }
 
-            // User avatar circle
-            Rectangle {
-                width:  32
-                height: 32
-                radius: 16
-                color:  Theme.surfaceContainerHighest
-                border.color: Theme.ov30
-                border.width: 1
+            // About Topaz — rightmost (first from the right), deliberately a
+            // bit bigger than the other icons (38×38 vs. their 32×32, tight
+            // 3px image margin) so it stands out as the "info" affordance.
+            // Row centers each child individually via anchors.verticalCenter
+            // (not a RowLayout), so this doesn't affect the 64px bar height.
+            Item {
+                id: aboutButton
+                width:  38
+                height: 38
                 anchors.verticalCenter: parent.verticalCenter
 
-                Text {
-                    anchors.centerIn: parent
-                    text: "M"
-                    font.family: Theme.fontFamilyBody
-                    font.pixelSize: 13
-                    font.weight:    Font.Medium
-                    color: Theme.fgSurface
+                // Background-highlight hover feedback (not a text-recolor)
+                // since a raster PNG can't be recolored via `color:` the way
+                // the gear glyph is — same technique as the volume button.
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radiusMd
+                    color:  Theme.p10
+                    visible: hoverAbout.containsMouse
+                }
+
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 3
+                    source: "qrc:/Topaz/InfoAbout.png"
+                    sourceSize.width:  width
+                    sourceSize.height: height
+                    fillMode: Image.PreserveAspectFit
+                }
+
+                MouseArea {
+                    id: hoverAbout
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.aboutRequested()
                 }
             }
         }

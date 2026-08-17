@@ -68,6 +68,8 @@ qt_add_executable(topaz
     librarycache.cpp
     ratingcache.h
     ratingcache.cpp
+    buildinfo.h
+    buildinfo.cpp
     libraryscanner.h
     libraryscanner.cpp
     librarymodel.h
@@ -118,6 +120,7 @@ qt_add_qml_module(topaz
         NowPlaying.qml
         BottomBar.qml
         SetupDialog.qml
+        AboutDialog.qml
         NewPlaylistDialog.qml
         MessageBox.qml
         FloatingPane.qml
@@ -127,12 +130,20 @@ qt_add_qml_module(topaz
         MilkdropWindow.qml
     RESOURCES
         app.ico
+        InfoAbout.png
+        Claude_Logo.png
+        CrucifyTheMadness_Logo.png
 )
 
 set_target_properties(topaz PROPERTIES
     OUTPUT_NAME Topaz
     WIN32_EXECUTABLE TRUE
 )
+
+# Exposes CMake's own project() version to BuildInfo (buildinfo.h/cpp) for
+# the About Topaz dialog, so the displayed version never drifts out of sync
+# with the one place it's actually declared.
+target_compile_definitions(topaz PRIVATE TOPAZ_VERSION_STRING="${PROJECT_VERSION}")
 
 target_link_libraries(topaz
     PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Multimedia Qt6::Concurrent Qt6::Widgets Qt6::OpenGL
