@@ -644,6 +644,7 @@ current track changes (see `PlaybackEngine::currentLargeCoverSource`).
 | `scanning` | `true` while a scan is running |
 | `scanProgress` | 0–100 completion percentage |
 | `trackCount` | Number of tracks currently in the model |
+| `albumCount` | Number of distinct albums currently in the model (canonicalized by trimmed+lowercased `albumArtist\|album`, same normalization as `buildLibraryTree()`). Recomputed in one O(N_tracks) pass whenever `applyTracks()` replaces `m_tracks` (cache load / scan complete) — not recomputed per read. Shown on the About dialog's TOPAZ tab. |
 | `ratingsReady` | `true` once a scan (full or stat-check) has completed at least once in this session with rating enrichment applied (see UC-14). Gates the AUTO PLAY button in `BottomBar`; never reset back to `false`. |
 | `loadCacheAndStartStatCheck()` | Load cache instantly, then dispatch stat-check |
 | `startFullScan()` | Trigger a full rescan on the worker thread |
@@ -1204,6 +1205,7 @@ configurable via the app JSON config) will be introduced at that point.
       +scanning bool
       +scanProgress int
       +trackCount int
+      +albumCount int
       +ratingsReady bool
       +loadCacheAndStartStatCheck()
       +startFullScan()

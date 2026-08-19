@@ -274,6 +274,7 @@ ApplicationWindow {
     // About Topaz dialog — opened by TopBar's rightmost (info) icon
     AboutDialog {
         id: aboutDialog
+        libraryModel: libraryModel
     }
 
     // New-playlist dialog — opened by NowPlaying's + NEW button

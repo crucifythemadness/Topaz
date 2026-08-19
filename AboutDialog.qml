@@ -23,6 +23,8 @@ import QtQuick.Layouts
 Popup {
     id: root
 
+    property LibraryModel libraryModel: null
+
     x: Overlay.overlay ? (Overlay.overlay.width  - width)  / 2 : 0
     y: Overlay.overlay ? (Overlay.overlay.height - height) / 2 : 0
     width:  560
@@ -162,7 +164,7 @@ Popup {
                         // Version chip
                         Rectangle {
                             height: 32
-                            width:  versionLabel.implicitWidth + 28
+                            width:  versionLabel.implicitWidth + 100
                             radius: Theme.radiusFull
                             color:  Theme.surfaceContainerHigh
 
@@ -191,7 +193,7 @@ Popup {
                         // Build-date chip
                         Rectangle {
                             height: 32
-                            width:  buildDateLabel.implicitWidth + 28
+                            width:  buildDateLabel.implicitWidth + 100
                             radius: Theme.radiusFull
                             color:  Theme.surfaceContainerHigh
 
@@ -218,11 +220,75 @@ Popup {
                         }
                     }
 
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: 8
+                        spacing: 12
+
+                        // Track-count chip
+                        Rectangle {
+                            height: 32
+                            width:  trackCountLabel.implicitWidth + 100
+                            radius: Theme.radiusFull
+                            color:  Theme.surfaceContainerHigh
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 10; height: 10
+                                    radius: 5
+                                    color: Theme.primary
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    id: trackCountLabel
+                                    text: (root.libraryModel ? root.libraryModel.trackCount : 0) + " TRACKS"
+                                    font.family:        Theme.fontFamilyMono
+                                    font.pixelSize:     14
+                                    font.weight:        Font.Medium
+                                    font.letterSpacing: 0.8
+                                    color: Theme.fgSurface
+                                }
+                            }
+                        }
+
+                        // Album-count chip
+                        Rectangle {
+                            height: 32
+                            width:  albumCountLabel.implicitWidth + 100
+                            radius: Theme.radiusFull
+                            color:  Theme.surfaceContainerHigh
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 10; height: 10
+                                    radius: 5
+                                    color: Theme.secondary
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    id: albumCountLabel
+                                    text: (root.libraryModel ? root.libraryModel.albumCount : 0) + " ALBUMS"
+                                    font.family:        Theme.fontFamilyMono
+                                    font.pixelSize:     14
+                                    font.weight:        Font.Medium
+                                    font.letterSpacing: 0.8
+                                    color: Theme.fgSurface
+                                }
+                            }
+                        }
+                    }
+
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         Layout.topMargin: 16
-                        width: 360
-                        text: qsTr("A Windows desktop audio jukebox for FLAC, MP3 and Opus libraries.")
+                        Layout.preferredWidth: 440
+                        text: qsTr("A desktop audio jukebox that supports FLAC, MP3 and OPUS. A simple way to experience music in a different way. Simple yet sophisticated – for music lovers, offline collectors and parties. Developed as a Vibe-Coding project, using only Claude Sonnet 4.6 and 5.0, to demonstrate just how powerful these LLMs are.")
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
                         font.family:    Theme.fontFamilyBody
@@ -410,11 +476,195 @@ Popup {
             }
 
             // PANEL 2 — POWERED BY
-            // Intentionally empty for now — filled in later with the real
-            // dependency list and logos.
             Item {
                 anchors.fill: parent
                 visible: tabBar.currentTab === 2
+
+                // Scrollable (unlike DEVELOPED BY): more libraries may be
+                // added here over time, so this panel scrolls instead of
+                // needing the dialog resized each time.
+                ScrollView {
+                    id: poweredByScroll
+                    anchors.fill: parent
+                    anchors.margins: 40
+                    clip: true
+
+                    ColumnLayout {
+                        width: poweredByScroll.availableWidth
+                        spacing: 40
+
+                        // Qt
+                        RowLayout {
+                            Layout.alignment: Qt.AlignLeft
+                            spacing: 20
+
+                            Image {
+                                Layout.alignment: Qt.AlignVCenter
+                                source: "qrc:/Topaz/Qt_Logo.png"
+                                sourceSize.width:  128
+                                sourceSize.height: 128
+                                width:  128
+                                height: 128
+                                fillMode: Image.PreserveAspectFit
+                            }
+
+                            Text {
+                                Layout.alignment: Qt.AlignVCenter
+                                text: "https://www.qt.io/"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                color: linkHoverQtLib.containsMouse
+                                       ? Theme.primary : Theme.fgSurfaceVariant
+
+                                MouseArea {
+                                    id: linkHoverQtLib
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Qt.openUrlExternally("https://www.qt.io/")
+                                }
+                            }
+                        }
+
+                        // FFmpeg
+                        RowLayout {
+                            Layout.alignment: Qt.AlignLeft
+                            spacing: 20
+
+                            Image {
+                                Layout.alignment: Qt.AlignVCenter
+                                source: "qrc:/Topaz/FFmpeg_Logo.png"
+                                sourceSize.width:  128
+                                sourceSize.height: 128
+                                width:  128
+                                height: 128
+                                fillMode: Image.PreserveAspectFit
+                            }
+
+                            Text {
+                                Layout.alignment: Qt.AlignVCenter
+                                text: "https://ffmpeg.org/"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                color: linkHoverFFmpeg.containsMouse
+                                       ? Theme.primary : Theme.fgSurfaceVariant
+
+                                MouseArea {
+                                    id: linkHoverFFmpeg
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Qt.openUrlExternally("https://ffmpeg.org/")
+                                }
+                            }
+                        }
+
+                        // ProjectM
+                        RowLayout {
+                            Layout.alignment: Qt.AlignLeft
+                            spacing: 20
+
+                            Image {
+                                Layout.alignment: Qt.AlignVCenter
+                                source: "qrc:/Topaz/ProjectM_Logo.png"
+                                sourceSize.width:  128
+                                sourceSize.height: 128
+                                width:  128
+                                height: 128
+                                fillMode: Image.PreserveAspectFit
+                            }
+
+                            Text {
+                                Layout.alignment: Qt.AlignVCenter
+                                text: "https://github.com/projectM-visualizer/projectm"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                color: linkHoverProjectM.containsMouse
+                                       ? Theme.primary : Theme.fgSurfaceVariant
+
+                                MouseArea {
+                                    id: linkHoverProjectM
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Qt.openUrlExternally("https://github.com/projectM-visualizer/projectm")
+                                }
+                            }
+                        }
+
+                        // KISS FFT -- no logo exists for this project, so a
+                        // wordmark-style Text fills the same 128px-wide slot
+                        // the logos occupy in the rows above, keeping the
+                        // link column aligned across all four rows.
+                        RowLayout {
+                            Layout.alignment: Qt.AlignLeft
+                            spacing: 20
+
+                            Text {
+                                Layout.preferredWidth: 128
+                                Layout.alignment: Qt.AlignVCenter
+                                horizontalAlignment: Text.AlignHCenter
+                                text: "KISS FFT"
+                                font.family:    Theme.fontFamilyHeadline
+                                font.pixelSize: Theme.headlineMd
+                                font.weight:    Font.Bold
+                                color: Theme.fgSurface
+                            }
+
+                            Text {
+                                Layout.alignment: Qt.AlignVCenter
+                                text: "https://github.com/mborgerding/kissfft"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                color: linkHoverKissFFT.containsMouse
+                                       ? Theme.primary : Theme.fgSurfaceVariant
+
+                                MouseArea {
+                                    id: linkHoverKissFFT
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Qt.openUrlExternally("https://github.com/mborgerding/kissfft")
+                                }
+                            }
+                        }
+
+                        // GLEW -- also no real logo, same wordmark treatment
+                        // as KISS FFT above.
+                        RowLayout {
+                            Layout.alignment: Qt.AlignLeft
+                            spacing: 20
+
+                            Text {
+                                Layout.preferredWidth: 128
+                                Layout.alignment: Qt.AlignVCenter
+                                horizontalAlignment: Text.AlignHCenter
+                                text: "GLEW"
+                                font.family:    Theme.fontFamilyHeadline
+                                font.pixelSize: Theme.headlineMd
+                                font.weight:    Font.Bold
+                                color: Theme.fgSurface
+                            }
+
+                            Text {
+                                Layout.alignment: Qt.AlignVCenter
+                                text: "https://github.com/nigels-com/glew"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                color: linkHoverGlew.containsMouse
+                                       ? Theme.primary : Theme.fgSurfaceVariant
+
+                                MouseArea {
+                                    id: linkHoverGlew
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Qt.openUrlExternally("https://github.com/nigels-com/glew")
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

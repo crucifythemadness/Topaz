@@ -35,6 +35,7 @@ class LibraryModel : public QAbstractListModel
     Q_PROPERTY(bool        scanning   READ scanning   NOTIFY scanningChanged)
     Q_PROPERTY(int         scanProgress READ scanProgress NOTIFY scanProgressChanged)
     Q_PROPERTY(int         trackCount READ trackCount  NOTIFY trackCountChanged)
+    Q_PROPERTY(int         albumCount READ albumCount  NOTIFY albumCountChanged)
     Q_PROPERTY(bool        ratingsReady READ ratingsReady NOTIFY ratingsReadyChanged)
 
 public:
@@ -71,6 +72,7 @@ public:
     bool       scanning()     const { return m_scanning; }
     int        scanProgress() const { return m_scanProgress; }
     int        trackCount()   const { return m_tracks.size(); }
+    int        albumCount()   const { return m_albumCount; }
     // True once a scan (full or stat-check) has completed at least once in this
     // session with rating enrichment applied — gates the AUTO PLAY button.
     bool       ratingsReady() const { return m_ratingsReady; }
@@ -135,6 +137,7 @@ signals:
     void scanningChanged();
     void scanProgressChanged();
     void trackCountChanged();
+    void albumCountChanged();
     void ratingsReadyChanged();
 
     // Emitted after the model is populated (cache load or scan complete).
@@ -161,6 +164,7 @@ private:
 
     AppConfig        *m_appConfig    = nullptr;
     QList<TrackInfo>  m_tracks;
+    int               m_albumCount   = 0;
     LibraryScanner   *m_scanWorker   = nullptr;
     QThread          *m_scanThread   = nullptr;
     bool              m_scanning     = false;

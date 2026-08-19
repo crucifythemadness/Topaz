@@ -204,6 +204,21 @@ void LibraryModel::applyTracks(QList<TrackInfo> &&tracks)
     if (m_tracks.size() != oldCount)
         emit trackCountChanged();
 
+    // Single O(N_tracks) pass to count distinct albums, same
+    // trimmed+lowercased canonicalization buildLibraryTree() uses.
+    QSet<QString> uniqueAlbums;
+    uniqueAlbums.reserve(m_tracks.size());
+    for (const TrackInfo &t : std::as_const(m_tracks)) {
+        if (t.album.isEmpty()) continue;
+        uniqueAlbums.insert(t.albumArtist.trimmed().toLower()
+                             + QLatin1Char('\x1f')
+                             + t.album.trimmed().toLower());
+    }
+    if (uniqueAlbums.size() != m_albumCount) {
+        m_albumCount = uniqueAlbums.size();
+        emit albumCountChanged();
+    }
+
     emit libraryRefreshed();
 }
 

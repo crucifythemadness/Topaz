@@ -133,6 +133,9 @@ qt_add_qml_module(topaz
         InfoAbout.png
         Claude_Logo.png
         CrucifyTheMadness_Logo.png
+        Qt_Logo.png
+        FFmpeg_Logo.png
+        ProjectM_Logo.png
 )
 
 set_target_properties(topaz PROPERTIES
