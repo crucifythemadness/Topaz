@@ -6,6 +6,9 @@
 //   artistLabel   - string
 //   isActive      - bool   (true = primary left-accent border)
 //   albumYear     - int    (0 = unknown; year label under the cover hidden)
+//   albumGenre    - string (empty = hidden; shown as "Genre | Year" when set --
+//                           SearchResultBrowser-only, since a genre-filtered
+//                           AlbumBrowser view doesn't need it repeated per card)
 //   tracks        - list<{ number, title, duration, durationMs, bitrate,
 //                          filePath, artist, albumArtist, album, coverSource }>
 //   coverSource   - url    (empty = show placeholder)
@@ -27,6 +30,7 @@ Rectangle {
     property bool   isActive:    false
     property url    coverSource: ""
     property int    albumYear:   0   // 0 = unknown; year label hidden
+    property string albumGenre:  ""  // empty = hidden; SearchResultBrowser-only
     property var    tracks:      []
     property var    engine:      null   // optional - used for double-click add to queue
     // Bound from AlbumBrowser; gates double-click add while an AUTO PLAY
@@ -93,7 +97,12 @@ Rectangle {
 
             Text {
                 width: 160
-                text: root.albumYear > 0 ? String(root.albumYear) : ""
+                text: {
+                    const g = root.albumGenre
+                    const y = root.albumYear > 0 ? String(root.albumYear) : ""
+                    if (g && y) return g + " | " + y
+                    return g || y
+                }
                 font.family:    Theme.fontFamilyBody
                 font.pixelSize: Theme.labelMd
                 color: "white"   // deliberate literal white, not a Theme.* token

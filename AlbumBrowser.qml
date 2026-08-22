@@ -15,7 +15,16 @@ Rectangle {
     // ── Filtered album list ───────────────────────────────────────────────
     property var currentAlbums: []
 
-    onLibChanged: currentAlbums = lib ? lib.filteredAlbums() : []
+    onLibChanged: {
+        currentAlbums = lib ? lib.filteredAlbums() : []
+        // Restore the scroll position saved from this same lib the last
+        // time this view was loaded (Main.qml's Loader destroys/recreates
+        // this component on every LIBRARY<->SEARCH switch). Qt.callLater
+        // defers past this tick so contentHeight has caught up with the
+        // model just assigned above -- setting contentY immediately can
+        // get clamped back to 0 first.
+        if (lib) Qt.callLater(function() { albumList.contentY = lib.albumScrollY })
+    }
 
     // Use Qt.callLater so the LibraryTree (and the rest of the current frame)
     // can render before the potentially heavy filteredAlbums() call is made.
@@ -72,6 +81,7 @@ Rectangle {
         clip:        true
         spacing:     24
         cacheBuffer: 200
+        onContentYChanged: if (root.lib) root.lib.albumScrollY = contentY
 
         model: root.currentAlbums
 

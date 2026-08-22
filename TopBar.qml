@@ -12,6 +12,18 @@ Rectangle {
     // Topaz's own playback level). See systemvolumecontroller.h.
     property var systemVolume: null
 
+    // Bound from Main.qml -- which of the three navigation tabs is active.
+    // "library" | "playlists" | "search"
+    property string activeTab: "library"
+
+    // Emitted when the user clicks a navigation tab. TopBar owns no tab
+    // state of its own beyond `activeTab` (for styling) -- same "dumb
+    // component, owner decides" convention as settingsRequested()/
+    // aboutRequested() below.
+    signal librarySelected()
+    signal playlistsSelected()
+    signal searchSelected()
+
     // Emitted when the user clicks the gear (⚙) icon
     signal settingsRequested()
 
@@ -46,48 +58,53 @@ Rectangle {
             Layout.fillHeight: true
             spacing: 48
 
-            // Library (active state)
-            Item {
-                width:  libText.implicitWidth
-                height: parent.height
+            Repeater {
+                model: [
+                    { key: "library",   label: "LIBRARY"   },
+                    { key: "search",    label: "SEARCH"    },
+                    { key: "playlists", label: "PLAYLISTS" }
+                ]
 
-                Text {
-                    id: libText
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("LIBRARY")
-                    font.family: Theme.fontFamilyBody
-                    font.pixelSize:    Theme.labelSm
-                    font.weight:       Font.Bold
-                    font.letterSpacing: Theme.lsWidest
-                    color: Theme.primary
-                }
+                delegate: Item {
+                    readonly property bool isActive: root.activeTab === modelData.key
+                    width:  tabText.implicitWidth
+                    height: parent.height
 
-                // Active underline
-                Rectangle {
-                    anchors {
-                        left: libText.left; right: libText.right
-                        bottom: parent.bottom; bottomMargin: 4
+                    Text {
+                        id: tabText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr(modelData.label)
+                        font.family: Theme.fontFamilyBody
+                        font.pixelSize:    Theme.labelLg
+                        font.weight:       isActive ? Font.Bold : Font.Medium
+                        font.letterSpacing: Theme.lsWidest
+                        color: isActive                 ? Theme.primary
+                             : tabHover.containsMouse    ? Theme.fgSurface
+                             :                              Theme.fgSurfaceVariant
                     }
-                    height: 2
-                    color: Theme.primary
-                }
-            }
 
-            // Playlists (inactive)
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("PLAYLISTS")
-                font.family: Theme.fontFamilyBody
-                font.pixelSize:    Theme.labelSm
-                font.weight:       Font.Medium
-                font.letterSpacing: Theme.lsWidest
-                color: hoverPlaylists.containsMouse ? Theme.fgSurface : Theme.fgSurfaceVariant
+                    // Active underline
+                    Rectangle {
+                        visible: isActive
+                        anchors {
+                            left: tabText.left; right: tabText.right
+                            bottom: parent.bottom; bottomMargin: 4
+                        }
+                        height: 2
+                        color: Theme.primary
+                    }
 
-                MouseArea {
-                    id: hoverPlaylists
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
+                    MouseArea {
+                        id: tabHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (modelData.key === "library")   root.librarySelected()
+                            else if (modelData.key === "playlists") root.playlistsSelected()
+                            else if (modelData.key === "search")    root.searchSelected()
+                        }
+                    }
                 }
             }
         }

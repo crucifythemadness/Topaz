@@ -58,6 +58,18 @@ Item {
     property string selectedArtist:  ""
     property string selectedAlbum:   ""
 
+    // AlbumBrowser's ListView.contentY, persisted here (not in the view
+    // itself) so it survives the view being destroyed/recreated by
+    // Main.qml's Loader when switching away from and back to LIBRARY.
+    property real   albumScrollY:    0
+
+    // Set (one-way) by Main.qml from its own activeTab. Read-only here --
+    // used only to suppress the LIBRARY-tab-specific genre auto-select
+    // convenience in toggleGenre() while SEARCH is active (LibraryTree/
+    // AlbumBrowser aren't even loaded then, and leaving a stale
+    // selectedGenre around would surprise the user when they switch back).
+    property string activeTab: "library"
+
     // Emitted only when a genre is auto-selected as a result of GenreBar
     // activation/deactivation (see _selectGenreExclusive()) — never for
     // user-driven selection (tree clicks go through selectGenre() instead).
@@ -82,7 +94,7 @@ Item {
         if (activating) {
             _genreModel.setProperty(index, "active", true)
             _rebuildActiveNames()
-            _selectGenreExclusive(name)
+            if (activeTab === "library") _selectGenreExclusive(name)
         } else {
             // Capture this genre's position among the currently-active genres
             // before removing it, so we can auto-select its nearest neighbour.
@@ -92,14 +104,16 @@ Item {
             _genreModel.setProperty(index, "active", false)
             _rebuildActiveNames()
 
-            if (activeGenreNames.length === 0) {
-                selectedGenre = ""
-            } else {
-                // Removing the genre at `pos` shifts everything after it down by
-                // one, so the genre that was next now sits at this same index;
-                // if this genre was last, clamp to the new last (previous) genre.
-                const neighborIdx = Math.min(pos, activeGenreNames.length - 1)
-                _selectGenreExclusive(activeGenreNames[neighborIdx])
+            if (activeTab === "library") {
+                if (activeGenreNames.length === 0) {
+                    selectedGenre = ""
+                } else {
+                    // Removing the genre at `pos` shifts everything after it down by
+                    // one, so the genre that was next now sits at this same index;
+                    // if this genre was last, clamp to the new last (previous) genre.
+                    const neighborIdx = Math.min(pos, activeGenreNames.length - 1)
+                    _selectGenreExclusive(activeGenreNames[neighborIdx])
+                }
             }
         }
     }
@@ -177,8 +191,14 @@ Item {
             if (_genreModel.get(i).active) names.push(_genreModel.get(i).name)
         }
         activeGenreNames = names
-        selectedArtist   = ""
-        selectedAlbum    = ""
+        // Only clear the drill-down selection on the LIBRARY tab -- while
+        // SEARCH is active, toggling a genre (e.g. for "Consider Genre")
+        // must not disturb whatever artist/album the user had selected in
+        // LibraryTree, since that view isn't even loaded right now.
+        if (activeTab === "library") {
+            selectedArtist = ""
+            selectedAlbum  = ""
+        }
         _rebuildTree()
     }
 

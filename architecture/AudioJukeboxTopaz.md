@@ -55,7 +55,7 @@ Topaz is an audio jukebox which is a desktop app that can play audio files (*.fl
 
 1. User clicks a genre button (e.g. "Techno").
 2. `GenreBar` calls `lib.toggleGenre(index)`.
-3. `LibraryData.toggleGenre()` flips the `active` flag in `genreModel` and rebuilds `activeGenreNames`. If the genre was just **activated**, it becomes the sole `selectedGenre` (replacing any prior selection). If it was just **deactivated**, the nearest remaining active genre is auto-selected instead — the one positionally after it, or if it was the last active genre, the one before it; if no active genres remain, `selectedGenre` is cleared. `selectedArtist`/`selectedAlbum` are cleared in both cases. When a genre is auto-selected this way, `LibraryData` emits `genreAutoSelected(genre)`, and `LibraryTree` scrolls that genre's header row into view via `positionViewAtIndex(..., ListView.Contain)`. This scroll-into-view only happens for auto-selection — manually clicking a genre, artist, or album row in the tree does not trigger it.
+3. `LibraryData.toggleGenre()` flips the `active` flag in `genreModel` and rebuilds `activeGenreNames`. If the genre was just **activated**, it becomes the sole `selectedGenre` (replacing any prior selection). If it was just **deactivated**, the nearest remaining active genre is auto-selected instead — the one positionally after it, or if it was the last active genre, the one before it; if no active genres remain, `selectedGenre` is cleared. `selectedArtist`/`selectedAlbum` are cleared in both cases. When a genre is auto-selected this way, `LibraryData` emits `genreAutoSelected(genre)`, and `LibraryTree` scrolls that genre's header row into view via `positionViewAtIndex(..., ListView.Contain)`. This scroll-into-view only happens for auto-selection — manually clicking a genre, artist, or album row in the tree does not trigger it. **All of this auto-selection is suppressed while SEARCH is active** (`LibraryData.activeTab !== "library"`, one-way bound from `Main.qml`'s own `activeTab` — see UC-21): `activeGenreNames` still updates normally (so "Consider Genre" search stays correct), but the *entire* existing selection — `selectedGenre` **and** `selectedArtist`/`selectedAlbum` — is left completely untouched, since `LibraryTree`/`AlbumBrowser` aren't even loaded on that tab and disturbing any part of a stale selection would otherwise surprise the user the next time they switch back to LIBRARY (e.g. a previously drilled-down artist reverting to just its genre). Note `selectedArtist`/`selectedAlbum` are cleared by `_rebuildActiveNames()` itself (`LibraryData.qml`), not by `toggleGenre()` directly — both are gated on the same `activeTab === "library"` check.
 4. `LibraryTree.onLibraryChanged` fires → tree renders only active-genre sections.
 5. `AlbumBrowser` receives `onActiveGenreNamesChanged` → schedules `_scheduleRefresh()` via `Qt.callLater` (deferred to the next event-loop tick so LibraryTree renders its frame first) → `currentAlbums = lib.filteredAlbums()` → `ListView` updates.
 6. `AlbumBrowser` subtitle updates to reflect the new filter path (e.g. `TECHNO`).
@@ -391,11 +391,19 @@ Topaz module
 ├── LibraryModel        C++ QML_ELEMENT — QAbstractListModel + scanner orchestration
 │                         property AppConfig appConfig
 │                         Q_INVOKABLE: loadCacheAndStartStatCheck(), startFullScan()
-│                         Q_INVOKABLE queries: genres(), artistsForGenre(), albumsForArtist(), filteredAlbums(), buildLibraryTree()
+│                         Q_INVOKABLE queries: genres(), artistsForGenre(), albumsForArtist(), filteredAlbums(), buildLibraryTree(), searchLibrary()  — see UC-21
 ├── LibraryData.qml     shared state model — genre toggle, selection, tree builder
 │                         property AppConfig appConfig
 │                         property LibraryModel libraryModel
-├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, AudioVisualizerController, SetupDialog, NewPlaylistDialog
+│                         property string activeTab  (one-way bound from Main.qml's own activeTab; suppresses genre auto-selection in toggleGenre() while SEARCH is active, see UC-01/UC-21)
+│                         property real albumScrollY  (AlbumBrowser's ListView.contentY, persisted here so it survives the Loader swap, see UC-21)
+├── SearchData.qml      independent search state model — see UC-21 (deliberately not coupled to LibraryData beyond one read-only property)
+│                         property LibraryModel libraryModel
+│                         property var activeGenreNames  (one-way bound from LibraryData.activeGenreNames by Main.qml)
+│                         property string query, mode ("all"/"artists"/"albums"/"tracks"), property bool considerGenre, property bool matchWholeWord, property var results
+│                         property real resultScrollY  (SearchResultBrowser's ListView.contentY, persisted here so it survives the Loader swap, see UC-21)
+├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, SearchData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, AudioVisualizerController, SetupDialog, NewPlaylistDialog
+│                         property string activeTab ("library"/"playlists"/"search")  — drives TopBar's tab highlighting and which components the SplitView's first two Loaders load, see UC-21
 │                         property bool bigCoverPaneOpen  (toggled by NowPlaying.onBigCoverRequested / BigCoverWindow.onCloseRequested)
 │                         Loader { active: bigCoverPaneOpen; sourceComponent: BigCoverWindow {...} }  — see "Detachable panes" below
 │                         property bool tagInfoPaneOpen  (toggled by BottomBar.onTagInfoToggleRequested / TagInfoWindow.onCloseRequested)
@@ -404,6 +412,8 @@ Topaz module
 │                         Loader { active: audioVisualizerPaneOpen; sourceComponent: AudioVisualizerWindow {...} }  — see UC-19
 │                         property bool milkdropPaneOpen  (toggled by BottomBar.onMilkdropToggleRequested / MilkdropWindow.onCloseRequested)
 │                         Loader { active: milkdropPaneOpen; sourceComponent: MilkdropWindow {...} }  — see UC-20
+│                         SplitView slot 1: Loader { sourceComponent: activeTab === "search" ? SearchPanel : LibraryTree }  — see UC-21
+│                         SplitView slot 2: Loader { sourceComponent: activeTab === "search" ? SearchResultBrowser : AlbumBrowser }  — see UC-21
 ├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY | AUDIO VISUALIZER | MILKDROP, see UC-15 / UC-14 / UC-19 / UC-20)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
@@ -414,6 +424,8 @@ Topaz module
 ├── MilkdropWindow.qml  FloatingPane specialization: hosts a MilkdropView (C++ QQuickItem, owns the projectM render pipeline directly) — see UC-20
 ├── TopBar.qml          Header (logo | navigation tabs | loudspeaker icon + gear icon + avatar)  height 64 px
 │                         property var systemVolume  (bound to SystemVolumeController; drives the OS-Volume flyout, see below)
+│                         property string activeTab ("library"/"playlists"/"search", bound from Main.qml)  — drives which of the 3 tabs is highlighted; a Repeater-driven Row (same array-model convention as BottomBar), see UC-21
+│                         signal librarySelected() / playlistsSelected() / searchSelected()  ← tab click; "dumb component, owner decides" — Main.qml sets activeTab in response
 │                         signal settingsRequested()  ← gear icon click
 │                         Loudspeaker icon (🔊, leftmost of the three): click opens a non-modal Popup (~8cm/300px-wide
 │                         Slider, 0-100, labeled "OS Volume") anchored under the button via parent: <button item>.
@@ -434,11 +446,14 @@ Topaz module
 │                         popup open or not (see SystemVolumeController below).
 ├── GenreBar.qml        3 × 10 genre toggle grid  (reads lib.genreModel, calls lib.toggleGenre)
 ├── LibraryTree.qml     Left sidebar  default width 286 px, user-resizable  (flat virtualised ListView; flatRows JS array; no nested Repeaters)
+├── SearchPanel.qml     Replaces LibraryTree in the same SplitView slot when SEARCH is active — see UC-21 (independent of LibraryData; property SearchData searchData)
 ├── AlbumBrowser.qml    Center album list  flex-grow (absorbs all surplus width from window resize or panel drag)  (calls lib.filteredAlbums() via Qt.callLater; property autoPlay forwarded to each AlbumCard, see UC-16)
+├── SearchResultBrowser.qml  Replaces AlbumBrowser in the same SplitView slot when SEARCH is active — see UC-21 (property SearchData searchData, property var engine/autoPlay forwarded to AlbumCard, same as AlbumBrowser)
 ├── AlbumCard.qml       Single album card delegate (cover + year label + track listing; single-track drag & drop to queue; no selection; no context menus)
 │                         property var engine  (optional; used for double-click add-to-queue and drag cursor override)
 │                         property var autoPlay  (optional; gates double-click add via autoPlay.manualQueueEditingAllowed, see UC-16)
 │                         property int albumYear  (0 = unknown, hides the label; left-aligned under the cover, Theme.labelMd, literal white)
+│                         property string albumGenre  (empty = hidden; renders as "Genre | Year" when both set — SearchResultBrowser-only, see UC-21; AlbumBrowser leaves it unset so Library-tab cards are unchanged)
 ├── PlaybackQueue.qml   Queue panel  default width 374 px, user-resizable  (bound to PlaybackEngine model; DropArea; move/remove; shows activePlaylistName in header when set; shows LOCK PLAYLIST toggle when a playlist is active)
 │                         Auto-scrolls to keep the current track topmost (and upcoming tracks visible below it) on every add/remove, whenever the queue overflows the panel — independent of AUTO PLAY/MANUAL MODE, see UC-11
 │                         property var autoPlay  (gates clear/remove/move/reorder/drop via autoPlay.manualQueueEditingAllowed + autoPlay.queueClearAllowed; row click (select another track) via autoPlay.trackNavigationAllowed; clear button routes through autoPlay.clearQueueAndHistory(), see UC-16)
@@ -654,6 +669,7 @@ current track changes (see `PlaybackEngine::currentLargeCoverSource`).
 | `filteredAlbums(activeGenres, selectedArtist, selectedAlbum)` | Album display objects for AlbumBrowser. **Single O(N_tracks) pass** using `QHash` to group tracks by `(albumArtist\|album)` key; cover thumb and year (first non-zero seen per album, same defensive pattern as the cover thumb) collected in the same pass; no per-album full rescan. Replaces the former O(N_tracks × N_albums) three-pass algorithm. Result sorted by albumArtist ascending, then year descending, then albumTitle ascending (case-insensitive); unknown-year albums (`year == 0`) sort last within their artist group. |
 | `buildLibraryTree(activeGenres)` | **Single-pass** tree builder: returns `[ { genre, artists: [ { name, albums: [{title}] } ] } ]` for `LibraryData._rebuildTree()`. One O(N_tracks) scan replaces the former N_genres + N_artists separate full-list scans. |
 | `coverThumbForAlbum(album, albumArtist)` | Base64 thumbnail for an album |
+| `searchLibrary(query, mode, activeGenres, considerGenre, matchWholeWord)` | Substring search across `albumArtist`/`album`/`title` — see UC-21. `matchWholeWord=true` requires the match to be bounded by non-alphanumeric characters (or field start/end) via a plain-`QString` `matchesWholeWord()` helper, not `QRegularExpression`; `false` (default) uses ordinary substring `contains()`, chosen once per call via a small lambda rather than branching per field. `mode` is `"all"` \| `"artists"` \| `"albums"` \| `"tracks"` (unrecognized values behave as `"all"`). **Single O(N_tracks) pass, all modes** — `albumArtist`/`album` are constant across every track in their group (the same invariant `filteredAlbums()`'s grouping key relies on), so a match on either field for one track is guaranteed to match every sibling track in that album too; no second "find matches, then rescan for siblings" pass is needed. A title-only match is inherently per-track already, which is exactly the "just this track, not its album siblings" behavior `"tracks"` mode needs. `considerGenre=false` ignores `activeGenres` entirely; `considerGenre=true` with an empty `activeGenres` returns no results (mirrors `filteredAlbums()`'s equivalent short-circuit). Empty/whitespace-only `query` returns no results. Shares its post-filter grouping/sort/serialize tail with `filteredAlbums()` via a private `serializeAlbumAccum()` helper (an anonymous-namespace `AlbumAccum` struct, extracted from the two functions' ~60 lines of previously-duplicated logic) — same `QVariantList` shape as `filteredAlbums()`, except `isActive` is always `false` (no search-result card is naturally "selected"). **Cover fix-up**: since `"tracks"`-mode (and `"all"`-mode title-only) matches only include the matching track(s), not the rest of the album, a second pass over `m_tracks` fills in any still-missing album cover from any track carrying one (skipped entirely if every matched album already has a cover) — otherwise a track whose own tag lacks embedded art would show no cover even though a sibling track has one. `filteredAlbums()`/`buildLibraryTree()` never need this since they always include an album's full track list already. |
 | `libraryRefreshed()` signal | Emitted after cache load or scan complete |
 
 ### Library cache format — `Topaz.library.json`
@@ -1035,6 +1051,34 @@ AppConfig (C++)
 Next scan will pick up the new folder automatically.
 ```
 
+## Data Flow: Search (SearchPanel typing)
+
+```
+User types in SearchPanel's query TextInput
+   │  onTextEdited: searchData.query = text
+   ▼
+SearchData (independent of LibraryData)
+   ├── onQueryChanged → _scheduleSearch()
+   │       ├── query.trim() === "" → results = []; mode = "all"  (synchronous, no debounce)
+   │       └── otherwise → restart 250ms debounce Timer
+   ▼ (Timer fires)
+libraryModel.searchLibrary(query, mode, activeGenreNames, considerGenre, matchWholeWord)
+   │  single O(N_tracks) pass — see "LibraryModel public API" / UC-21
+   ▼
+SearchData.results = [...]
+   │
+   └──► SearchResultBrowser ListView.model  (bound directly — no Qt.callLater
+            needed here; SearchData's debounce already centralizes the async
+            update)
+                └── AlbumCard delegates render (same object shape as
+                    filteredAlbums(); albumGenre prop fed from the result's
+                    genre field renders "Genre | Year" under the cover)
+
+Mode-button click (ALL/ARTISTS/ALBUMS/TRACKS) → searchData.mode = "..." →
+same debounce → re-search. "Match whole word" / "Consider Genre" checkbox
+toggles → same debounce → re-search; Consider Genre is additionally gated
+on lib.activeGenreNames (one-way bound into SearchData by Main.qml).
+```
 
 ## Supported Resolutions → Adaptive Layout Strategy
 
@@ -1082,6 +1126,12 @@ hover → `secondary` teal when actively dragged).
 When the application window is widened or narrowed, only AlbumBrowser grows or
 shrinks.  Resizing a panel handle narrows AlbumBrowser accordingly, down to its
 400 px minimum.
+
+When TopBar's SEARCH tab is active, the LibraryTree and AlbumBrowser slots
+are occupied by `SearchPanel.qml`/`SearchResultBrowser.qml` instead (via a
+`Loader` in each slot — see UC-21), but the slots' widths, minimums, and
+resize/persistence behavior are unchanged, since those live on the `Loader`
+itself rather than on whichever component it currently loads.
 
 ### Layout persistence
 
@@ -1214,8 +1264,19 @@ configurable via the app JSON config) will be introduced at that point.
       +albumsForArtist(artist, genre) QStringList
       +filteredAlbums(activeGenres, artist, album) QVariantList
       +buildLibraryTree(activeGenres) QVariantList
+      +searchLibrary(query, mode, activeGenres, considerGenre, matchWholeWord) QVariantList
       +autoPlayCandidatePool(activeGenres, considerGenre, considerRating, minimumRating) QVariantList
       ~libraryRefreshed()
+    }
+
+    class SearchData {
+      +libraryModel LibraryModel
+      +activeGenreNames QStringList
+      +query string
+      +mode string
+      +considerGenre bool
+      +matchWholeWord bool
+      +results QVariantList
     }
 
     class AppConfig {
@@ -1296,6 +1357,7 @@ configurable via the app JSON config) will be introduced at that point.
     AutoPlayController --> PlaybackEngine : addTrack/playAt/trackList/clearQueue; listens trackPlayedToCompletion + queueExhausted (see UC-16)
     AutoPlayController --> LibraryModel   : calls autoPlayCandidatePool() (see UC-16)
     AutoPlayController --> AppConfig      : reads all autoPlay* settings live (see UC-16)
+    SearchData --> LibraryModel : calls searchLibrary() (see UC-21)
 ```
 
 ---
@@ -3491,4 +3553,132 @@ playback pauses mid-fade.
 - Same as UC-17/UC-18/UC-19: no live handling of screen-configuration changes
   while the pane is open, and open/closed state is not persisted across app
   restarts.
+
+---
+
+## UC-21 Search Library
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | User searches the whole library by artist, album, or track title without navigating the genre tree. |
+| **Actor** | User |
+| **Precondition** | The library has been scanned. |
+| **Trigger** | User clicks the "SEARCH" tab in `TopBar`. |
+
+### Normal Flow
+
+1. User clicks "SEARCH". `TopBar` emits `searchSelected()` → `Main.qml` sets
+   `activeTab = "search"`. The two `Loader`s in the `SplitView`'s first two
+   slots swap `LibraryTree`/`AlbumBrowser` for `SearchPanel.qml`/
+   `SearchResultBrowser.qml`; `PlaybackQueue` and `NowPlaying` are untouched,
+   and `GenreBar` (outside the `SplitView`) stays visible and usable.
+2. User types into `SearchPanel`'s query field (a `TextInput`, same
+   `Rectangle`+`TextInput` convention as `SetupDialog`'s "add genre" input).
+   `onTextEdited` writes directly to `SearchData.query`.
+3. `SearchData` restarts a 250ms debounce `Timer` on every `query`/`mode`/
+   `considerGenre`/`matchWholeWord`/`activeGenreNames` change. When it
+   fires, it calls `LibraryModel.searchLibrary(query.trim(), mode,
+   activeGenreNames, considerGenre, matchWholeWord)` and assigns the result
+   to `SearchData.results`.
+4. `SearchResultBrowser`'s `ListView` is bound directly to
+   `searchData.results` — no additional refresh plumbing needed, since
+   `SearchData` already centralizes the debounce. Each result renders as an
+   `AlbumCard` (`searchLibrary()` returns the same per-album/per-track
+   object shape `filteredAlbums()` does, so no card-rendering logic needed
+   duplicating — the only addition is feeding `AlbumCard`'s `albumGenre`
+   prop from the result's `genre` field, rendering "Genre | Year" under the
+   cover; `AlbumBrowser` leaves `albumGenre` unset so Library-tab cards are
+   unchanged), including drag-to-queue.
+5. Once the trimmed query is non-empty, `SearchPanel` reveals four
+   mode-toggle buttons — `ALL` (default), `ARTISTS`, `ALBUMS`, `TRACKS` —
+   styled like `TopBar`'s own tabs at a smaller size. Clicking one sets
+   `SearchData.mode` and triggers a fresh (debounced) search.
+
+### Alternate: mode switch
+
+- **ARTISTS**: matches `albumArtist` substrings; every track under a
+  matching artist is returned (with all their albums/tracks), not just the
+  matching one — see `LibraryModel::searchLibrary()`.
+- **ALBUMS**: matches `album` substrings; every track under a matching
+  album is returned.
+- **TRACKS**: matches `title` substrings only; only the matching track(s)
+  within an album are returned (sibling tracks are excluded), still with
+  the album's cover.
+- **ALL** (default): the union of all three — matching a track's
+  `albumArtist`/`album`/`title` independently pulls it into the results.
+  All four modes are a single O(N_tracks) pass; see the "LibraryModel
+  public API" section below for why no second "pull in siblings" pass is
+  needed for the artist/album cases.
+
+### Alternate: Match whole word
+
+- `SearchPanel`'s "Match whole word" checkbox (unchecked by default,
+  positioned above "Consider Genre") is bound to `SearchData
+  .matchWholeWord`. When checked, a field only counts as matched if the
+  query substring is bounded by non-alphanumeric characters (or field
+  start/end) on both sides — e.g. "Love" then matches "Love" but not
+  "Lovely"/"Loveless" — via a plain-`QString` boundary check
+  (`matchesWholeWord()` in `librarymodel.cpp`), not `QRegularExpression`,
+  to match the rest of `searchLibrary()`'s style. Still a single
+  O(N_tracks) pass; the boundary check only runs per field actually being
+  compared, same as the substring check it replaces.
+
+### Alternate: Consider Genre
+
+- `SearchPanel`'s "Consider Genre" checkbox (unchecked by default) is bound
+  to `SearchData.considerGenre`. When checked, search additionally requires
+  `t.genre` to be one of `LibraryData.activeGenreNames` (the genres
+  currently toggled on in `GenreBar`) — this is the one deliberate,
+  read-only dependency `SearchData` has on `LibraryData`; nothing else
+  couples the two. When unchecked, genre is ignored entirely.
+
+### Empty-State Rules
+
+- Query empty: `SearchResultBrowser` shows "Type a query to search your
+  library." and the mode-toggle row is hidden.
+- Query non-empty, zero matches: `SearchResultBrowser` shows "No matches
+  for the current search."
+- Clearing the query (back to empty) synchronously clears `SearchData
+  .results` and resets `SearchData.mode` back to `"all"`, so the next
+  search starts from a clean slate.
+
+### Design notes
+
+- **Independence from LIBRARY**: `SearchData`/`SearchPanel`/
+  `SearchResultBrowser` never read or write `LibraryData`'s selection state
+  (`selectedGenre`/`selectedArtist`/`selectedAlbum`) and never call
+  `LibraryData`'s tree-building functions. Switching tabs cannot leave one
+  side's state corrupted by the other.
+- **PLAYLISTS tab**: clicking it sets `activeTab = "playlists"` (so it
+  visually highlights — `TopBar`'s active/inactive styling keys off
+  `activeTab` directly) but has no dedicated panel content yet — the
+  `SplitView` `Loader`s' swap condition is exactly `activeTab === "search"`,
+  so PLAYLISTS shows the same panels as LIBRARY today.
+- **Loader-based panel swap, not `visible` toggling**: a `Loader` destroys/
+  recreates its content on swap, so `LibraryTree`'s local transient UI state
+  (expanded-artist set, its own scroll position) resets when the user
+  leaves and returns to LIBRARY — `LibraryData`'s actual selection state is
+  unaffected since it lives in `lib`, not the view. `SearchData` lives
+  outside both `Loader`s, so leaving and returning to SEARCH preserves the
+  last query/mode/results exactly. `Loader` was chosen over keeping both
+  trees permanently instantiated with `visible` toggling because it avoids
+  two heavy virtualized `ListView`s coexisting and is unambiguously correct
+  (rather than relying on `SplitView`'s undocumented behavior for
+  runtime-toggled child visibility).
+- **`AlbumBrowser`/`SearchResultBrowser` scroll position IS preserved**
+  across the swap, unlike `LibraryTree`'s: each `ListView`'s `contentY` is
+  mirrored into `LibraryData.albumScrollY`/`SearchData.resultScrollY`
+  (`onContentYChanged`) — since those data objects, unlike the views
+  themselves, survive the `Loader` swap — and restored via `Qt.callLater`
+  the next time that view is (re)created (`onLibChanged`/
+  `onSearchDataChanged`, both of which fire exactly once per (re)creation,
+  not on every ordinary model refresh while the view stays loaded). The
+  `Qt.callLater` defer is required, not optional: setting `contentY` in the
+  same tick as the model change gets clamped back to 0 before
+  `contentHeight` catches up — the same technique `LibraryTree.qml`
+  already uses to preserve its own scroll position across a flat-list
+  rebuild (`onExpandedArtistsChanged`). `LibraryTree`'s own scroll offset
+  and expand-state remain unpreserved (see previous point) since those stay
+  genuinely tied to the destroyed/recreated view instance itself, with no
+  natural home on `LibraryData` the way a single scroll float has.
 

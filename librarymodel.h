@@ -112,6 +112,25 @@ public:
     Q_INVOKABLE QString coverThumbForAlbum(const QString &album,
                                             const QString &albumArtist) const;
 
+    // Substring search across album-artist / album title / track title.
+    // mode is "all" | "artists" | "albums" | "tracks" ("all" or any
+    // unrecognized value searches all three fields). considerGenre=false
+    // ignores activeGenres entirely; considerGenre=true with an empty
+    // activeGenres returns no results (mirrors filteredAlbums()). Empty
+    // (or whitespace-only) query returns no results.
+    // Same QVariantList shape as filteredAlbums(), except "isActive" is
+    // always false (no card is naturally "selected" in search results).
+    // Single O(N_tracks) pass — see librarymodel.cpp for why no second
+    // "pull in sibling tracks" pass is needed for artist/album matches.
+    // matchWholeWord=true requires the matched substring to be bounded by
+    // non-alphanumeric characters (or string start/end) on both sides —
+    // e.g. "Love" then matches "Love" but not "Lovely"/"Loveless".
+    Q_INVOKABLE QVariantList searchLibrary(const QString &query,
+                                            const QString &mode,
+                                            const QStringList &activeGenres,
+                                            bool considerGenre,
+                                            bool matchWholeWord) const;
+
     // Single-pass tree builder for LibraryData._rebuildTree().
     // Returns QVariantList matching the shape:
     //   [ { genre, artists: [ { name, albums: [ { title } ] } ] } ]
@@ -159,8 +178,6 @@ private slots:
 private:
     void applyTracks(QList<TrackInfo> &&tracks);
     void startWorkerThread();
-
-    static QString formatDuration(qint64 ms);
 
     AppConfig        *m_appConfig    = nullptr;
     QList<TrackInfo>  m_tracks;

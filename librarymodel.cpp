@@ -6,6 +6,123 @@
 #include <algorithm>
 #include <numeric>
 
+namespace {
+
+QString formatDuration(qint64 ms)
+{
+    const int totalSecs = static_cast<int>(ms / 1000);
+    return QString("%1:%2")
+        .arg(totalSecs / 60)
+        .arg(totalSecs % 60, 2, 10, QChar('0'));
+}
+
+// Whole-word substring match for searchLibrary()'s "Match whole word"
+// option: needle must occur bounded by non-alphanumeric characters (or
+// haystack start/end) on both sides, e.g. "Love" matches "Love" but not
+// "Lovely"/"Loveless". Plain QString scanning rather than
+// QRegularExpression, to match this file's existing style.
+bool matchesWholeWord(const QString &haystack, const QString &needle)
+{
+    if (needle.isEmpty()) return false;
+    int from = 0;
+    while (true) {
+        const int idx = haystack.indexOf(needle, from, Qt::CaseInsensitive);
+        if (idx < 0) return false;
+        const bool leftOk  = (idx == 0) || !haystack.at(idx - 1).isLetterOrNumber();
+        const int afterIdx = idx + needle.length();
+        const bool rightOk = (afterIdx >= haystack.length()) || !haystack.at(afterIdx).isLetterOrNumber();
+        if (leftOk && rightOk) return true;
+        from = idx + 1; // keep looking -- an earlier occurrence might not be word-bounded
+    }
+}
+
+// Shared accumulator for grouping tracks into album cards, keyed by
+// (genre|albumArtist|album). Used by both filteredAlbums() and
+// searchLibrary() so the two stay in lockstep on shape/behavior.
+struct AlbumAccum {
+    QString              genre;
+    QString              albumArtist;
+    QString              album;
+    QString              coverThumb;
+    int                  year = 0;
+    QList<const TrackInfo *> tracks;
+};
+
+// Sorts (albumArtist asc, year desc, albumTitle asc, case-insensitive),
+// sorts each album's tracks by track number, and serializes into the
+// QVariantList shape AlbumCard/AlbumBrowser expect. markFirstActive mirrors
+// filteredAlbums()'s "highlight the first card" behavior for genre/artist
+// drill-down; searchLibrary() passes false since no search result card is
+// naturally "selected."
+QVariantList serializeAlbumAccum(QList<AlbumAccum> &albumAccum, bool markFirstActive = true)
+{
+    if (albumAccum.isEmpty()) return {};
+
+    QList<int> sortedIdx(albumAccum.size());
+    std::iota(sortedIdx.begin(), sortedIdx.end(), 0);
+    std::sort(sortedIdx.begin(), sortedIdx.end(),
+              [&albumAccum](int a, int b) {
+                  const AlbumAccum &aa = albumAccum[a];
+                  const AlbumAccum &bb = albumAccum[b];
+                  int c = aa.albumArtist.compare(bb.albumArtist, Qt::CaseInsensitive);
+                  if (c != 0) return c < 0;
+                  if (aa.year != bb.year) return aa.year > bb.year;
+                  return aa.album.compare(bb.album, Qt::CaseInsensitive) < 0;
+              });
+
+    QVariantList result;
+    result.reserve(albumAccum.size());
+
+    for (int si = 0; si < sortedIdx.size(); ++si) {
+        AlbumAccum &aa = albumAccum[sortedIdx[si]];
+
+        std::sort(aa.tracks.begin(), aa.tracks.end(),
+                  [](const TrackInfo *a, const TrackInfo *b) {
+                      return a->track < b->track;
+                  });
+
+        const QString coverSrc = aa.coverThumb.isEmpty()
+            ? QString()
+            : QStringLiteral("data:image/jpeg;base64,") + aa.coverThumb;
+
+        QVariantList trackList;
+        trackList.reserve(aa.tracks.size());
+        for (const TrackInfo *t : std::as_const(aa.tracks)) {
+            QVariantMap tm;
+            tm[QStringLiteral("number")]      = t->track > 0
+                                                ? QString::number(t->track).rightJustified(2, '0')
+                                                : QStringLiteral("—");
+            tm[QStringLiteral("title")]       = t->title;
+            tm[QStringLiteral("duration")]    = formatDuration(t->duration);
+            tm[QStringLiteral("durationMs")]  = static_cast<qlonglong>(t->duration);
+            tm[QStringLiteral("bitrate")]     = t->bitrate;
+            tm[QStringLiteral("filePath")]    = t->filePath;
+            tm[QStringLiteral("artist")]      = t->artist;
+            tm[QStringLiteral("albumArtist")] = t->albumArtist;
+            tm[QStringLiteral("album")]       = t->album;
+            tm[QStringLiteral("genre")]       = t->genre;
+            tm[QStringLiteral("year")]        = t->year;
+            tm[QStringLiteral("coverSource")] = coverSrc; // set directly – no post-loop needed
+            trackList.append(tm);
+        }
+
+        QVariantMap album;
+        album[QStringLiteral("albumTitle")]  = aa.album;
+        album[QStringLiteral("albumArtist")] = aa.albumArtist;
+        album[QStringLiteral("artistLabel")] = aa.albumArtist;
+        album[QStringLiteral("genre")]       = aa.genre;
+        album[QStringLiteral("isActive")]    = markFirstActive && (si == 0);
+        album[QStringLiteral("coverSource")] = coverSrc;
+        album[QStringLiteral("year")]        = aa.year;
+        album[QStringLiteral("tracks")]      = trackList;
+        result.append(album);
+    }
+
+    return result;
+}
+
+} // namespace
+
 // ─────────────────────────────────────────────────────────────────────────
 
 LibraryModel::LibraryModel(QObject *parent)
@@ -222,16 +339,6 @@ void LibraryModel::applyTracks(QList<TrackInfo> &&tracks)
     emit libraryRefreshed();
 }
 
-// ── Query helpers ─────────────────────────────────────────────────────────
-
-QString LibraryModel::formatDuration(qint64 ms)
-{
-    const int totalSecs = static_cast<int>(ms / 1000);
-    return QString("%1:%2")
-        .arg(totalSecs / 60)
-        .arg(totalSecs % 60, 2, 10, QChar('0'));
-}
-
 QStringList LibraryModel::genres() const
 {
     QSet<QString> seen;
@@ -300,14 +407,6 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
     //   pass 1 – collect unique album keys
     //   pass 2 – per-album full rescan for tracks (N_albums × N_tracks)
     //   pass 3 – coverThumbForAlbum() per album (N_albums × N_tracks)
-    struct AlbumAccum {
-        QString              albumArtist;
-        QString              album;
-        QString              coverThumb;
-        int                  year = 0;
-        QList<const TrackInfo *> tracks;
-    };
-
     QHash<QString, int> keyToIndex; // lowercased key → index in albumAccum
     QList<AlbumAccum>   albumAccum;
 
@@ -325,7 +424,7 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
         auto it = keyToIndex.find(key);
         if (it == keyToIndex.end()) {
             keyToIndex.insert(key, albumAccum.size());
-            albumAccum.append({ t.albumArtist, t.album,
+            albumAccum.append({ t.genre, t.albumArtist, t.album,
                                 t.coverThumb,            // grab first cover seen
                                 t.year,                  // grab first non-zero year seen
                                 { &t } });
@@ -339,74 +438,104 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
         }
     }
 
-    if (albumAccum.isEmpty()) return {};
+    return serializeAlbumAccum(albumAccum);
+}
 
-    // ── Sort albums: albumArtist asc, then year desc, then album title asc
-    // (case-insensitive) ────────────────────────────────────────────────────
-    // Albums with no year tag (year == 0) naturally sort last within their
-    // artist group — no special-casing needed.
-    QList<int> sortedIdx(albumAccum.size());
-    std::iota(sortedIdx.begin(), sortedIdx.end(), 0);
-    std::sort(sortedIdx.begin(), sortedIdx.end(),
-              [&albumAccum](int a, int b) {
-                  const AlbumAccum &aa = albumAccum[a];
-                  const AlbumAccum &bb = albumAccum[b];
-                  int c = aa.albumArtist.compare(bb.albumArtist, Qt::CaseInsensitive);
-                  if (c != 0) return c < 0;
-                  if (aa.year != bb.year) return aa.year > bb.year;
-                  return aa.album.compare(bb.album, Qt::CaseInsensitive) < 0;
-              });
+QVariantList LibraryModel::searchLibrary(const QString &query,
+                                          const QString &mode,
+                                          const QStringList &activeGenres,
+                                          bool considerGenre,
+                                          bool matchWholeWord) const
+{
+    const QString q = query.trimmed();
+    if (q.isEmpty()) return {};
+    if (considerGenre && activeGenres.isEmpty()) return {};
 
-    // ── Build result ──────────────────────────────────────────────────────
-    QVariantList result;
-    result.reserve(albumAccum.size());
-
-    for (int si = 0; si < sortedIdx.size(); ++si) {
-        AlbumAccum &aa = albumAccum[sortedIdx[si]];
-
-        // Sort tracks within album by track number
-        std::sort(aa.tracks.begin(), aa.tracks.end(),
-                  [](const TrackInfo *a, const TrackInfo *b) {
-                      return a->track < b->track;
-                  });
-
-        const QString coverSrc = aa.coverThumb.isEmpty()
-            ? QString()
-            : QStringLiteral("data:image/jpeg;base64,") + aa.coverThumb;
-
-        QVariantList trackList;
-        trackList.reserve(aa.tracks.size());
-        for (const TrackInfo *t : std::as_const(aa.tracks)) {
-            QVariantMap tm;
-            tm[QStringLiteral("number")]      = t->track > 0
-                                                ? QString::number(t->track).rightJustified(2, '0')
-                                                : QStringLiteral("\u2014");
-            tm[QStringLiteral("title")]       = t->title;
-            tm[QStringLiteral("duration")]    = formatDuration(t->duration);
-            tm[QStringLiteral("durationMs")]  = static_cast<qlonglong>(t->duration);
-            tm[QStringLiteral("bitrate")]     = t->bitrate;
-            tm[QStringLiteral("filePath")]    = t->filePath;
-            tm[QStringLiteral("artist")]      = t->artist;
-            tm[QStringLiteral("albumArtist")] = t->albumArtist;
-            tm[QStringLiteral("album")]       = t->album;
-            tm[QStringLiteral("genre")]       = t->genre;
-            tm[QStringLiteral("year")]        = t->year;
-            tm[QStringLiteral("coverSource")] = coverSrc; // set directly – no post-loop needed
-            trackList.append(tm);
-        }
-
-        QVariantMap album;
-        album[QStringLiteral("albumTitle")]  = aa.album;
-        album[QStringLiteral("albumArtist")] = aa.albumArtist;
-        album[QStringLiteral("artistLabel")] = aa.albumArtist;
-        album[QStringLiteral("isActive")]    = (si == 0);
-        album[QStringLiteral("coverSource")] = coverSrc;
-        album[QStringLiteral("year")]        = aa.year;
-        album[QStringLiteral("tracks")]      = trackList;
-        result.append(album);
+    QSet<QString> activeGenresLower;
+    if (considerGenre) {
+        activeGenresLower.reserve(activeGenres.size());
+        for (const QString &g : activeGenres)
+            activeGenresLower.insert(g.trimmed().toLower());
     }
 
-    return result;
+    // "all" (or any unrecognized mode) searches all three fields.
+    const bool wantArtists = (mode == QLatin1String("artists") || mode == QLatin1String("all"));
+    const bool wantAlbums  = (mode == QLatin1String("albums")  || mode == QLatin1String("all"));
+    const bool wantTracks  = (mode == QLatin1String("tracks")  || mode == QLatin1String("all"));
+    const bool anyMode     = wantArtists || wantAlbums || wantTracks;
+
+    auto fieldMatches = [&](const QString &field) {
+        return matchWholeWord ? matchesWholeWord(field, q)
+                               : field.contains(q, Qt::CaseInsensitive);
+    };
+
+    // ── Single O(N_tracks) pass ──────────────────────────────────────────
+    // albumArtist/album are constant across every track in their group (the
+    // same invariant filteredAlbums()'s grouping key relies on), so a match
+    // on either field for one track is guaranteed to also match every
+    // sibling track in that album — the "pull in the whole album" behavior
+    // for artist/album matches falls out of per-track evaluation for free,
+    // with no second "find matches, then rescan for siblings" pass needed.
+    // A title-only match is inherently per-track already, which is exactly
+    // the "just this track" behavior track-mode search needs.
+    QHash<QString, int> keyToIndex;
+    QList<AlbumAccum>   albumAccum;
+
+    for (const TrackInfo &t : std::as_const(m_tracks)) {
+        if (considerGenre && !activeGenresLower.contains(t.genre.trimmed().toLower()))
+            continue;
+
+        const bool matched = anyMode
+            && ((wantArtists && fieldMatches(t.albumArtist))
+             || (wantAlbums  && fieldMatches(t.album))
+             || (wantTracks  && fieldMatches(t.title)));
+        if (!matched) continue;
+
+        const QString key = t.genre.trimmed().toLower() + QChar('|')
+                           + t.albumArtist.toLower() + QChar('|') + t.album.toLower();
+        auto it = keyToIndex.find(key);
+        if (it == keyToIndex.end()) {
+            keyToIndex.insert(key, albumAccum.size());
+            albumAccum.append({ t.genre, t.albumArtist, t.album, t.coverThumb, t.year, { &t } });
+        } else {
+            AlbumAccum &aa = albumAccum[it.value()];
+            if (aa.coverThumb.isEmpty() && !t.coverThumb.isEmpty())
+                aa.coverThumb = t.coverThumb;
+            if (aa.year == 0 && t.year != 0)
+                aa.year = t.year;
+            aa.tracks.append(&t);
+        }
+    }
+
+    // ── Cover fix-up (search-only convenience) ───────────────────────────
+    // TRACKS-mode (and ALL-mode title-only) matches deliberately include
+    // only the matching track(s), not the rest of the album — so if that
+    // one track's own tag has no embedded cover (common when only track 1
+    // of a rip carries it), the card would show no cover even though a
+    // sibling track (correctly excluded above) has one.
+    // filteredAlbums()/buildLibraryTree() never need this since they always
+    // include an album's full track list already. Skips entirely (the
+    // common case) if every matched album already has a cover.
+    QHash<QString, int> missingCoverKeys; // same keys as keyToIndex above
+    for (auto it = keyToIndex.constBegin(); it != keyToIndex.constEnd(); ++it) {
+        if (albumAccum[it.value()].coverThumb.isEmpty())
+            missingCoverKeys.insert(it.key(), it.value());
+    }
+    if (!missingCoverKeys.isEmpty()) {
+        for (const TrackInfo &t : std::as_const(m_tracks)) {
+            if (missingCoverKeys.isEmpty()) break;
+            if (t.coverThumb.isEmpty()) continue;
+            const QString key = t.genre.trimmed().toLower() + QChar('|')
+                               + t.albumArtist.toLower() + QChar('|') + t.album.toLower();
+            auto found = missingCoverKeys.constFind(key);
+            if (found != missingCoverKeys.constEnd()) {
+                albumAccum[found.value()].coverThumb = t.coverThumb;
+                missingCoverKeys.erase(found);
+            }
+        }
+    }
+
+    return serializeAlbumAccum(albumAccum, /*markFirstActive=*/false);
 }
 
 QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres,
