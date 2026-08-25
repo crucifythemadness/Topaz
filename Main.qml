@@ -29,9 +29,8 @@ ApplicationWindow {
 
     // Which of TopBar's three navigation tabs is active. Shell-level state
     // (not library- or search-specific), same precedent as the pane-open
-    // properties below. "playlists" has no dedicated content yet, so the
-    // SplitView Loaders below only special-case "search" -- playlists shows
-    // the same panels as "library".
+    // properties below. Drives which components the SplitView's first two
+    // Loaders load — see UC-21 (search) / UC-22 (playlists).
     property string activeTab: "library"
 
     // ── Detachable "big cover" pane ──────────────────────────────────────
@@ -260,6 +259,17 @@ ApplicationWindow {
     // Playlist manager — handles XSPF file creation.
     PlaylistManager { id: playlistManager }
 
+    // Playlists tab state -- deliberately independent of LibraryData/
+    // SearchData (see PlaylistsData.qml). engine is the one read-only
+    // exception, needed to recognize the playlist currently loaded into the
+    // queue so it can be excluded from selection — see UC-22.
+    PlaylistsData {
+        id: playlistsData
+        playlistManager: playlistManager
+        libraryModel:    libraryModel
+        engine:          engine
+    }
+
     // Windows OS master volume control — see systemvolumecontroller.h.
     SystemVolumeController { id: systemVolume }
 
@@ -298,6 +308,10 @@ ApplicationWindow {
         id:              newPlaylistDialog
         playlistManager: playlistManager
         engine:          engine
+        // Keeps the PLAYLISTS tab's list live even while it's already the
+        // active tab — PlaylistsPanel otherwise only refreshes when the
+        // Loader (re)creates it on tab switch (see UC-22).
+        onPlaylistCreated: playlistsData.refreshPlaylists()
     }
 
     // Kick off cache load + background stat-check once QML engine is ready
@@ -328,16 +342,19 @@ ApplicationWindow {
     // Components loaded into the SplitView's first two slots, switched by
     // root.activeTab (see the two Loaders below). Deliberately no property
     // bindings declared inside these Component blocks -- LibraryTree/
-    // AlbumBrowser/SearchResultBrowser each declare their own "lib"/
-    // "engine"/"autoPlay" property, so a declarative "lib: lib" etc. here
-    // would resolve against the object's own just-declared property instead
-    // of walking out to this file's ids (same collision already documented
-    // above for BigCoverWindow's "engine" binding). Assigned imperatively
-    // instead, via onLoaded on each Loader.
+    // AlbumBrowser/SearchResultBrowser/PlaylistsPanel/PlaylistViewer each
+    // declare their own "lib"/"engine"/"autoPlay"/"playlistsData" property,
+    // so a declarative "lib: lib" etc. here would resolve against the
+    // object's own just-declared property instead of walking out to this
+    // file's ids (same collision already documented above for
+    // BigCoverWindow's "engine" binding). Assigned imperatively instead,
+    // via onLoaded on each Loader.
     Component { id: libraryTreeComponent; LibraryTree {} }
     Component { id: searchPanelComponent; SearchPanel {} }
+    Component { id: playlistsPanelComponent; PlaylistsPanel {} }
     Component { id: albumBrowserComponent; AlbumBrowser {} }
     Component { id: searchResultComponent; SearchResultBrowser {} }
+    Component { id: playlistViewerComponent; PlaylistViewer {} }
 
     ColumnLayout {
         anchors.fill: parent
@@ -373,43 +390,50 @@ ApplicationWindow {
                      :                       Theme.surfaceContainerLow
             }
 
-            // Swaps between LibraryTree/SearchPanel based on root.activeTab.
-            // SplitView.* attached properties and the width-persistence
-            // debounce live on the Loader itself (the actual SplitView
-            // child), not on the loaded item, since attached properties
-            // must sit on the direct child. A Loader (rather than keeping
-            // both permanently instantiated with `visible` toggling) avoids
-            // two heavy virtualized trees coexisting and sidesteps relying
-            // on undocumented SplitView behavior for invisible children --
-            // the accepted tradeoff is that LibraryTree's local transient
-            // state (expanded artists, scroll position) resets when the
-            // user leaves and returns to LIBRARY; actual selection state
-            // lives in `lib`, unaffected. SearchData likewise lives outside
-            // this Loader, so leaving and returning to SEARCH preserves the
-            // last query/mode/results.
+            // Swaps between LibraryTree/SearchPanel/PlaylistsPanel based on
+            // root.activeTab. SplitView.* attached properties and the
+            // width-persistence debounce live on the Loader itself (the
+            // actual SplitView child), not on the loaded item, since
+            // attached properties must sit on the direct child. A Loader
+            // (rather than keeping all three permanently instantiated with
+            // `visible` toggling) avoids heavy virtualized trees coexisting
+            // and sidesteps relying on undocumented SplitView behavior for
+            // invisible children -- the accepted tradeoff is that
+            // LibraryTree's local transient state (expanded artists, scroll
+            // position) resets when the user leaves and returns to LIBRARY;
+            // actual selection state lives in `lib`, unaffected. SearchData/
+            // PlaylistsData likewise live outside this Loader, so leaving
+            // and returning to SEARCH/PLAYLISTS preserves the last query/
+            // mode/results or selected playlist and scroll position.
             Loader {
                 id: libraryTreePanel
                 SplitView.preferredWidth: appConfig.libraryTreeWidth
                 SplitView.minimumWidth:   160
                 onWidthChanged: saveLayoutTimer.restart()
-                sourceComponent: root.activeTab === "search" ? searchPanelComponent : libraryTreeComponent
+                sourceComponent: root.activeTab === "search"    ? searchPanelComponent
+                                : root.activeTab === "playlists" ? playlistsPanelComponent
+                                :                                  libraryTreeComponent
                 onLoaded: {
                     if (!item) return
-                    if (root.activeTab === "search") item.searchData = search
-                    else                             item.lib        = lib
+                    if (root.activeTab === "search")         item.searchData    = search
+                    else if (root.activeTab === "playlists") item.playlistsData = playlistsData
+                    else                                      item.lib          = lib
                 }
             }
 
             Loader {
                 SplitView.fillWidth: true
                 SplitView.minimumWidth: 400
-                sourceComponent: root.activeTab === "search" ? searchResultComponent : albumBrowserComponent
+                sourceComponent: root.activeTab === "search"    ? searchResultComponent
+                                : root.activeTab === "playlists" ? playlistViewerComponent
+                                :                                  albumBrowserComponent
                 onLoaded: {
                     if (!item) return
                     item.engine   = engine
                     item.autoPlay = autoPlay
-                    if (root.activeTab === "search") item.searchData = search
-                    else                              item.lib       = lib
+                    if (root.activeTab === "search")         item.searchData    = search
+                    else if (root.activeTab === "playlists") item.playlistsData = playlistsData
+                    else                                      item.lib          = lib
                 }
             }
 

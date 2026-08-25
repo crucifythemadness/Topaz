@@ -33,6 +33,12 @@ public:
     // Returns true when a playlist with this name already exists.
     Q_INVOKABLE bool playlistExists(const QString &name) const;
 
+    // Returns all playlists found in playlistDirectory(), sorted by display
+    // name ascending (case-insensitive). Each element is a QVariantMap:
+    //   { fileName, displayName }
+    // fileName includes ".xml"; displayName has the extension stripped.
+    Q_INVOKABLE QVariantList listPlaylists() const;
+
     // Creates a new XSPF playlist.
     // name   – file name without extension (leading/trailing whitespace trimmed)
     // tracks – QVariantList of maps, each containing at minimum:

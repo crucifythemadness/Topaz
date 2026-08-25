@@ -112,12 +112,15 @@ qt_add_qml_module(topaz
         Theme.qml
         LibraryData.qml
         SearchData.qml
+        PlaylistsData.qml
         TopBar.qml
         GenreBar.qml
         LibraryTree.qml
         SearchPanel.qml
+        PlaylistsPanel.qml
         AlbumBrowser.qml
         SearchResultBrowser.qml
+        PlaylistViewer.qml
         AlbumCard.qml
         PlaybackQueue.qml
         NowPlaying.qml

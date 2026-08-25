@@ -112,6 +112,24 @@ public:
     Q_INVOKABLE QString coverThumbForAlbum(const QString &album,
                                             const QString &albumArtist) const;
 
+    // Converts a raw track list (the shape PlaylistManager::loadPlaylist()
+    // returns) into one standalone AlbumCard-shaped entry per track — no
+    // grouping by album, unlike filteredAlbums()/searchLibrary(), so
+    // PlaylistViewer shows exactly how the playlist is composed track by
+    // track (consecutive same-album tracks still render as separate cards).
+    // Any track whose filePath matches a track in the scanned library
+    // reuses that track's own tag data at zero extra I/O cost via a single
+    // O(N_tracks) lookup pass. Cover art is resolved per track via
+    // coverThumbForAlbum() whenever the matched (or synthesized) track's own
+    // coverThumb is empty — which is the common case, since coverThumb is
+    // only populated on one representative track per album in the whole
+    // scanned library — so every track of an album shows its cover
+    // regardless of which one happens to be that representative; a track
+    // whose album has no cover anywhere in the library still renders
+    // correctly, just without one. isActive is always false. The playlist's
+    // own track order is preserved rather than alphabetically re-sorted.
+    Q_INVOKABLE QVariantList buildStandaloneTrackCards(const QVariantList &tracks) const;
+
     // Substring search across album-artist / album title / track title.
     // mode is "all" | "artists" | "albums" | "tracks" ("all" or any
     // unrecognized value searches all three fields). considerGenre=false

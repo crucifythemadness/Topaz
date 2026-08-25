@@ -53,22 +53,28 @@ struct AlbumAccum {
 // QVariantList shape AlbumCard/AlbumBrowser expect. markFirstActive mirrors
 // filteredAlbums()'s "highlight the first card" behavior for genre/artist
 // drill-down; searchLibrary() passes false since no search result card is
-// naturally "selected."
-QVariantList serializeAlbumAccum(QList<AlbumAccum> &albumAccum, bool markFirstActive = true)
+// naturally "selected." preserveOrder=true (buildStandaloneTrackCards(),
+// for playlists) skips both sorts instead, since a playlist's own
+// listening order matters more than alphabetical browsing order — cards
+// then emit in the order their tracks appear in the playlist.
+QVariantList serializeAlbumAccum(QList<AlbumAccum> &albumAccum, bool markFirstActive = true,
+                                  bool preserveOrder = false)
 {
     if (albumAccum.isEmpty()) return {};
 
     QList<int> sortedIdx(albumAccum.size());
     std::iota(sortedIdx.begin(), sortedIdx.end(), 0);
-    std::sort(sortedIdx.begin(), sortedIdx.end(),
-              [&albumAccum](int a, int b) {
-                  const AlbumAccum &aa = albumAccum[a];
-                  const AlbumAccum &bb = albumAccum[b];
-                  int c = aa.albumArtist.compare(bb.albumArtist, Qt::CaseInsensitive);
-                  if (c != 0) return c < 0;
-                  if (aa.year != bb.year) return aa.year > bb.year;
-                  return aa.album.compare(bb.album, Qt::CaseInsensitive) < 0;
-              });
+    if (!preserveOrder) {
+        std::sort(sortedIdx.begin(), sortedIdx.end(),
+                  [&albumAccum](int a, int b) {
+                      const AlbumAccum &aa = albumAccum[a];
+                      const AlbumAccum &bb = albumAccum[b];
+                      int c = aa.albumArtist.compare(bb.albumArtist, Qt::CaseInsensitive);
+                      if (c != 0) return c < 0;
+                      if (aa.year != bb.year) return aa.year > bb.year;
+                      return aa.album.compare(bb.album, Qt::CaseInsensitive) < 0;
+                  });
+    }
 
     QVariantList result;
     result.reserve(albumAccum.size());
@@ -76,10 +82,12 @@ QVariantList serializeAlbumAccum(QList<AlbumAccum> &albumAccum, bool markFirstAc
     for (int si = 0; si < sortedIdx.size(); ++si) {
         AlbumAccum &aa = albumAccum[sortedIdx[si]];
 
-        std::sort(aa.tracks.begin(), aa.tracks.end(),
-                  [](const TrackInfo *a, const TrackInfo *b) {
-                      return a->track < b->track;
-                  });
+        if (!preserveOrder) {
+            std::sort(aa.tracks.begin(), aa.tracks.end(),
+                      [](const TrackInfo *a, const TrackInfo *b) {
+                          return a->track < b->track;
+                      });
+        }
 
         const QString coverSrc = aa.coverThumb.isEmpty()
             ? QString()
@@ -604,6 +612,74 @@ QString LibraryModel::coverThumbForAlbum(const QString &album,
             return t.coverThumb;
     }
     return {};
+}
+
+// ── buildStandaloneTrackCards ─────────────────────────────────────────────
+// Converts an arbitrary track list (e.g. PlaylistManager::loadPlaylist()'s
+// output) into one standalone AlbumCard-shaped entry per track -- no
+// grouping by album, so PlaylistViewer shows exactly how the playlist is
+// composed track by track. See UC-22.
+QVariantList LibraryModel::buildStandaloneTrackCards(const QVariantList &tracks) const
+{
+    if (tracks.isEmpty()) return {};
+
+    // filePath -> TrackInfo* for tracks already in the scanned library, so
+    // playlist tracks reuse their own tag data (and, via coverThumbForAlbum()
+    // below, their album's cover) instead of re-decoding JPEGs from disk.
+    QHash<QString, const TrackInfo *> byPath;
+    byPath.reserve(m_tracks.size());
+    for (const TrackInfo &t : std::as_const(m_tracks))
+        byPath.insert(t.filePath, &t);
+
+    // Owns TrackInfo instances synthesized for tracks not found in byPath.
+    // Reserved up front so AlbumAccum's raw pointers into it stay valid.
+    QList<TrackInfo> fallback;
+    fallback.reserve(tracks.size());
+
+    QList<AlbumAccum> albumAccum;
+    albumAccum.reserve(tracks.size());
+
+    for (const QVariant &v : tracks) {
+        const QVariantMap m = v.toMap();
+        const QString filePath = m.value(QStringLiteral("filePath")).toString();
+
+        const TrackInfo *t = byPath.value(filePath, nullptr);
+        if (!t) {
+            TrackInfo synth;
+            synth.filePath    = filePath;
+            synth.title       = m.value(QStringLiteral("title")).toString();
+            synth.artist      = m.value(QStringLiteral("artist")).toString();
+            synth.albumArtist = m.value(QStringLiteral("albumArtist")).toString();
+            synth.album       = m.value(QStringLiteral("album")).toString();
+            synth.genre       = m.value(QStringLiteral("genre")).toString();
+            synth.year        = m.value(QStringLiteral("year")).toInt();
+            synth.track       = m.value(QStringLiteral("trackNumber"),
+                                         m.value(QStringLiteral("number"))).toInt();
+            synth.duration    = m.value(QStringLiteral("durationMs")).toLongLong();
+            synth.bitrate     = m.value(QStringLiteral("bitrate")).toInt();
+            fallback.append(synth);
+            t = &fallback.last();
+        }
+
+        // t->coverThumb is only non-empty for the one representative track
+        // the scanner chose per (genre, albumArtist, album) -- see UC-05
+        // step 4d -- so most tracks of an album have it empty even though
+        // the album genuinely has a cover. Fall back to coverThumbForAlbum()
+        // per track: an O(N_tracks) scan per call, which would be wasteful
+        // across the whole library, but is negligible for a playlist
+        // (capped in practice at a few hundred tracks).
+        QString coverThumb = t->coverThumb;
+        if (coverThumb.isEmpty())
+            coverThumb = coverThumbForAlbum(t->album, t->albumArtist);
+
+        // Each track becomes its own one-track "album" accumulator -- no
+        // (genre|albumArtist|album) dedup, unlike filteredAlbums()/
+        // searchLibrary(), so consecutive same-album tracks still render as
+        // separate cards.
+        albumAccum.append({ t->genre, t->albumArtist, t->album, coverThumb, t->year, { t } });
+    }
+
+    return serializeAlbumAccum(albumAccum, /*markFirstActive=*/false, /*preserveOrder=*/true);
 }
 
 // ── buildLibraryTree ──────────────────────────────────────────────────────

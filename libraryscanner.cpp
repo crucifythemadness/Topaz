@@ -2,10 +2,12 @@
 #include "librarycache.h"
 #include "ratingcache.h"
 #include "tagreader.h"
+#include "volumepath.h"
 
 #include <QDir>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
+#include <QStorageInfo>
 #include <QThread>
 #include <QThreadPool>
 #include <QTimer>
@@ -199,13 +201,32 @@ void LibraryScanner::performScan(QStringList genres, QVariantList folders,
     //    folders. A cached entry whose path never shows up here (deleted, or
     //    its folder removed from configuration) is simply never re-added to
     //    the result below — that's the deletion-detection mechanism.
+    //
+    //    Each folder's path is canonicalized via VolumePath::resolve() before
+    //    walking it — on Windows, a configured folder path can have a
+    //    non-canonical drive-letter case (e.g. "d:/Music") that still
+    //    resolves to the right files (NTFS is case-insensitive), but every
+    //    discovered TrackInfo::filePath would then inherit that same
+    //    non-canonical case, while VolumePath::resolve()/quickPath()
+    //    elsewhere (cache reload, playlist load) always reconstruct the
+    //    canonical, QStorageInfo-reported case. That mismatch breaks any
+    //    exact-string filePath comparison — e.g. LibraryModel
+    //    ::buildStandaloneTrackCards()'s cover lookup, and the
+    //    existingModified/existingCacheMap lookups just below, silently
+    //    forcing a full tag re-read of the whole folder on every scan.
+    //    Canonicalizing once per folder (not per file) keeps this cheap.
+    const QList<QStorageInfo> mountedVolumes = QStorageInfo::mountedVolumes();
+
     QList<QFileInfo> discovered;
     QStringList rootDirs;
     for (const QVariant &v : std::as_const(folders)) {
         if (m_cancelRequested.load(std::memory_order_relaxed)) return;
         const QVariantMap m    = v.toMap();
-        const QString     path = m[QStringLiteral("path")].toString();
+        QString           path = m[QStringLiteral("path")].toString();
         if (path.isEmpty()) continue;
+        const QString canonical = VolumePath::fromAbsolutePath(path).resolve(mountedVolumes);
+        if (!canonical.isEmpty())
+            path = canonical;
         rootDirs.append(path);
         const bool recursive = m[QStringLiteral("includeSubfolders")].toBool();
         discovered.append(discoverAudioFiles(path, recursive));

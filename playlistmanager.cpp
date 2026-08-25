@@ -140,6 +140,28 @@ bool PlaylistManager::playlistExists(const QString &name) const
                          + trimmed + QStringLiteral(".xml"));
 }
 
+QVariantList PlaylistManager::listPlaylists() const
+{
+    const QFileInfoList files = QDir(playlistDirectory())
+        .entryInfoList(QStringList{QStringLiteral("*.xml")}, QDir::Files);
+
+    QVariantList result;
+    result.reserve(files.size());
+    for (const QFileInfo &fi : files) {
+        QVariantMap m;
+        m[QStringLiteral("fileName")]    = fi.fileName();
+        m[QStringLiteral("displayName")] = fi.completeBaseName();
+        result.append(m);
+    }
+
+    std::sort(result.begin(), result.end(), [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value(QStringLiteral("displayName")).toString()
+                   .compare(b.toMap().value(QStringLiteral("displayName")).toString(),
+                            Qt::CaseInsensitive) < 0;
+    });
+    return result;
+}
+
 // ── Create ────────────────────────────────────────────────────────────────
 
 QString PlaylistManager::createPlaylist(const QString &name,

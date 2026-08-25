@@ -245,7 +245,24 @@ User clicks an album row in `LibraryTree`:
    semantics, so both are now thin wrappers around one implementation):
    a. **Discover** — recursively walks each configured folder (respecting
       `includeSubfolders`), listing every `*.mp3`/`*.flac`/`*.opus` file
-      currently on disk. Pure filesystem listing, no tag reads.
+      currently on disk. Pure filesystem listing, no tag reads. Each
+      folder's configured path is first canonicalized via
+      `VolumePath::fromAbsolutePath(path).resolve(mountedVolumes)`
+      (`libraryscanner.cpp`, `volumepath.h/cpp`) — once per folder, not per
+      file — so every discovered `TrackInfo::filePath` is byte-identical to
+      however `VolumePath::resolve()`/`quickPath()` reconstruct the same
+      file's path elsewhere (cache reload, playlist load). Without this, a
+      folder configured with a non-canonical drive-letter case (e.g.
+      `d:/Music` — still resolves fine, since NTFS is case-insensitive)
+      would produce `TrackInfo::filePath`s that silently fail every
+      exact-string comparison against the canonical form: this folder's
+      files would never match the existing cache in step 4b below (forcing
+      a full tag re-read on every scan) and would never match a playlist
+      track's resolved path in `LibraryModel::buildStandaloneTrackCards()`'s
+      cover lookup (see UC-22), showing no cover despite being in the
+      library. Falls back to the raw configured path unchanged if the
+      volume can't currently be resolved (e.g. unmounted) — same as before
+      this fix.
    b. **Classify** — for each discovered file, compares its `lastModified`
       against the existing cache: unchanged files reuse their cached
       `TrackInfo` verbatim (no tag read at all); new/changed files are queued.
@@ -391,7 +408,7 @@ Topaz module
 ├── LibraryModel        C++ QML_ELEMENT — QAbstractListModel + scanner orchestration
 │                         property AppConfig appConfig
 │                         Q_INVOKABLE: loadCacheAndStartStatCheck(), startFullScan()
-│                         Q_INVOKABLE queries: genres(), artistsForGenre(), albumsForArtist(), filteredAlbums(), buildLibraryTree(), searchLibrary()  — see UC-21
+│                         Q_INVOKABLE queries: genres(), artistsForGenre(), albumsForArtist(), filteredAlbums(), buildLibraryTree(), searchLibrary()  — see UC-21; buildStandaloneTrackCards()  — see UC-22
 ├── LibraryData.qml     shared state model — genre toggle, selection, tree builder
 │                         property AppConfig appConfig
 │                         property LibraryModel libraryModel
@@ -402,8 +419,13 @@ Topaz module
 │                         property var activeGenreNames  (one-way bound from LibraryData.activeGenreNames by Main.qml)
 │                         property string query, mode ("all"/"artists"/"albums"/"tracks"), property bool considerGenre, property bool matchWholeWord, property var results
 │                         property real resultScrollY  (SearchResultBrowser's ListView.contentY, persisted here so it survives the Loader swap, see UC-21)
-├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, SearchData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, AudioVisualizerController, SetupDialog, NewPlaylistDialog
-│                         property string activeTab ("library"/"playlists"/"search")  — drives TopBar's tab highlighting and which components the SplitView's first two Loaders load, see UC-21
+├── PlaylistsData.qml   independent playlists-tab state model — see UC-22 (deliberately not coupled to LibraryData/SearchData beyond one read-only property)
+│                         property PlaylistManager playlistManager, property LibraryModel libraryModel
+│                         property var engine  (one-way ref to PlaybackEngine, read-only — used only to recognize the playlist currently active in the queue)
+│                         property var playlists, property string selectedFileName/selectedDisplayName, property var albums, property var selectedRawTracks
+│                         property real resultScrollY  (PlaylistViewer's ListView.contentY, persisted here so it survives the Loader swap, see UC-22)
+├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, SearchData, PlaylistsData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, AudioVisualizerController, SetupDialog, NewPlaylistDialog
+│                         property string activeTab ("library"/"playlists"/"search")  — drives TopBar's tab highlighting and which components the SplitView's first two Loaders load, see UC-21/UC-22
 │                         property bool bigCoverPaneOpen  (toggled by NowPlaying.onBigCoverRequested / BigCoverWindow.onCloseRequested)
 │                         Loader { active: bigCoverPaneOpen; sourceComponent: BigCoverWindow {...} }  — see "Detachable panes" below
 │                         property bool tagInfoPaneOpen  (toggled by BottomBar.onTagInfoToggleRequested / TagInfoWindow.onCloseRequested)
@@ -412,10 +434,11 @@ Topaz module
 │                         Loader { active: audioVisualizerPaneOpen; sourceComponent: AudioVisualizerWindow {...} }  — see UC-19
 │                         property bool milkdropPaneOpen  (toggled by BottomBar.onMilkdropToggleRequested / MilkdropWindow.onCloseRequested)
 │                         Loader { active: milkdropPaneOpen; sourceComponent: MilkdropWindow {...} }  — see UC-20
-│                         SplitView slot 1: Loader { sourceComponent: activeTab === "search" ? SearchPanel : LibraryTree }  — see UC-21
-│                         SplitView slot 2: Loader { sourceComponent: activeTab === "search" ? SearchResultBrowser : AlbumBrowser }  — see UC-21
+│                         SplitView slot 1: Loader { sourceComponent: activeTab === "search" ? SearchPanel : activeTab === "playlists" ? PlaylistsPanel : LibraryTree }  — see UC-21/UC-22
+│                         SplitView slot 2: Loader { sourceComponent: activeTab === "search" ? SearchResultBrowser : activeTab === "playlists" ? PlaylistViewer : AlbumBrowser }  — see UC-21/UC-22
 ├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY | AUDIO VISUALIZER | MILKDROP, see UC-15 / UC-14 / UC-19 / UC-20)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
+│                         signal playlistCreated()  ← emitted on success; Main.qml calls playlistsData.refreshPlaylists() so the PLAYLISTS tab stays live even while already active, see UC-22
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
 ├── FloatingPane.qml    Reusable base Window for detachable panes (frameless, movable, resizable, right-click-to-close) — see "Detachable panes" below
 ├── BigCoverWindow.qml  FloatingPane specialization: shows only the current track's cover art
@@ -424,7 +447,7 @@ Topaz module
 ├── MilkdropWindow.qml  FloatingPane specialization: hosts a MilkdropView (C++ QQuickItem, owns the projectM render pipeline directly) — see UC-20
 ├── TopBar.qml          Header (logo | navigation tabs | loudspeaker icon + gear icon + avatar)  height 64 px
 │                         property var systemVolume  (bound to SystemVolumeController; drives the OS-Volume flyout, see below)
-│                         property string activeTab ("library"/"playlists"/"search", bound from Main.qml)  — drives which of the 3 tabs is highlighted; a Repeater-driven Row (same array-model convention as BottomBar), see UC-21
+│                         property string activeTab ("library"/"playlists"/"search", bound from Main.qml)  — drives which of the 3 tabs is highlighted; a Repeater-driven Row (same array-model convention as BottomBar), see UC-21/UC-22
 │                         signal librarySelected() / playlistsSelected() / searchSelected()  ← tab click; "dumb component, owner decides" — Main.qml sets activeTab in response
 │                         signal settingsRequested()  ← gear icon click
 │                         Loudspeaker icon (🔊, leftmost of the three): click opens a non-modal Popup (~8cm/300px-wide
@@ -447,8 +470,10 @@ Topaz module
 ├── GenreBar.qml        3 × 10 genre toggle grid  (reads lib.genreModel, calls lib.toggleGenre)
 ├── LibraryTree.qml     Left sidebar  default width 286 px, user-resizable  (flat virtualised ListView; flatRows JS array; no nested Repeaters)
 ├── SearchPanel.qml     Replaces LibraryTree in the same SplitView slot when SEARCH is active — see UC-21 (independent of LibraryData; property SearchData searchData)
+├── PlaylistsPanel.qml  Replaces LibraryTree/SearchPanel in the same SplitView slot when PLAYLISTS is active — see UC-22 (independent of LibraryData/SearchData; property PlaylistsData playlistsData; playlist row disabled when active in queue)
 ├── AlbumBrowser.qml    Center album list  flex-grow (absorbs all surplus width from window resize or panel drag)  (calls lib.filteredAlbums() via Qt.callLater; property autoPlay forwarded to each AlbumCard, see UC-16)
 ├── SearchResultBrowser.qml  Replaces AlbumBrowser in the same SplitView slot when SEARCH is active — see UC-21 (property SearchData searchData, property var engine/autoPlay forwarded to AlbumCard, same as AlbumBrowser)
+├── PlaylistViewer.qml  Replaces AlbumBrowser/SearchResultBrowser in the same SplitView slot when PLAYLISTS is active — see UC-22 (property PlaylistsData playlistsData, property var engine/autoPlay forwarded to AlbumCard; header shows a compact LOAD button instead of a title label)
 ├── AlbumCard.qml       Single album card delegate (cover + year label + track listing; single-track drag & drop to queue; no selection; no context menus)
 │                         property var engine  (optional; used for double-click add-to-queue and drag cursor override)
 │                         property var autoPlay  (optional; gates double-click add via autoPlay.manualQueueEditingAllowed, see UC-16)
@@ -493,7 +518,7 @@ work), not just with track count.
 | `LibraryCache` | `librarycache.h/cpp` | Atomic read/write of `Topaz.library.json` |
 | `LibraryScanner` | `libraryscanner.h/cpp` | Worker: directory walk, parallel tag-reading (`QtConcurrent`/`QThreadPool`), genre filter, QFileSystemWatcher |
 | `LibraryModel` | `librarymodel.h/cpp` | QAbstractListModel + Q_INVOKABLE query helpers exposed to QML |
-| `PlaylistManager` | `playlistmanager.h/cpp` | XSPF playlist file creation; path-portability helpers |
+| `PlaylistManager` | `playlistmanager.h/cpp` | XSPF playlist file creation; path-portability helpers; `listPlaylists()` for the PLAYLISTS tab (see UC-22) |
 | `SystemVolumeController` | `systemvolumecontroller.h/cpp` | Windows OS master-volume control via Core Audio COM |
 
 ### SystemVolumeController — Windows OS master volume
@@ -670,6 +695,7 @@ current track changes (see `PlaybackEngine::currentLargeCoverSource`).
 | `buildLibraryTree(activeGenres)` | **Single-pass** tree builder: returns `[ { genre, artists: [ { name, albums: [{title}] } ] } ]` for `LibraryData._rebuildTree()`. One O(N_tracks) scan replaces the former N_genres + N_artists separate full-list scans. |
 | `coverThumbForAlbum(album, albumArtist)` | Base64 thumbnail for an album |
 | `searchLibrary(query, mode, activeGenres, considerGenre, matchWholeWord)` | Substring search across `albumArtist`/`album`/`title` — see UC-21. `matchWholeWord=true` requires the match to be bounded by non-alphanumeric characters (or field start/end) via a plain-`QString` `matchesWholeWord()` helper, not `QRegularExpression`; `false` (default) uses ordinary substring `contains()`, chosen once per call via a small lambda rather than branching per field. `mode` is `"all"` \| `"artists"` \| `"albums"` \| `"tracks"` (unrecognized values behave as `"all"`). **Single O(N_tracks) pass, all modes** — `albumArtist`/`album` are constant across every track in their group (the same invariant `filteredAlbums()`'s grouping key relies on), so a match on either field for one track is guaranteed to match every sibling track in that album too; no second "find matches, then rescan for siblings" pass is needed. A title-only match is inherently per-track already, which is exactly the "just this track, not its album siblings" behavior `"tracks"` mode needs. `considerGenre=false` ignores `activeGenres` entirely; `considerGenre=true` with an empty `activeGenres` returns no results (mirrors `filteredAlbums()`'s equivalent short-circuit). Empty/whitespace-only `query` returns no results. Shares its post-filter grouping/sort/serialize tail with `filteredAlbums()` via a private `serializeAlbumAccum()` helper (an anonymous-namespace `AlbumAccum` struct, extracted from the two functions' ~60 lines of previously-duplicated logic) — same `QVariantList` shape as `filteredAlbums()`, except `isActive` is always `false` (no search-result card is naturally "selected"). **Cover fix-up**: since `"tracks"`-mode (and `"all"`-mode title-only) matches only include the matching track(s), not the rest of the album, a second pass over `m_tracks` fills in any still-missing album cover from any track carrying one (skipped entirely if every matched album already has a cover) — otherwise a track whose own tag lacks embedded art would show no cover even though a sibling track has one. `filteredAlbums()`/`buildLibraryTree()` never need this since they always include an album's full track list already. |
+| `buildStandaloneTrackCards(tracks)` | Converts an arbitrary raw track list (the shape `PlaylistManager::loadPlaylist()` returns) into one standalone, `AlbumCard`-shaped entry **per track** — no grouping by album, unlike `filteredAlbums()`/`searchLibrary()` — see UC-22. Builds a `filePath → TrackInfo*` lookup over `m_tracks` once (O(N_tracks)) so any track still present in the scanned library reuses its own tag data at no extra I/O cost; a track no longer in the scan is still rendered, synthesized from the input map's own fields. Cover art is resolved per track via `coverThumbForAlbum(album, albumArtist)` whenever the matched/synthesized track's own `coverThumb` is empty — the common case, since `coverThumb` is only populated on one representative track per album in the whole scanned library (see UC-05) — so every track of an album shows a cover regardless of which one happens to be that representative; only an album with no cover anywhere in the library renders without one. `isActive` is always `false`. Calls `serializeAlbumAccum(albumAccum, false, /*preserveOrder=*/true)` — cards are emitted in the playlist's own track order rather than alphabetically re-sorted. |
 | `libraryRefreshed()` signal | Emitted after cache load or scan complete |
 
 ### Library cache format — `Topaz.library.json`
@@ -1266,6 +1292,7 @@ configurable via the app JSON config) will be introduced at that point.
       +buildLibraryTree(activeGenres) QVariantList
       +searchLibrary(query, mode, activeGenres, considerGenre, matchWholeWord) QVariantList
       +autoPlayCandidatePool(activeGenres, considerGenre, considerRating, minimumRating) QVariantList
+      +buildStandaloneTrackCards(tracks) QVariantList
       ~libraryRefreshed()
     }
 
@@ -1277,6 +1304,21 @@ configurable via the app JSON config) will be introduced at that point.
       +considerGenre bool
       +matchWholeWord bool
       +results QVariantList
+    }
+
+    class PlaylistsData {
+      +playlistManager PlaylistManager
+      +libraryModel LibraryModel
+      +engine PlaybackEngine
+      +playlists QVariantList
+      +selectedFileName string
+      +selectedDisplayName string
+      +albums QVariantList
+      +selectedRawTracks QVariantList
+      +resultScrollY real
+      +refreshPlaylists()
+      +selectPlaylist(fileName)
+      +clearSelection()
     }
 
     class AppConfig {
@@ -1358,6 +1400,8 @@ configurable via the app JSON config) will be introduced at that point.
     AutoPlayController --> LibraryModel   : calls autoPlayCandidatePool() (see UC-16)
     AutoPlayController --> AppConfig      : reads all autoPlay* settings live (see UC-16)
     SearchData --> LibraryModel : calls searchLibrary() (see UC-21)
+    PlaylistsData --> LibraryModel : calls buildStandaloneTrackCards() (see UC-22)
+    PlaylistsData --> PlaybackEngine : reads activePlaylistName (read-only, see UC-22)
 ```
 
 ---
@@ -1777,7 +1821,11 @@ every mounted volume for the stored relative path if the named volume isn't foun
    b. Calls `engine.trackList()` to obtain the current queue (empty list when queue is empty).
    c. Calls `playlistManager.createPlaylist(name, tracks)`.
 7. `PlaylistManager` writes the XSPF file to `<AppConfigLocation>/playlists/<name>.xml`.
-8. Dialog closes automatically.
+8. `NewPlaylistDialog` emits `playlistCreated()`; `Main.qml` handles it with
+   `playlistsData.refreshPlaylists()` so the PLAYLISTS tab's list reflects
+   the new playlist immediately, even if it's already the active tab (see
+   UC-22).
+9. Dialog closes automatically.
 
 ### Alternate: Name already exists
 
@@ -1861,6 +1909,18 @@ If no tracks resolve successfully, `result.tracks` is empty.  `addTracks` is not
 ### Alternate: Partial tracks missing
 
 Only the found tracks are added; the missing ones are silently omitted.  The loaded playlist file on disk is unchanged.
+
+### Alternate: Load from PlaylistViewer (PLAYLISTS tab)
+
+`PlaylistViewer`'s own **LOAD** button (see UC-22) triggers the identical
+effect — clear the active playlist first if one exists, `addTracks()`,
+`setActivePlaylistName()` — but skips steps 3-7 entirely: the file was
+already selected via `PlaylistsPanel`, and `PlaylistManager.loadPlaylist()`
+was already called once (to build the preview) by
+`PlaylistsData.selectPlaylist()`. The already-parsed track list is reused
+from `PlaylistsData.selectedRawTracks` rather than re-reading and
+re-parsing the XSPF file and re-running `TagReader::read()` on every track
+a second time.
 
 ### Design decisions
 
@@ -3649,11 +3709,7 @@ playback pauses mid-fade.
   (`selectedGenre`/`selectedArtist`/`selectedAlbum`) and never call
   `LibraryData`'s tree-building functions. Switching tabs cannot leave one
   side's state corrupted by the other.
-- **PLAYLISTS tab**: clicking it sets `activeTab = "playlists"` (so it
-  visually highlights — `TopBar`'s active/inactive styling keys off
-  `activeTab` directly) but has no dedicated panel content yet — the
-  `SplitView` `Loader`s' swap condition is exactly `activeTab === "search"`,
-  so PLAYLISTS shows the same panels as LIBRARY today.
+- **PLAYLISTS tab**: has its own dedicated panel content — see UC-22.
 - **Loader-based panel swap, not `visible` toggling**: a `Loader` destroys/
   recreates its content on swap, so `LibraryTree`'s local transient UI state
   (expanded-artist set, its own scroll position) resets when the user
@@ -3681,4 +3737,154 @@ playback pauses mid-fade.
   and expand-state remain unpreserved (see previous point) since those stay
   genuinely tied to the destroyed/recreated view instance itself, with no
   natural home on `LibraryData` the way a single scroll float has.
+
+---
+
+## UC-22 Browse Playlists (PLAYLISTS Tab)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | User browses saved XSPF playlists and previews or loads one into the queue, independently of LIBRARY/SEARCH. |
+| **Actor** | User |
+| **Precondition** | Application is running (playlists don't require a library scan). |
+| **Trigger** | User clicks the "PLAYLISTS" tab in `TopBar`. |
+
+### Normal Flow
+
+1. User clicks "PLAYLISTS". `TopBar` emits `playlistsSelected()` →
+   `Main.qml` sets `activeTab = "playlists"`. The two `Loader`s in the
+   `SplitView`'s first two slots swap `LibraryTree`/`AlbumBrowser` (or
+   `SearchPanel`/`SearchResultBrowser`) for `PlaylistsPanel.qml`/
+   `PlaylistViewer.qml`; `PlaybackQueue` and `NowPlaying` are untouched.
+2. `PlaylistsPanel`'s `onPlaylistsDataChanged` (fired once by `Main.qml`'s
+   `Loader.onLoaded` right after creation — not `Component.onCompleted`,
+   see Design notes) calls `PlaylistsData.refreshPlaylists()`, which calls
+   `PlaylistManager.listPlaylists()` — a `QDir` listing of `*.xml` files in
+   `playlistDirectory()`, sorted by display name ascending
+   (case-insensitive).
+3. `PlaylistsPanel` renders one row per playlist (styled like
+   `LibraryTree`'s genre row: bullet + name, `Theme.fontFamilyBody`/
+   `labelLg`/`Font.Bold`, `Theme.s10` background when selected).
+4. User clicks a playlist row. `PlaylistsData.selectPlaylist(fileName)`
+   calls `PlaylistManager.loadPlaylist(path)` (parses the XSPF, resolves
+   each track's absolute path via `VolumePath`, reads bitrate/duration/tag
+   fallbacks — same as UC-10 step 7) then
+   `LibraryModel.buildStandaloneTrackCards(result.tracks)` to convert the
+   raw track list into one standalone, `AlbumCard`-shaped entry **per
+   track** — deliberately **not** grouped by album, unlike
+   `filteredAlbums()`/`searchLibrary()`, so the playlist's actual
+   track-by-track composition stays visible even when several tracks from
+   the same album are adjacent. Both the raw tracks
+   (`PlaylistsData.selectedRawTracks`) and the per-track cards
+   (`PlaylistsData.albums`) are cached.
+5. `PlaylistViewer`'s `ListView` is bound to `playlistsData.albums`,
+   rendering each entry as its own `AlbumCard` (each with its own cover,
+   album title, artist, and single track row) — identical rendering path
+   to `SearchResultBrowser` (including the `albumGenre` → "Genre | Year"
+   prop), so drag-to-queue and double-click-to-queue work unmodified (see
+   UC-06). The header shows the track count and playlist name on the
+   right; the left side (where `AlbumBrowser`/`SearchResultBrowser` show
+   "ALBUM BROWSER"/"SEARCH RESULT") instead shows a compact **LOAD**
+   button (see step 6).
+6. User clicks **LOAD**. Identical effect to UC-10's LOAD button, except
+   no `FileDialog` is shown (the file was already picked in step 4) and no
+   `PlaylistManager.loadPlaylist()` re-parse happens — the already-cached
+   `PlaylistsData.selectedRawTracks` is handed straight to
+   `PlaybackEngine.addTracks()`, followed by
+   `engine.setActivePlaylistName(selectedFileName)`. If a playlist was
+   already active, its queue is cleared first (`autoPlay
+   .clearQueueAndHistory()`/`engine.clearQueue()`), exactly as in UC-10.
+   `PlaylistsData.clearSelection()` is then called, returning
+   `PlaylistViewer` to its empty state.
+
+### Alternate: Playlist already active in the queue
+
+A playlist row whose `fileName` matches `engine.activePlaylistName` (the
+playlist currently loaded into the queue) is rendered dimmed with an
+"(IN QUEUE)" label, and its `MouseArea` is `enabled: false` — it cannot be
+selected for preview. Reselecting it would only clear and reload the exact
+same queue, so the row is excluded entirely rather than allowing a no-op
+LOAD. This is a plain reactive binding on `engine.activePlaylistName`
+(`NOTIFY`-backed `Q_PROPERTY`), so the row's state updates immediately if
+the active playlist changes elsewhere (e.g. REMOVE/LOAD in `NowPlaying`)
+while PLAYLISTS is the active tab.
+
+### Alternate: Track missing a cover in the scanned library
+
+If a playlist track's file is no longer part of the current library scan
+(e.g. its folder was unmonitored since the playlist was created),
+`buildStandaloneTrackCards()` still renders it correctly — just without a
+cover — by synthesizing a `TrackInfo` from the XSPF-derived fields (see
+Design notes).
+
+### Design notes
+
+- **Independence from LIBRARY/SEARCH**: `PlaylistsData`/`PlaylistsPanel`/
+  `PlaylistViewer` never read or write `LibraryData`/`SearchData` state.
+  The one deliberate exception is a read-only reference to `PlaybackEngine`
+  (`PlaylistsData.engine`), needed solely to recognize the active-in-queue
+  playlist (previous section) — the same "one intentional read-only
+  cross-reference" pattern `SearchData.activeGenreNames` already
+  established for LIBRARY/SEARCH.
+- **No album grouping — each track is its own card**: unlike
+  `filteredAlbums()`/`searchLibrary()`, `buildStandaloneTrackCards()` never
+  merges tracks sharing `(genre|albumArtist|album)` into one accumulator —
+  every input track becomes its own one-track `AlbumAccum`. This is
+  deliberate: a playlist's whole point is showing exactly how the user
+  composed it, so three tracks off the same album appearing back-to-back
+  (or scattered through the playlist) each render as their own card with
+  their own cover, rather than collapsing into a single browsing-style
+  album rollup.
+- **Playlist's own order is preserved, not alphabetically re-sorted**:
+  `buildStandaloneTrackCards()` calls `serializeAlbumAccum(albumAccum,
+  false, /*preserveOrder=*/true)`, a parameter that skips both of
+  `serializeAlbumAccum()`'s internal sorts. Cards are emitted in the exact
+  order their tracks appear in the playlist — matching the user's
+  expectation that a playlist plays back in the sequence they built it in,
+  not alphabetical browsing order. (The per-card track sort the flag also
+  skips is moot here since every card holds exactly one track.)
+- **Per-track cover fallback via `coverThumbForAlbum()`**:
+  `PlaylistManager.loadPlaylist()` deliberately skips cover thumbnail
+  generation for load speed (see UC-10), and `TrackInfo::coverThumb`
+  itself is only populated on one representative track per `(genre,
+  albumArtist, album)` triple in the whole scanned library (see UC-05 step
+  4d) — every other track of that album stores an empty string. A naive
+  `filePath` match alone would therefore only show a cover on whichever
+  literal track happens to be that representative, leaving every other
+  track of the same album blank even when the playlist has several of
+  them. `buildStandaloneTrackCards()` falls back to
+  `coverThumbForAlbum(album, albumArtist)` (`librarymodel.cpp:606-616`)
+  whenever a track's own `coverThumb` is empty, so every track of an album
+  shows its cover regardless of which literal file the scanner chose as
+  representative. `coverThumbForAlbum()` is an O(N_tracks) linear scan —
+  too slow to call once per track across the whole library in general, but
+  negligible for a playlist, which is capped in practice at a few hundred
+  tracks (200 tracks is already 12+ hours of continuous playback) — so a
+  dedicated per-call hash (the pattern `searchLibrary()`'s track-cover
+  fix-up pass uses at whole-library scale) isn't warranted here.
+- **`onPlaylistsDataChanged`, not `Component.onCompleted`**: `Main.qml`'s
+  `Loader.onLoaded` assigns `item.playlistsData` imperatively *after* the
+  loaded item (and its own `Component.onCompleted`) has already run, so a
+  `Component.onCompleted` handler in `PlaylistsPanel.qml` would see
+  `playlistsData` still `null`. Using `onPlaylistsDataChanged` instead
+  (the same fix `AlbumBrowser.onLibChanged`/
+  `SearchResultBrowser.onSearchDataChanged` already apply) ensures
+  `refreshPlaylists()` runs once the property is actually set, so the
+  playlist listing is always fresh whenever the user switches *into*
+  PLAYLISTS from another tab.
+- **Live refresh while already on PLAYLISTS**: the above alone doesn't
+  cover creating a playlist via `NowPlaying`'s **+ NEW** button while
+  PLAYLISTS is already the active tab, since that doesn't destroy/recreate
+  `PlaylistsPanel`. `NewPlaylistDialog` (see UC-08) emits
+  `playlistCreated()` on success; `Main.qml` handles it with
+  `onPlaylistCreated: playlistsData.refreshPlaylists()`. `PlaylistsData` is
+  a plain always-alive `Item`, not `Loader`-managed, so this is safe to
+  call regardless of the active tab, and `PlaylistsPanel`'s `ListView`
+  (bound directly to `playlistsData.playlists`) updates immediately if it
+  happens to be visible.
+- **Scroll position preserved across the `Loader` swap**: identical
+  mechanism to `AlbumBrowser`/`SearchResultBrowser` (previous section) —
+  `PlaylistViewer`'s `ListView.contentY` mirrors into
+  `PlaylistsData.resultScrollY` and is restored via `Qt.callLater` on
+  `onPlaylistsDataChanged`.
 

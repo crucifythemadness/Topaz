@@ -19,6 +19,12 @@ Popup {
     required property var playlistManager
     required property var engine
 
+    // Emitted after a playlist is successfully created -- lets Main.qml
+    // refresh PlaylistsData even while PLAYLISTS is already the active tab
+    // (PlaylistsPanel otherwise only refreshes on Loader (re)creation, see
+    // UC-22).
+    signal playlistCreated()
+
     anchors.centerIn: Overlay.overlay
     width:  520
     height: 280
@@ -232,6 +238,7 @@ Popup {
         } else {
             if (root.engine)
                 root.engine.setActivePlaylistName(name + ".xml")
+            root.playlistCreated()
             root.close()
         }
     }
