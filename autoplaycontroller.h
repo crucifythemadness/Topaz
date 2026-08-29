@@ -105,6 +105,11 @@ public:
     // with clearing the queue itself (only reachable when queueClearAllowed).
     Q_INVOKABLE void clearQueueAndHistory();
 
+    // Just the play-history half of clearQueueAndHistory(), without the
+    // forced engine->clearQueue() -- for the playlist-load crossfade path
+    // (see UC-23), which must not stop the very playback it's fading.
+    Q_INVOKABLE void clearHistory();
+
 signals:
     void engineChanged();
     void libraryModelChanged();

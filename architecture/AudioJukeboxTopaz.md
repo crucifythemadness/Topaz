@@ -1376,6 +1376,7 @@ configurable via the app JSON config) will be introduced at that point.
       +trackNavigationAllowed bool
       +toggle()
       +clearQueueAndHistory()
+      +clearHistory()
       ~activeChanged()
       ~manualQueueEditingAllowedChanged()
       ~queueClearAllowedChanged()
@@ -1653,11 +1654,13 @@ explicitly. See UC-15 for the full crossfade flow.
 | `moveDown(index)` | invokable | Swap track with successor (not allowed on playing track). Calls `playlistManager.rewritePlaylist()` when a playlist is active and not locked. |
 | `moveTrack(from, to)` | invokable | Move any non-playing track from one queue index to another in a single step. Updates `m_currentIndex` if the currently playing track falls in the shifted range. Uses `QAbstractItemModel::beginMoveRows` / `endMoveRows` so the bound `ListView` animates the reorder automatically. Calls `playlistManager.rewritePlaylist()` when a playlist is active and not locked. |
 | `clearQueue()` | invokable | Stop playback, empty the queue, clear `activePlaylistName`, and reset `playlistLocked` to `false`. |
+| `loadPlaylistTracks(tracks)` | invokable | Replaces the entire queue with `tracks` — used exclusively by the "load a playlist" flows (`NowPlaying`/`PlaylistViewer` LOAD buttons). Behaves exactly like `clearQueue()`+`addTracks(tracks)` unless `crossfadeEnabled` is on and a track is currently playing (and both it and the new first track exceed `crossfadeSeconds`), in which case it crossfades directly into the new playlist's first track instead of a hard stop-then-restart — see UC-23. |
 | `setActivePlaylistName(name)` | invokable | Set the active playlist file name (e.g. `"GothicRock01.xml"`). Resets `playlistLocked` to `false`. Called from `NewPlaylistDialog` after successful creation, and from the load-playlist flow. |
 | `setPlaylistLocked(locked)` | invokable | Set the lock state. When unlocked (`false`), immediately calls `playlistManager.rewritePlaylist()` so the file reflects any changes made while locked. |
 | `setCurrentRating(rating)` | invokable | Set the current track's rating (1-10; no-op otherwise or if no track is loaded). Updates the queue entry and calls `RatingCache::setRating(genre, ratingId, rating)` to persist immediately. |
 | `trackList()` | invokable | Return all queued tracks as `QVariantList` of maps (`filePath`, `title`, `artist`, `albumArtist`, `album`, `trackNumber`, `durationMs`) — used by `PlaylistManager.createPlaylist()` |
-| `setDragCopyCursor()` | invokable | Calls `QGuiApplication::setOverrideCursor(Qt::DragCopyCursor)` — sets the system-wide drag cursor so no child `MouseArea` can override it. Called by `AlbumCard` the moment a drag gesture starts (> 8 px threshold). |
+| `beginDragCursor()` | invokable | Pushes a system-wide `Qt::ForbiddenCursor` override via `QGuiApplication::setOverrideCursor()` — the default "not over a valid drop target" cursor for a drag gesture. Called by `AlbumCard` the moment a drag starts (> 8 px threshold). |
+| `setDragCursorAllowed(allowed)` | invokable | Changes the *shape* of the already-pushed override cursor between `Qt::DragCopyCursor` (`allowed=true`) and `Qt::ForbiddenCursor` (`allowed=false`) via `QGuiApplication::changeOverrideCursor()` — not a second push, so one `restoreOverrideCursor()` at drag end still correctly pops it. Called by `PlaybackQueue`'s `DropArea.onEntered`/`onExited`. |
 | `restoreOverrideCursor()` | invokable | Calls `QGuiApplication::restoreOverrideCursor()` — restores the cursor to its previous state. Called by `AlbumCard` on `onReleased` when a drag ends. |
 | `playAt(index)` | invokable | Load and play the track at given index |
 | `togglePlay()` | invokable | Toggle between play and pause |
@@ -1890,18 +1893,29 @@ This is valid XSPF and no special handling is required.
 
 ### Normal Flow
 
-1. User clicks **LOAD**.
-2. If `engine.activePlaylistName ≠ ""` (a playlist is currently active): `engine.clearQueue()` is called first — identical to the REMOVE use case.
-3. `loadPlaylistDialog.currentFolder` is set to `playlistManager.playlistDirectory()` (the folder where new playlists are saved).
-4. The native file-open dialog opens with title **"Select a XSPF Playlist"** and filter `*.xml`.
-5. User selects an `.xml` file and confirms.
-6. `loadPlaylistDialog.onAccepted` calls `playlistManager.loadPlaylist(selectedFile)`.
-7. `PlaylistManager.loadPlaylist()` parses the XSPF, then for each `<track>`:
+1. User clicks **LOAD**. `loadPlaylistDialog.currentFolder` is set to
+   `playlistManager.playlistDirectory()` (the folder where new playlists
+   are saved) and the dialog opens — nothing about the current queue is
+   touched yet (see Design decisions: this used to clear the queue right
+   here, before the file was even picked).
+2. The native file-open dialog opens with title **"Select a XSPF
+   Playlist"** and filter `*.xml`.
+3. User selects an `.xml` file and confirms.
+4. `loadPlaylistDialog.onAccepted` calls `playlistManager.loadPlaylist(selectedFile)`.
+5. `PlaylistManager.loadPlaylist()` parses the XSPF, then for each `<track>`:
    a. Builds a `VolumePath` from the entry's `<volume>`/`<location>` and calls `.resolve(mounted)` (`mounted` fetched once for the whole playlist) — tries the named volume's root first, then falls back to prepending every mounted volume's root to the relative path.
    b. If the resulting absolute path exists → included in the result.
    c. If not found on any volume → silently skipped.
-8. `engine.addTracks(result.tracks)` adds the found tracks to the queue.  Because the queue was empty, `PlaybackEngine` auto-plays the first track.
-9. `engine.setActivePlaylistName(result.fileName)` sets the display name in the `PlaybackQueue` header.
+6. `autoPlay.clearHistory()` resets AUTO PLAY's play-count history (if
+   bound), then `engine.loadPlaylistTracks(result.tracks)` **always**
+   replaces the queue — crossfading into it if eligible, or an instant
+   replace otherwise (see UC-23 for the full decision) — regardless of
+   whether a playlist was already active. (An earlier version of this step
+   only replaced when `engine.activePlaylistName ≠ ""`, falling back to a
+   silent `addTracks()` append otherwise — appending behind whatever was
+   already playing, with no effect on playback at all. Fixed: LOAD should
+   always mean "load this playlist now.")
+7. `engine.setActivePlaylistName(result.fileName)` sets the display name in the `PlaybackQueue` header.
 
 ### Alternate: All tracks missing
 
@@ -1914,19 +1928,30 @@ Only the found tracks are added; the missing ones are silently omitted.  The loa
 ### Alternate: Load from PlaylistViewer (PLAYLISTS tab)
 
 `PlaylistViewer`'s own **LOAD** button (see UC-22) triggers the identical
-effect — clear the active playlist first if one exists, `addTracks()`,
-`setActivePlaylistName()` — but skips steps 3-7 entirely: the file was
-already selected via `PlaylistsPanel`, and `PlaylistManager.loadPlaylist()`
-was already called once (to build the preview) by
-`PlaylistsData.selectPlaylist()`. The already-parsed track list is reused
-from `PlaylistsData.selectedRawTracks` rather than re-reading and
+effect — same step-6/7 branch (`loadPlaylistTracks()` if a playlist was
+already active, else `addTracks()`), `setActivePlaylistName()` — but skips
+steps 1-5 entirely: the file was already selected via `PlaylistsPanel`, and
+`PlaylistManager.loadPlaylist()` was already called once (to build the
+preview) by `PlaylistsData.selectPlaylist()`. The already-parsed track list
+is reused from `PlaylistsData.selectedRawTracks` rather than re-reading and
 re-parsing the XSPF file and re-running `TagReader::read()` on every track
 a second time.
+
+### Alternate: Crossfade into the new playlist
+
+See UC-23 for the full mechanism. In short: if `AppConfig.crossfadeEnabled`
+is on and a track is currently playing when step 6 runs,
+`engine.loadPlaylistTracks()` fades the currently-playing track directly
+into the new playlist's first track instead of stopping and restarting —
+otherwise (setting off, nothing playing, or either track too short for the
+configured crossfade length) it behaves exactly like the original
+`clearQueue()`+`addTracks()` sequence.
 
 ### Design decisions
 
 - **Path resolution via `QStorageInfo`**: probing only real mounted volumes (not all 26 drive letters) is both faster and more reliable, and is the same cross-platform API on Linux. `VolumePath::resolve()` first tries the volume named in `<volume>` (fast path), then falls back to prepending every mounted volume's root to the relative path format (e.g. `/Music/foo.flac`) in turn — the same fallback the code always used, now shared with `AppConfig` and `LibraryCache` via `volumepath.h` rather than being playlist-specific.
 - **TagReader call on load**: XSPF does not store bitrate or exact duration. During `loadPlaylist()`, `TagReader::read(path, false)` is called for each resolved file to retrieve the actual bitrate, duration, and any tag fields that were absent or empty in the XSPF. Cover thumbnail generation is skipped (`generateCoverThumb = false`) to keep loading fast; the `NowPlaying` panel loads the cover asynchronously from the audio file via `TagReader::readRawCover` when the track starts playing.
+- **Clearing/crossfading moved from the LOAD button's click to the file dialog's accept**: originally, clicking LOAD cleared the queue immediately (if a playlist was active), *before* the file dialog even opened — so canceling the dialog left the queue emptied for nothing. Introducing UC-23's crossfade required knowing the target tracks before deciding whether/how to replace the queue, which only made this pre-existing quirk impossible to keep — the decision now happens in `onAccepted`, once `result.tracks` is known, fixing the cancel case as a side effect rather than a deliberate behavior change.
 
 ---
 
@@ -3782,7 +3807,7 @@ playback pauses mid-fade.
 4. User clicks a playlist row. `PlaylistsData.selectPlaylist(fileName)`
    calls `PlaylistManager.loadPlaylist(path)` (parses the XSPF, resolves
    each track's absolute path via `VolumePath`, reads bitrate/duration/tag
-   fallbacks — same as UC-10 step 7) then
+   fallbacks — same as UC-10 step 5) then
    `LibraryModel.buildStandaloneTrackCards(result.tracks)` to convert the
    raw track list into one standalone, `AlbumCard`-shaped entry **per
    track** — deliberately **not** grouped by album, unlike
@@ -3804,12 +3829,11 @@ playback pauses mid-fade.
    no `FileDialog` is shown (the file was already picked in step 4) and no
    `PlaylistManager.loadPlaylist()` re-parse happens — the already-cached
    `PlaylistsData.selectedRawTracks` is handed straight to
-   `PlaybackEngine.addTracks()`, followed by
-   `engine.setActivePlaylistName(selectedFileName)`. If a playlist was
-   already active, its queue is cleared first (`autoPlay
-   .clearQueueAndHistory()`/`engine.clearQueue()`), exactly as in UC-10.
-   `PlaylistsData.clearSelection()` is then called, returning
-   `PlaylistViewer` to its empty state.
+   `PlaybackEngine.loadPlaylistTracks()`, which **always** replaces the
+   queue, crossfading into it if eligible (see UC-23), followed by
+   `engine.setActivePlaylistName(selectedFileName)` — exactly the same
+   step-6 flow UC-10 uses. `PlaylistsData.clearSelection()` is then called,
+   returning `PlaylistViewer` to its empty state.
 
 ### Alternate: Playlist already active in the queue
 
@@ -3901,4 +3925,97 @@ Design notes).
   `PlaylistViewer`'s `ListView.contentY` mirrors into
   `PlaylistsData.resultScrollY` and is restored via `Qt.callLater` on
   `onPlaylistsDataChanged`.
+
+---
+
+## UC-23 Crossfade Into a Loaded Playlist
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Loading a different playlist while a track is already playing fades out the current track and fades in the new playlist's first track, instead of a hard stop-then-restart. |
+| **Actor** | System (playback), gated by a setting the user controls |
+| **Precondition** | `AppConfig.crossfadeEnabled` is `true`; a track is currently playing; both the outgoing (live) and incoming (tag) track durations exceed `crossfadeSeconds`. |
+| **Trigger** | User clicks **LOAD** in `NowPlaying` or `PlaylistViewer` (UC-10/UC-22) while a track is playing. |
+
+### Normal Flow
+
+1. UC-10 step 6 / UC-22 step 6 always call `PlaybackEngine
+   .loadPlaylistTracks(tracks)` — never `clearQueue()`+`addTracks()`
+   directly from QML — regardless of whether a playlist was already
+   active. (An earlier version of this step only called
+   `loadPlaylistTracks()` when `activePlaylistName ≠ ""`, silently
+   appending via `addTracks()` otherwise — the bug that motivated this
+   fix, see UC-10's Normal Flow step 6 note.)
+2. `loadPlaylistTracks()` checks eligibility: `AppConfig.crossfadeEnabled()`
+   is on, `isPlaying()` is true, a track is current
+   (`m_currentIndex >= 0`), and — the same rule `onDeckPositionChanged()`
+   applies to the natural crossfade (UC-15) — both the active deck's live
+   `duration()` and the new first track's tag `durationMs` exceed
+   `crossfadeSeconds() * 1000`. If any of that fails, it falls straight
+   through to `clearQueue()`+`addTracks(tracks)` — today's original,
+   unmodified behavior.
+3. When eligible: captures `m_fadeOutDeck`/`m_fadeInDeck` (mirroring
+   `startCrossfade()`) and the outgoing track's file path
+   (`m_fadeOutFilePath`, since that track won't have a slot in the queue
+   once it's replaced), builds the *entire new queue* into
+   `m_pendingQueue` (not `m_queue` yet), loads the new first track onto the
+   standby deck at volume `0` and starts it playing, then starts the same
+   `m_fadeTimer`/`onFadeTick()` ramp the natural crossfade uses — with a
+   new `m_crossfadeReplacesQueue = true` flag and `m_fadeTargetIndex = 0`.
+4. At the fade's midpoint (`onFadeTick()`, `frac >= 0.5`, unchanged
+   trigger): the UI-facing deck alias swaps as usual, and — only because
+   `m_crossfadeReplacesQueue` is `true` — `m_queue` is replaced wholesale
+   with `m_pendingQueue` (`beginResetModel`/`endResetModel`,
+   `queueCountChanged()`) *before* the existing, unmodified
+   `switchCurrentIndexTo(m_fadeTargetIndex)` call, which now correctly
+   resolves index `0` in the *new* queue. `NowPlaying`/`PlaybackQueue`
+   update together at this instant, exactly like a natural crossfade's
+   midpoint.
+5. At fade completion (`frac >= 1.0`): the outgoing deck stops and its
+   volume resets, same as always; `trackPlayedToCompletion` fires for the
+   captured `m_fadeOutFilePath` (not a `m_queue` index lookup, since that
+   track is no longer in the queue) and the three new members reset so
+   they can never leak into a later, unrelated natural crossfade.
+
+### Alternate: Crossfade disabled or ineligible
+
+Falls back to `clearQueue()`+`addTracks(tracks)` — byte-identical to the
+original UC-10/UC-22 behavior. This covers: `crossfadeEnabled` off, nothing
+currently playing (paused or idle queue), or either the outgoing or
+incoming track being shorter than the configured crossfade length.
+
+### Alternate: Interrupted mid-fade
+
+Any queue-mutating method (`removeAt`, `moveUp`, `moveDown`, `moveTrack`,
+`clearQueue`) or `loadTrack()`/`seek()` calls `cancelCrossfade()` first, same
+as for a natural crossfade (UC-15) — now additionally resetting
+`m_crossfadeReplacesQueue`/`m_pendingQueue`/`m_fadeOutFilePath`. If canceled
+before the midpoint, the old queue and track are untouched and simply
+resume at full volume; if canceled after the midpoint, the new queue is
+already in place (the swap is synchronous, not gradual) and only the
+now-irrelevant outgoing deck gets stopped.
+
+### Design notes
+
+- **Why not extend `startCrossfade()` directly**: that function's whole
+  design assumes the outgoing and incoming tracks are adjacent indices in
+  one unchanged `m_queue` — true for a natural crossfade, false here (the
+  incoming track belongs to a queue that's about to replace the old one
+  entirely). Reusing the same timer/ramp/midpoint machinery via one
+  additive `if (m_crossfadeReplacesQueue)` branch in `onFadeTick()` (default
+  `false`, set only by `loadPlaylistTracks()`) avoids duplicating that
+  machinery while guaranteeing zero behavior change for the 100% of
+  crossfades that don't set the flag.
+- **AUTO PLAY is orthogonal**: the LOAD button is already fully disabled
+  during an AUTO PLAY session (`autoPlay.queueClearAllowed` is `!active`),
+  so this path only ever engages in MANUAL MODE. The one AUTO PLAY side
+  effect worth preserving — `clearQueueAndHistory()`'s
+  `m_playCounts.clear()` — can't reuse that method directly, since it also
+  unconditionally calls `engine.clearQueue()`, which would kill the very
+  playback being crossfaded. A new `AutoPlayController.clearHistory()`
+  provides just the history-clear half.
+- **Why the LOAD button's queue-clear moved from click to accept**: see
+  UC-10's Design decisions — crossfading needs the target tracks before it
+  can decide anything, which the old eager-clear-on-click structure made
+  impossible.
 

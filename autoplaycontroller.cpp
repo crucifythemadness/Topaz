@@ -139,6 +139,11 @@ void AutoPlayController::clearQueueAndHistory()
     if (m_engine) m_engine->clearQueue();
 }
 
+void AutoPlayController::clearHistory()
+{
+    m_playCounts.clear();
+}
+
 void AutoPlayController::start()
 {
     if (m_active || !m_engine || !m_appConfig || !m_libraryModel) return;

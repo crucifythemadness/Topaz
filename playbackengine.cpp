@@ -452,6 +452,64 @@ void PlaybackEngine::clearQueue()
     }
 }
 
+// See UC-23. Crossfades the currently-playing track directly into the first
+// track of `trackList` when eligible; otherwise behaves exactly like
+// clearQueue()+addTracks(trackList) (today's behavior, unchanged).
+void PlaybackEngine::loadPlaylistTracks(const QVariantList &trackList)
+{
+    if (trackList.isEmpty()) return;
+
+    const bool wantsCrossfade = m_appConfig && m_appConfig->crossfadeEnabled()
+                                 && isPlaying() && m_currentIndex >= 0;
+
+    TrackInfo firstNew;
+    if (wantsCrossfade)
+        firstNew = trackFromMap(trackList.first().toMap());
+
+    // Same "both tracks must exceed the fade window" rule onDeckPositionChanged()
+    // applies to the natural crossfade -- avoids a fade longer than the track itself.
+    const qint64 fadeMs = wantsCrossfade
+        ? qint64(m_appConfig->crossfadeSeconds() * 1000) : 0;
+    const bool eligible = wantsCrossfade
+        && m_player->duration() > fadeMs
+        && firstNew.duration    > fadeMs;
+
+    if (!eligible) {
+        clearQueue();
+        addTracks(trackList);
+        return;
+    }
+
+    cancelCrossfade();   // clean slate if a natural fade is already in flight
+
+    m_fadeOutDeck     = m_activeDeck;
+    m_fadeInDeck      = 1 - m_activeDeck;
+    m_fadeOutFilePath = m_queue.at(m_currentIndex).filePath;
+
+    m_pendingQueue.clear();
+    m_pendingQueue.reserve(trackList.size());
+    m_pendingQueue.append(firstNew);
+    for (int i = 1; i < trackList.size(); ++i)
+        m_pendingQueue.append(trackFromMap(trackList.at(i).toMap()));
+
+    m_players[m_fadeInDeck]->setSource(QUrl::fromLocalFile(firstNew.filePath));
+    m_audioOutputs[m_fadeInDeck]->setVolume(0.0f);
+    m_players[m_fadeInDeck]->play();
+
+    m_crossfading            = true;
+    m_crossfadeReplacesQueue = true;
+    m_fadeMidpointFired      = false;
+    m_fadeTargetIndex        = 0;   // new first track's index, once swapped in at the midpoint
+    m_fadeElapsedMs          = 0;
+
+    if (m_playlistLocked) {
+        m_playlistLocked = false;
+        emit playlistLockedChanged();
+    }
+
+    m_fadeTimer->start();
+}
+
 void PlaybackEngine::setActivePlaylistName(const QString &name)
 {
     if (m_activePlaylistName == name) return;
@@ -732,6 +790,17 @@ void PlaybackEngine::onFadeTick()
         m_player      = m_players[m_activeDeck];
         m_audioOutput = m_audioOutputs[m_activeDeck];
 
+        // loadPlaylistTracks()'s queue-replacing crossfade (see UC-23): swap
+        // in the whole new queue right here, before switchCurrentIndexTo()
+        // below reads m_queue.at(m_fadeTargetIndex) (== 0 in this case).
+        // Never true for a natural, proximity-triggered crossfade.
+        if (m_crossfadeReplacesQueue) {
+            beginResetModel();
+            m_queue = std::move(m_pendingQueue);
+            endResetModel();
+            emit queueCountChanged();
+        }
+
         switchCurrentIndexTo(m_fadeTargetIndex);
         emit durationChanged();
         emit positionChanged();
@@ -747,8 +816,17 @@ void PlaybackEngine::onFadeTick()
         m_audioOutputs[m_fadeOutDeck]->setVolume(1.0f);   // reset for reuse
         m_crossfading = false;
 
-        if (m_fadeOutIndex >= 0 && m_fadeOutIndex < m_queue.size())
+        if (m_crossfadeReplacesQueue) {
+            // The outgoing track no longer has a slot in m_queue (it belonged
+            // to the queue that just got replaced), so its path was captured
+            // up front in loadPlaylistTracks() instead of looked up by index.
+            if (!m_fadeOutFilePath.isEmpty())
+                emit trackPlayedToCompletion(m_fadeOutFilePath);
+            m_crossfadeReplacesQueue = false;
+            m_fadeOutFilePath.clear();
+        } else if (m_fadeOutIndex >= 0 && m_fadeOutIndex < m_queue.size()) {
             emit trackPlayedToCompletion(m_queue.at(m_fadeOutIndex).filePath);
+        }
     }
 }
 
@@ -762,6 +840,11 @@ void PlaybackEngine::cancelCrossfade()
     m_audioOutputs[m_activeDeck]->setVolume(1.0f);
     m_crossfading   = false;
     m_fadeElapsedMs = 0;
+    // Must reset -- otherwise an interrupted queue-replacing crossfade (see
+    // UC-23) would leak this state into the next, unrelated natural crossfade.
+    m_crossfadeReplacesQueue = false;
+    m_pendingQueue.clear();
+    m_fadeOutFilePath.clear();
 }
 
 QString PlaybackEngine::msToString(qint64 ms)

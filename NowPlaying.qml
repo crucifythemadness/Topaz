@@ -32,7 +32,12 @@ Rectangle {
                                loadPlaylistDialog.selectedFile.toString())
             const tracks = result.tracks
             if (tracks && tracks.length > 0) {
-                root.engine.addTracks(tracks)
+                // loadPlaylistTracks() always replaces the queue -- it
+                // crossfades into the new playlist when CROSSFADE is on and
+                // something is currently playing, otherwise it's an instant
+                // replace (see UC-23).
+                if (root.autoPlay) root.autoPlay.clearHistory()
+                root.engine.loadPlaylistTracks(tracks)
                 root.engine.setActivePlaylistName(result.fileName)
             }
         }
@@ -483,10 +488,12 @@ Rectangle {
                             cursorShape: loadPlaylistBtn.active ? Qt.PointingHandCursor : Qt.ArrowCursor
                             onClicked: {
                                 if (!loadPlaylistBtn.active) return
-                                if (root.engine && root.engine.activePlaylistName !== "") {
-                                    if (root.autoPlay) root.autoPlay.clearQueueAndHistory()
-                                    else root.engine.clearQueue()
-                                }
+                                // Clearing/crossfading happens in
+                                // loadPlaylistDialog.onAccepted instead, once
+                                // the new tracks are actually known (see
+                                // UC-23) -- clearing here, before the file is
+                                // even picked, meant canceling the dialog
+                                // used to leave the queue emptied for nothing.
                                 if (root.playlistManager)
                                     loadPlaylistDialog.currentFolder =
                                         "file:///" + root.playlistManager.playlistDirectory()

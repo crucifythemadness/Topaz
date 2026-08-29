@@ -154,6 +154,21 @@ public:
     Q_INVOKABLE void moveTrack(int from, int to);
     Q_INVOKABLE void clearQueue();
 
+    // Replaces the entire queue with `tracks` -- used exclusively by the
+    // "load a playlist" flows (NowPlaying / PlaylistViewer LOAD buttons).
+    // Behaves exactly like clearQueue() followed by addTracks(tracks)
+    // UNLESS AppConfig.crossfadeEnabled() is true AND a track is currently
+    // playing, in which case the currently-playing track crossfades
+    // directly into the first track of `tracks` (dual-deck, reusing the
+    // same fade machinery as the natural end-of-track crossfade -- see
+    // UC-15) instead of a hard stop-then-restart; the remaining tracks
+    // become the queue behind it. Falls back to the instant clearQueue()+
+    // addTracks() behavior if either the outgoing or incoming track is too
+    // short for the configured crossfade length (same eligibility rule as
+    // the natural crossfade). No other queue-mutating path is affected by
+    // any of this -- see UC-23.
+    Q_INVOKABLE void loadPlaylistTracks(const QVariantList &tracks);
+
     // Returns all queued tracks as a list of maps suitable for PlaylistManager.
     // Each map contains: filePath, title, artist, albumArtist, album,
     //                    trackNumber, durationMs.
@@ -272,6 +287,18 @@ private:
     // needed by trackPlayedToCompletion() at fade-completion since m_currentIndex
     // has already swapped to the incoming track by the midpoint.
     int     m_fadeOutIndex      = -1;
+
+    // Set only by loadPlaylistTracks() when it starts a queue-replacing
+    // crossfade (see UC-23); onFadeTick() checks this to know whether its
+    // midpoint should advance to the next slot in the *same* queue (the
+    // natural crossfade — startCrossfade() never touches these three
+    // members, so they stay at their defaults for every such fade) or
+    // replace m_queue wholesale with m_pendingQueue. Reset by
+    // cancelCrossfade() and at normal fade completion so an interrupted
+    // queue-replacing fade can never leak into a later, unrelated crossfade.
+    bool             m_crossfadeReplacesQueue = false;
+    QList<TrackInfo> m_pendingQueue;
+    QString          m_fadeOutFilePath;
 
     QFutureWatcher<QByteArray> m_coverWatcher;
 };
