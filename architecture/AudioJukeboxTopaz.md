@@ -901,7 +901,8 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
         "minimumRating": 5,
         "allowManualModification": false,
         "songRepeat": "once",
-        "transportAccess": "nothing"
+        "transportAccess": "nothing",
+        "flickerNewTracks": false
     },
     "bigCoverPane": {
         "x": 100, "y": 100, "width": 400, "height": 400, "screenName": "DISPLAY1"
@@ -963,6 +964,7 @@ what "configured" means — absent means that pane has never been positioned yet
 | `autoPlayAllowManualModification` / `setAutoPlayAllowManualModification(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should allow the user to manually modify its auto-filled queue entries (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Allow Manual Modification"); not yet consumed by any queue-filling or editing logic (see UC-14). |
 | `autoPlaySongRepeat` / `setAutoPlaySongRepeat(mode)` | How many times AUTO PLAY should play a selected track before moving on (default `"once"`); one of `"once"`, `"twice"`, `"twiceIfNoneAvailable"`, `"several"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab radio group ("Play a Title") — the app's first radio-button control; not yet consumed by any selection logic (see UC-14). |
 | `autoPlayTransportAccess` / `setAutoPlayTransportAccess(mode)` | How much manual transport control remains available during an active AUTO PLAY session while `autoPlayAllowManualModification` is off (default `"nothing"`); one of `"nothing"`, `"playPause"`, `"playPauseAndSelect"` — invalid values are silently ignored (no-op); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab "Exceptions" radio group, indented under and only interactive while Allow Manual Modification is off. Consumed by `AutoPlayController::playPauseAllowed()`/`trackNavigationAllowed()` (see UC-16). |
+| `autoPlayFlickerNewTracks` / `setAutoPlayFlickerNewTracks(enabled)` | Whether a track `AutoPlayController` just added briefly flickers its `PlaybackQueue` row (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("New Tracks are Flickering"). Consumed by `PlaybackQueue.qml`'s row delegate via the new `PlaybackEngine` `autoPlayAdded` queue role (see UC-16). |
 | `bigCoverPaneConfigured` / `bigCoverPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable BigCoverWindow pane's last-saved geometry (defaults `400`×`400`, `configured` starts `false`). See UC-17. |
 | `saveBigCoverPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles; `screenName` is stored for completeness/debugging but not re-exposed as its own property. Auto-saves. Called from `Main.qml`'s `Loader` on `FloatingPane.geometrySettled()`. |
 | `tagInfoPaneConfigured` / `tagInfoPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable TagInfoWindow pane's last-saved geometry (defaults `500`×`230`, `configured` starts `false`). Same convention as `bigCoverPane*` above. See UC-18. |
@@ -1647,7 +1649,7 @@ explicitly. See UC-15 for the full crossfade flow.
 | `playlistLocked` | `bool` | When `true`, queue mutations (add, remove, move) do **not** update the XSPF file on disk. Default: `false`. Reset to `false` automatically when `activePlaylistName` changes or `clearQueue()` is called. When set from `true` → `false`, the XSPF is immediately rewritten with the current queue contents. |
 | `playlistManager` | `PlaylistManager*` | Reference to the `PlaylistManager` instance set from `Main.qml`. Used internally to sync the XSPF file when tracks are added, removed, or reordered. |
 | `appConfig` | `AppConfig*` | Reference to the `AppConfig` instance set from `Main.qml`. `crossfadeEnabled`/`crossfadeSeconds` are read live from it on every crossfade eligibility check (see UC-15) — never cached. |
-| `addTrack(map)` | invokable | Append a single track map to the queue. If `activePlaylistName` is set **and** `playlistLocked` is `false`, calls `playlistManager.appendTrack()` to persist the change. |
+| `addTrack(map, autoPlayAdded=false)` | invokable | Append a single track map to the queue. If `activePlaylistName` is set **and** `playlistLocked` is `false`, calls `playlistManager.appendTrack()` to persist the change. `autoPlayAdded` is set only by `AutoPlayController`'s 3 add call sites (see UC-16); when `true`, marks the new row's `autoPlayAdded` queue role `true` and clears it again after ~2s. |
 | `addTracks(list)` | invokable | Batch-append a QVariantList of track maps. Calls `appendTrack` for each new entry when a playlist is active and not locked. |
 | `removeAt(index)` | invokable | Remove track at given queue index. Captures `filePath` before removal; calls `playlistManager.removeTrackByPath()` when a playlist is active and not locked. |
 | `moveUp(index)` | invokable | Swap track with predecessor (not allowed on playing track). Calls `playlistManager.rewritePlaylist()` when a playlist is active and not locked. |
@@ -1697,6 +1699,7 @@ was confirmed present on the reference toolchain.
 | `playing` | `bool` | `true` for the currently playing row |
 | `durationStr` | `QString` | "M:SS" track duration |
 | `coverSource` | `QString` | `data:image/jpeg;base64,…` or empty |
+| `autoPlayAdded` | `bool` | `true` for ~2s after `AutoPlayController` added this row (see UC-16); drives the new-track flicker |
 
 ### Track map format (input to addTrack / addTracks)
 
@@ -2352,6 +2355,46 @@ code path that never touches it:
 `AutoPlayController::onTrackPlayedToCompletion()` increments `m_playCounts[filePath]`
 unconditionally (whether or not a session is currently active — harmless, since
 `start()` always resets the map anyway).
+
+### Normal Flow — Visual feedback for auto-added tracks
+
+Optional, off by default (`AppConfig.autoPlayFlickerNewTracks`, Setup →
+AUTO PLAY → "New Tracks are Flickering"). All 3 track-adding paths above —
+the initial empty-queue kickstart in `start()`, each poll-tick top-up in
+`maybeFillHorizon()`, and stall recovery in `onQueueExhausted()` — call
+`m_engine->addTrack(candidate, true)` instead of the 1-argument form,
+marking the newly appended row so `PlaybackQueue` can flicker it and draw
+the user's attention. No other path (manual drag/double-click add, batch
+`addTracks()` used by playlist loading — see UC-10/UC-22/UC-23) ever passes
+`true`, so this is scoped to AUTO PLAY additions only.
+
+- `PlaybackEngine::addTrack(map, autoPlayAdded = false)` sets a new,
+  purely transient `TrackInfo::autoPlayAdded` field on the appended row
+  (never persisted — `LibraryCache` and `PlaylistManager::appendTrack()`
+  both serialize field-by-field / from the original `QVariantMap`, never
+  touching this field) and exposes it as a new `QueueRole`
+  (`IsAutoPlayAddedRole` → `"autoPlayAdded"` in QML), following the exact
+  same shape as the existing `IsPlayingRole`/`"playing"`.
+- When `autoPlayAdded` is `true`, `addTrack()` schedules a
+  `QTimer::singleShot(2000, …)` that clears the flag and emits
+  `dataChanged` for that role — turning the flicker into a brief ~2s
+  attention cue rather than a permanent marker. The row index is captured
+  by value at schedule time; if an earlier row is removed/reordered in
+  that exact ~2s window the timer could clear the wrong row's flag (or
+  rarely leave one flickering a touch past 2s) — an accepted,
+  self-correcting tradeoff for a purely cosmetic feature, not worth a
+  heavier stable-identity mechanism.
+- `PlaybackQueue.qml`'s row delegate reacts to `model.autoPlayAdded` with a
+  `SequentialAnimation on opacity` (looping while
+  `model.autoPlayAdded && appConfig.autoPlayFlickerNewTracks` both hold)
+  on a new `Rectangle` layered just behind the existing "Playing-now
+  highlight" — so a track that's both just-added *and* immediately playing
+  (the stall-recovery and empty-queue-kickstart cases) shows both effects
+  together without conflict. Driving the animation purely off the data
+  role (not a one-shot `Component.onCompleted` trick) means it behaves
+  correctly under `ListView` virtualization: a row added off-screen and
+  scrolled into view later won't spuriously re-flicker, since the
+  animation only ever runs for as long as the role is actually `true`.
 
 ### Alternate: playback stalls at end of queue
 

@@ -39,6 +39,13 @@ struct TrackInfo
     int    rating   = 0;     // user rating 1-10; 0 = not rated yet
     QUuid  ratingId;         // deterministic identity for Topaz.rating.json persistence
 
+    // Runtime-only hint for PlaybackQueue's "new track" flicker (see
+    // UC-16) -- never persisted to Topaz.library.json or an XSPF file
+    // (LibraryCache and PlaylistManager never touch this field). Always
+    // false except briefly on a track PlaybackEngine::addTrack() just
+    // added on AutoPlayController's behalf.
+    bool   autoPlayAdded = false;
+
     // Deterministic (repeatable) UUIDv5 identity so ratings survive a full library
     // rebuild/rescan. Recomputed by LibraryScanner whenever a track's tags are (re-)read;
     // if albumArtist/artist/album/title change later, this — and the link to any existing

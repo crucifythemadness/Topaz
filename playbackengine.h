@@ -84,7 +84,8 @@ public:
         FilePathRole,
         IsPlayingRole,      // bool ("playing")
         DurationStringRole,
-        CoverSourceRole
+        CoverSourceRole,
+        IsAutoPlayAddedRole // bool ("autoPlayAdded") -- see UC-16
     };
     Q_ENUM(QueueRole)
 
@@ -146,7 +147,11 @@ public:
     Q_INVOKABLE void setCurrentRating(int rating);
 
     // ── Queue management (callable from QML) ──────────────────────────────
-    Q_INVOKABLE void addTrack(const QVariantMap  &track);
+    // autoPlayAdded is set only by AutoPlayController's 3 add call sites
+    // (start()/maybeFillHorizon()/onQueueExhausted()) -- see UC-16. Default
+    // keeps every other caller (manual drag/double-click, playlist load)
+    // unchanged.
+    Q_INVOKABLE void addTrack(const QVariantMap  &track, bool autoPlayAdded = false);
     Q_INVOKABLE void addTracks(const QVariantList &tracks);
     Q_INVOKABLE void removeAt(int index);
     Q_INVOKABLE void moveUp(int index);

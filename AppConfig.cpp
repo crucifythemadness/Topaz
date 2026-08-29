@@ -265,6 +265,14 @@ void AppConfig::setAutoPlayTransportAccess(const QString &mode)
     save();
 }
 
+void AppConfig::setAutoPlayFlickerNewTracks(bool enabled)
+{
+    if (m_autoPlayFlickerNewTracks == enabled) return;
+    m_autoPlayFlickerNewTracks = enabled;
+    emit autoPlayFlickerNewTracksChanged();
+    save();
+}
+
 // ── Big cover pane geometry ─────────────────────────────────────────────────
 
 void AppConfig::saveBigCoverPaneGeometry(int x, int y, int width, int height,
@@ -540,6 +548,8 @@ void AppConfig::load()
         autoPlay[QStringLiteral("songRepeat")].toString(QStringLiteral("once"));
     m_autoPlayTransportAccess =
         autoPlay[QStringLiteral("transportAccess")].toString(QStringLiteral("nothing"));
+    m_autoPlayFlickerNewTracks =
+        autoPlay[QStringLiteral("flickerNewTracks")].toBool(false);
 
     // Key presence, not a stored bool, is the "configured" signal — absence
     // means the pane has never been positioned yet (first-ever open).
@@ -633,6 +643,7 @@ void AppConfig::save()
     autoPlay[QStringLiteral("allowManualModification")] = m_autoPlayAllowManualModification;
     autoPlay[QStringLiteral("songRepeat")] = m_autoPlaySongRepeat;
     autoPlay[QStringLiteral("transportAccess")] = m_autoPlayTransportAccess;
+    autoPlay[QStringLiteral("flickerNewTracks")] = m_autoPlayFlickerNewTracks;
     root[QStringLiteral("autoPlay")] = autoPlay;
 
     if (m_bigCoverPaneConfigured) {

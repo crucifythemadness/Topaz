@@ -124,6 +124,8 @@ QVariant PlaybackEngine::data(const QModelIndex &index, int role) const
         return t.coverThumb.isEmpty()
             ? QString()
             : QStringLiteral("data:image/jpeg;base64,") + t.coverThumb;
+    case IsAutoPlayAddedRole:
+        return t.autoPlayAdded;
     default:
         return {};
     }
@@ -132,17 +134,18 @@ QVariant PlaybackEngine::data(const QModelIndex &index, int role) const
 QHash<int, QByteArray> PlaybackEngine::roleNames() const
 {
     return {
-        { PosRole,           "pos"         },
-        { TrackNameRole,     "trackName"   },
-        { SubLabelRole,      "subLabel"    },
-        { ArtistRole,        "artist"      },
-        { AlbumRole,         "album"       },
-        { BitrateRole,       "kbps"        },
-        { FormatRole,        "format"      },
-        { FilePathRole,      "filePath"    },
-        { IsPlayingRole,     "playing"     },
-        { DurationStringRole,"durationStr" },
-        { CoverSourceRole,   "coverSource" }
+        { PosRole,            "pos"          },
+        { TrackNameRole,      "trackName"    },
+        { SubLabelRole,       "subLabel"     },
+        { ArtistRole,         "artist"       },
+        { AlbumRole,          "album"        },
+        { BitrateRole,        "kbps"         },
+        { FormatRole,         "format"       },
+        { FilePathRole,       "filePath"     },
+        { IsPlayingRole,      "playing"      },
+        { DurationStringRole, "durationStr"  },
+        { CoverSourceRole,    "coverSource"  },
+        { IsAutoPlayAddedRole,"autoPlayAdded"}
     };
 }
 
@@ -258,11 +261,13 @@ TrackInfo PlaybackEngine::trackFromMap(const QVariantMap &map)
     return t;
 }
 
-void PlaybackEngine::addTrack(const QVariantMap &trackMap)
+void PlaybackEngine::addTrack(const QVariantMap &trackMap, bool autoPlayAdded)
 {
     const int row = m_queue.size();
+    TrackInfo t = trackFromMap(trackMap);
+    t.autoPlayAdded = autoPlayAdded;
     beginInsertRows({}, row, row);
-    m_queue.append(trackFromMap(trackMap));
+    m_queue.append(t);
     endInsertRows();
     emit queueCountChanged();
 
@@ -273,6 +278,21 @@ void PlaybackEngine::addTrack(const QVariantMap &trackMap)
     if (m_currentIndex < 0) {
         loadTrack(row);
         m_player->play();
+    }
+
+    // Clears the "just added by AUTO PLAY" flag ~2s later so
+    // PlaybackQueue's flicker (see UC-16) is a brief attention cue, not a
+    // permanent marker. row is captured by value; if an earlier row is
+    // removed/reordered in this exact ~2s window the flag could clear the
+    // wrong row (or rarely linger a bit) -- an accepted tradeoff for a
+    // purely cosmetic feature, not worth a heavier stable-identity scheme.
+    if (autoPlayAdded) {
+        QTimer::singleShot(2000, this, [this, row]() {
+            if (row >= 0 && row < m_queue.size() && m_queue.at(row).autoPlayAdded) {
+                m_queue[row].autoPlayAdded = false;
+                emit dataChanged(index(row), index(row), {IsAutoPlayAddedRole});
+            }
+        });
     }
 }
 

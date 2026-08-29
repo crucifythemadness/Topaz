@@ -24,7 +24,7 @@
 //                    "considerGenre": false,
 //                    "considerRating": false, "minimumRating": 5,
 //                    "allowManualModification": false, "songRepeat": "once",
-//                    "transportAccess": "nothing" },
+//                    "transportAccess": "nothing", "flickerNewTracks": false },
 //     "bigCoverPane": { "x": 100, "y": 100, "width": 400, "height": 400,
 //                       "screenName": "DISPLAY1" },
 //     "tagInfoPane": { "x": 100, "y": 100, "width": 500, "height": 230,
@@ -80,6 +80,9 @@ class AppConfig : public QObject
     Q_PROPERTY(bool autoPlayAllowManualModification  READ autoPlayAllowManualModification  NOTIFY autoPlayAllowManualModificationChanged)
     Q_PROPERTY(QString autoPlaySongRepeat            READ autoPlaySongRepeat               NOTIFY autoPlaySongRepeatChanged)
     Q_PROPERTY(QString autoPlayTransportAccess       READ autoPlayTransportAccess          NOTIFY autoPlayTransportAccessChanged)
+    // Whether a track PlaybackEngine::addTrack() just added on AUTO PLAY's
+    // behalf briefly flickers its PlaybackQueue row (see UC-16).
+    Q_PROPERTY(bool autoPlayFlickerNewTracks         READ autoPlayFlickerNewTracks         NOTIFY autoPlayFlickerNewTracksChanged)
 
     // ── Detachable "big cover" pane geometry (see FloatingPane.qml / BigCoverWindow.qml) ──
     // READ-only + a single Q_INVOKABLE setter (saveBigCoverPaneGeometry), matching
@@ -166,6 +169,7 @@ public:
     bool autoPlayAllowManualModification() const { return m_autoPlayAllowManualModification; }
     QString autoPlaySongRepeat()           const { return m_autoPlaySongRepeat;              }
     QString autoPlayTransportAccess()      const { return m_autoPlayTransportAccess;         }
+    bool autoPlayFlickerNewTracks()        const { return m_autoPlayFlickerNewTracks;        }
 
     bool bigCoverPaneConfigured() const { return m_bigCoverPaneConfigured; }
     int  bigCoverPaneX()          const { return m_bigCoverPaneX;          }
@@ -252,6 +256,7 @@ public:
     // Ignored (no-op) unless mode is one of: "nothing", "playPause",
     // "playPauseAndSelect".
     Q_INVOKABLE void setAutoPlayTransportAccess(const QString &mode);
+    Q_INVOKABLE void setAutoPlayFlickerNewTracks(bool enabled);
 
     // ── Big cover pane geometry ──────────────────────────────────────────
     // Called from Main.qml's Loader whenever FloatingPane.geometrySettled()
@@ -330,6 +335,7 @@ signals:
     void autoPlayAllowManualModificationChanged();
     void autoPlaySongRepeatChanged();
     void autoPlayTransportAccessChanged();
+    void autoPlayFlickerNewTracksChanged();
     void bigCoverPaneChanged();
     void tagInfoPaneChanged();
     void audioVisualizerChanged();
@@ -362,6 +368,7 @@ private:
     bool m_autoPlayAllowManualModification  = false;
     QString m_autoPlaySongRepeat            = QStringLiteral("once");
     QString m_autoPlayTransportAccess       = QStringLiteral("nothing");
+    bool m_autoPlayFlickerNewTracks         = false;
 
     bool    m_bigCoverPaneConfigured = false;
     int     m_bigCoverPaneX          = 0;

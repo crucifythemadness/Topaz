@@ -103,8 +103,22 @@ Rectangle {
                 }
 
                 Column {
+                    id: btnContent
                     anchors.centerIn: parent
                     spacing: 3
+
+                    // Blinks the red "AUTO PLAY is active" state for
+                    // attention -- never affects any other button.
+                    readonly property bool blinkingActive:
+                        isAutoPlayBtn && root.autoPlay && root.autoPlay.active
+
+                    SequentialAnimation on opacity {
+                        running: btnContent.blinkingActive
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 1.0; to: 0.3; duration: 500 }
+                        NumberAnimation { from: 0.3; to: 1.0; duration: 500 }
+                    }
+                    onBlinkingActiveChanged: if (!blinkingActive) opacity = 1.0   // animation.stop() can land mid-fade
 
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter

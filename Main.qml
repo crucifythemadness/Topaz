@@ -443,6 +443,7 @@ ApplicationWindow {
                 SplitView.minimumWidth:   240
                 engine: engine
                 autoPlay: autoPlay
+                appConfig: appConfig
                 onWidthChanged: saveLayoutTimer.restart()
             }
 

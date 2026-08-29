@@ -154,7 +154,7 @@ void AutoPlayController::start()
     if (m_engine->queueCount() == 0) {
         const QVariantMap candidate = pickNextCandidate();
         if (candidate.isEmpty()) return;   // nothing to play at all — stay inactive
-        m_engine->addTrack(candidate);     // auto-plays since the queue was empty
+        m_engine->addTrack(candidate, true);   // auto-plays since the queue was empty
     }
 
     m_active = true;
@@ -215,7 +215,7 @@ void AutoPlayController::maybeFillHorizon()
         stop(true);   // starving — no eligible track found
         return;
     }
-    m_engine->addTrack(candidate);
+    m_engine->addTrack(candidate, true);
 }
 
 void AutoPlayController::onTrackPlayedToCompletion(const QString &filePath)
@@ -233,7 +233,7 @@ void AutoPlayController::onQueueExhausted()
         stop(true);
         return;
     }
-    m_engine->addTrack(candidate);
+    m_engine->addTrack(candidate, true);
     m_engine->playAt(m_engine->queueCount() - 1);
 }
 

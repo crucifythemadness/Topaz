@@ -11,6 +11,9 @@ Rectangle {
     // and the clear-queue button (autoPlay.queueClearAllowed) while an AUTO PLAY
     // session is active — see UC-16 in the architecture doc.
     property var autoPlay: null
+    // Bound from Main.qml. Only needed for autoPlayFlickerNewTracks, which
+    // gates the AUTO PLAY new-track flicker below — see UC-16.
+    property var appConfig: null
     color: Theme.surfaceContainerLow
 
     // Ghost left border
@@ -257,6 +260,32 @@ Rectangle {
                 Rectangle {
                     anchors.fill: parent
                     color: model.playing ? Theme.p10 : "transparent"
+                }
+
+                // AUTO PLAY new-track flicker (see UC-16) -- active only
+                // while model.autoPlayAdded is true (PlaybackEngine clears
+                // it ~2s after the row was added) and the "New Tracks are
+                // Flickering" setting is on. Driven entirely by the data
+                // role, not delegate lifecycle, so it behaves correctly
+                // even if the row is off-screen (ListView virtualization)
+                // when added or cleared.
+                Rectangle {
+                    id: autoPlayFlicker
+                    anchors.fill: parent
+                    color: Theme.secondary
+                    opacity: 0
+
+                    readonly property bool active: model.autoPlayAdded
+                                                    && root.appConfig
+                                                    && root.appConfig.autoPlayFlickerNewTracks
+
+                    SequentialAnimation on opacity {
+                        running: autoPlayFlicker.active
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 0.0;  to: 0.35; duration: 250 }
+                        NumberAnimation { from: 0.35; to: 0.0;  duration: 250 }
+                    }
+                    onActiveChanged: if (!active) opacity = 0   // animation.stop() can land mid-fade
                 }
 
                 // Playing left accent
