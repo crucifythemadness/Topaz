@@ -230,7 +230,7 @@ Rectangle {
                                         Math.abs(mouse.y - pressY) > 8) {
                                     dragging = true
                                     trackRow.Drag.active = true
-                                    if (root.engine) root.engine.setDragCopyCursor()
+                                    if (root.engine) root.engine.beginDragCursor()
                                 }
                                 if (dragging) {
                                     // Keep the drag hotspot directly under the

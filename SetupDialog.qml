@@ -1964,6 +1964,110 @@ Popup {
                         }
                     }
 
+                    // ── Bar Opacity row ──────────────────────────────────
+                    // Foreground-only opacity — fades the bars/peak ticks
+                    // themselves, independent of Pane Opacity above.
+                    // See AudioVisualizerWindow.qml.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Bar Opacity"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("How visible the bars themselves are")
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(barOpacitySlider.value) + "%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "0%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: barOpacitySlider
+                                Layout.fillWidth: true
+                                from: 0
+                                to:   100
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.audioVisualizerBarOpacity * 100 : 100
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioVisualizerBarOpacity(value / 100)
+                                }
+
+                                background: Rectangle {
+                                    x: barOpacitySlider.leftPadding
+                                    y: barOpacitySlider.topPadding
+                                       + barOpacitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  barOpacitySlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  barOpacitySlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: barOpacitySlider.leftPadding
+                                       + barOpacitySlider.visualPosition
+                                         * (barOpacitySlider.availableWidth - width)
+                                    y: barOpacitySlider.topPadding
+                                       + barOpacitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "100%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
                     // ── Color row ───────────────────────────────────────
                     // Preset swatches rather than a full HSV/RGB picker —
                     // same "Repeater over an options array compared against

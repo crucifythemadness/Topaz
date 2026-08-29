@@ -159,9 +159,21 @@ public:
     //                    trackNumber, durationMs.
     Q_INVOKABLE QVariantList trackList() const;
 
-    // Cursor helpers — wrap QGuiApplication::setOverrideCursor so QML can
-    // set a global drag cursor that overrides all local MouseArea shapes.
-    Q_INVOKABLE void setDragCopyCursor();
+    // Cursor helpers — wrap QGuiApplication's override-cursor stack so QML
+    // can set a global drag cursor that overrides all local MouseArea
+    // shapes (a cursorShape binding on a MouseArea only applies while the
+    // mouse stays inside that MouseArea's bounds, which doesn't hold once
+    // the drag leaves it).
+    //
+    // beginDragCursor() pushes exactly one override (Qt::ForbiddenCursor,
+    // the default "not over a valid drop target" state) at drag start;
+    // setDragCursorAllowed() then only changes that same override's shape
+    // as the drag enters/exits PlaybackQueue's DropArea, via
+    // QGuiApplication::changeOverrideCursor() rather than pushing a second
+    // override — so exactly one restoreOverrideCursor() call at drag end
+    // still correctly pops it back to normal.
+    Q_INVOKABLE void beginDragCursor();
+    Q_INVOKABLE void setDragCursorAllowed(bool allowed);
     Q_INVOKABLE void restoreOverrideCursor();
 
     // ── Transport (callable from QML) ─────────────────────────────────────

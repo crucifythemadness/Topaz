@@ -113,6 +113,9 @@ class AppConfig : public QObject
     // never applied to the bars/peak ticks, which stay fully opaque regardless.
     // See AudioVisualizerWindow.qml.
     Q_PROPERTY(double  audioVisualizerPaneOpacity     READ audioVisualizerPaneOpacity    NOTIFY audioVisualizerChanged)
+    // Foreground-only opacity for the bars/peak ticks themselves, independent
+    // of audioVisualizerPaneOpacity above. See AudioVisualizerWindow.qml.
+    Q_PROPERTY(double  audioVisualizerBarOpacity      READ audioVisualizerBarOpacity     NOTIFY audioVisualizerChanged)
 
     // ── Detachable "audio visualizer" pane geometry (see FloatingPane.qml / AudioVisualizerWindow.qml) ──
     // Same READ-only + Q_INVOKABLE-setter convention as bigCoverPane/tagInfoPane above.
@@ -182,6 +185,7 @@ public:
     double  audioVisualizerSensitivity()      const { return m_audioVisualizerSensitivity;      }
     bool    audioVisualizerPeakHoldEnabled()  const { return m_audioVisualizerPeakHoldEnabled;  }
     double  audioVisualizerPaneOpacity()      const { return m_audioVisualizerPaneOpacity;      }
+    double  audioVisualizerBarOpacity()       const { return m_audioVisualizerBarOpacity;       }
 
     bool audioVisualizerPaneConfigured() const { return m_audioVisualizerPaneConfigured; }
     int  audioVisualizerPaneX()          const { return m_audioVisualizerPaneX;          }
@@ -275,6 +279,9 @@ public:
     // Background-only pane opacity; clamped to [0.0, 1.0]. Never applied to the
     // bars/peak ticks — see AudioVisualizerWindow.qml.
     Q_INVOKABLE void setAudioVisualizerPaneOpacity(double opacity);
+    // Foreground-only bar opacity; clamped to [0.0, 1.0]. Independent of
+    // setAudioVisualizerPaneOpacity above — see AudioVisualizerWindow.qml.
+    Q_INVOKABLE void setAudioVisualizerBarOpacity(double opacity);
 
     // ── Audio visualizer pane geometry ───────────────────────────────────
     // Same calling convention as saveBigCoverPaneGeometry above.
@@ -376,6 +383,7 @@ private:
     double  m_audioVisualizerSensitivity     = 0.5;
     bool    m_audioVisualizerPeakHoldEnabled = true;
     double  m_audioVisualizerPaneOpacity     = 1.0;
+    double  m_audioVisualizerBarOpacity      = 1.0;
 
     bool    m_audioVisualizerPaneConfigured = false;
     int     m_audioVisualizerPaneX          = 0;

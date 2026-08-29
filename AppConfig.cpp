@@ -349,6 +349,15 @@ void AppConfig::setAudioVisualizerPaneOpacity(double opacity)
     save();
 }
 
+void AppConfig::setAudioVisualizerBarOpacity(double opacity)
+{
+    opacity = qBound(0.0, opacity, 1.0);
+    if (qFuzzyCompare(m_audioVisualizerBarOpacity, opacity)) return;
+    m_audioVisualizerBarOpacity = opacity;
+    emit audioVisualizerChanged();
+    save();
+}
+
 // ── Audio visualizer pane geometry ──────────────────────────────────────────
 
 void AppConfig::saveAudioVisualizerPaneGeometry(int x, int y, int width, int height,
@@ -559,6 +568,7 @@ void AppConfig::load()
     m_audioVisualizerPeakHoldEnabled =
         audioVisualizer[QStringLiteral("peakHoldEnabled")].toBool(true);
     m_audioVisualizerPaneOpacity = audioVisualizer[QStringLiteral("paneOpacity")].toDouble(1.0);
+    m_audioVisualizerBarOpacity  = audioVisualizer[QStringLiteral("barOpacity")].toDouble(1.0);
 
     m_audioVisualizerPaneConfigured = root.contains(QStringLiteral("audioVisualizerPane"));
     const QJsonObject audioVisualizerPane = root[QStringLiteral("audioVisualizerPane")].toObject();
@@ -652,6 +662,7 @@ void AppConfig::save()
     audioVisualizer[QStringLiteral("sensitivity")]     = m_audioVisualizerSensitivity;
     audioVisualizer[QStringLiteral("peakHoldEnabled")] = m_audioVisualizerPeakHoldEnabled;
     audioVisualizer[QStringLiteral("paneOpacity")]     = m_audioVisualizerPaneOpacity;
+    audioVisualizer[QStringLiteral("barOpacity")]      = m_audioVisualizerBarOpacity;
     root[QStringLiteral("audioVisualizer")] = audioVisualizer;
 
     if (m_audioVisualizerPaneConfigured) {

@@ -262,7 +262,7 @@ Rectangle {
                 // Playing left accent
                 Rectangle {
                     anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-                    width: 4
+                    width: 8
                     color: Theme.primary
                     visible: model.playing
                 }
@@ -331,13 +331,16 @@ Rectangle {
                         }
                     }
 
-                // Move up/down buttons (hidden while playing or while manual
-                // queue editing isn't allowed)
+                // Move up/down buttons (faded while playing or while manual
+                // queue editing isn't allowed -- opacity, not visible, so
+                // the Row's layout slot (and the bitrate column after it)
+                // never shifts; see the position-number Text above for the
+                // same pattern).
                     Column {
                         width: 20
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 0
-                        visible: !model.playing && rowItem.manualAllowed
+                        opacity: (!model.playing && rowItem.manualAllowed) ? 1.0 : 0.0
 
                         Text {
                             text: "\u2191"
@@ -347,6 +350,7 @@ Rectangle {
                             width: parent.width
                             MouseArea {
                                 id: upHover; anchors.fill: parent
+                                enabled: !model.playing && rowItem.manualAllowed
                                 hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                 onClicked: { if (root.engine) root.engine.moveUp(index) }
                             }
@@ -359,13 +363,20 @@ Rectangle {
                             width: parent.width
                             MouseArea {
                                 id: downHover; anchors.fill: parent
+                                enabled: !model.playing && rowItem.manualAllowed
                                 hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                 onClicked: { if (root.engine) root.engine.moveDown(index) }
                             }
                         }
                     }
 
-                    // Remove button
+                    // Remove button (faded via opacity, not visible, for the
+                    // same reason as above -- removeHover stays hoverable
+                    // while faded so the existing hover-reveal keeps working:
+                    // the always-visible rowHover MouseArea below triggers
+                    // the initial reveal, removeHover.containsMouse only
+                    // sustains it once the cursor is precisely over the
+                    // button).
                     Text {
                         width: 32
                         height: parent.height
@@ -374,7 +385,7 @@ Rectangle {
                         color: removeHover.containsMouse ? Theme.fgSurface : Theme.fgSurfaceVariant
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment:   Text.AlignVCenter
-                        visible: (rowHover.containsMouse || removeHover.containsMouse) && rowItem.manualAllowed
+                        opacity: (rowHover.containsMouse || removeHover.containsMouse) && rowItem.manualAllowed ? 1.0 : 0.0
                         MouseArea {
                             id: removeHover; anchors.fill: parent
                             enabled: rowItem.manualAllowed
@@ -547,6 +558,11 @@ Rectangle {
             anchors.fill: parent
             enabled: !root.autoPlay || root.autoPlay.manualQueueEditingAllowed
             keys: ["externalDrop"]   // only AlbumCard drags; ignores internal reorder
+
+            // Switches the drag cursor between "+" (here) and "not allowed"
+            // (everywhere else) -- see AlbumCard.qml's beginDragCursor().
+            onEntered: if (root.engine) root.engine.setDragCursorAllowed(true)
+            onExited:  if (root.engine) root.engine.setDragCursorAllowed(false)
 
             // Highlight the panel during drag-over
             Rectangle {

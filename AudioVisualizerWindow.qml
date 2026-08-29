@@ -60,6 +60,14 @@ FloatingPane {
                    Theme.surfaceContainerLowest.b * paneOpacity,
                    paneOpacity)
 
+    // Foreground-only opacity — applied to barsRow below (level bars + peak
+    // ticks together), independent of paneOpacity above. Unlike paneOpacity,
+    // no premultiply treatment is needed: barsRow is an ordinary in-scene
+    // Item, not a Window's own clear color, so Qt Quick's scenegraph alpha
+    // blending already composites it correctly.
+    readonly property real barOpacity:
+        visualizerConfig ? visualizerConfig.audioVisualizerBarOpacity : 1.0
+
     // ── Placeholder — no track loaded ─────────────────────────────────────
     Rectangle {
         anchors.fill: parent
@@ -93,6 +101,7 @@ FloatingPane {
         anchors.fill: parent
         anchors.margins: 12
         visible: visWindow.hasTrack
+        opacity: visWindow.barOpacity
         spacing: 3
 
         readonly property int  barCount: visWindow.barModel.length

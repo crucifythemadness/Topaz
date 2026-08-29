@@ -973,6 +973,7 @@ what "configured" means — absent means that pane has never been positioned yet
 | `audioVisualizerSensitivity` / `setAudioVisualizerSensitivity(sensitivity)` | Gain offset applied before dB normalization in `AudioVisualizerController::processBlock` (default `0.5` = no change from the original fixed mapping); clamped to `[0.0, 1.0]`; auto-saves. Mapped to ±18dB (`(sensitivity - 0.5) * 2 * 18`) — `1.0` boosts bars closer to full height on loud passages, `0.0` cuts them noticeably lower. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider ("LOW"…"HIGH", displayed 0–100%). See UC-19. |
 | `audioVisualizerPeakHoldEnabled` / `setAudioVisualizerPeakHoldEnabled(enabled)` | Whether a slowly-decaying peak marker is drawn above each bar (default `true`); auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab toggle. |
 | `audioVisualizerPaneOpacity` / `setAudioVisualizerPaneOpacity(opacity)` | Background-only opacity for the Audio Visualizer pane (default `1.0`, fully opaque); clamped to `[0.0, 1.0]`; auto-saves. Applied to `AudioVisualizerWindow`'s `Window.color` alpha channel only — never to the bars/peak ticks, which stay fully opaque regardless. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider (0–100%). |
+| `audioVisualizerBarOpacity` / `setAudioVisualizerBarOpacity(opacity)` | Foreground-only opacity for the Audio Visualizer's bars and peak-hold ticks (default `1.0`, fully opaque); clamped to `[0.0, 1.0]`; auto-saves. Independent of `audioVisualizerPaneOpacity` — applied as an ordinary `opacity:` binding on `AudioVisualizerWindow`'s `barsRow` (level bars + peak ticks together), not `Window.color`, so no premultiply treatment is needed (unlike the pane background, this isn't a native window clear color — Qt Quick's scenegraph alpha blending already composites it correctly). Set from `SetupDialog`'s AUDIO VISUALIZER tab slider (0–100%). |
 | `audioVisualizerPaneConfigured` / `audioVisualizerPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable AudioVisualizerWindow pane's last-saved geometry (defaults `500`×`260`, `configured` starts `false`). Same convention as `bigCoverPane*`/`tagInfoPane*` above. See UC-19. |
 | `saveAudioVisualizerPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles. Same calling convention as `saveBigCoverPaneGeometry`. |
 | `save()` | Persist current state to `Topaz.config` (called automatically by all mutators). |
@@ -1418,14 +1419,14 @@ configurable via the app JSON config) will be introduced at that point.
 ### Normal Flow — Drag from track row to queue
 
 1. User presses and holds the left button on a track row and moves the mouse more than 8 px.
-2. `trackMA.onPositionChanged` sets `trackRow.Drag.active = true`, calls `engine.setDragCopyCursor()` to display a system-wide `DragCopyCursor` (➕ with arrow), and on every subsequent `positionChanged`, updates `Drag.hotSpot` to the cursor's current position in `trackRow`-local coordinates:
+2. `trackMA.onPositionChanged` sets `trackRow.Drag.active = true`, calls `engine.beginDragCursor()` to push a system-wide `Qt::ForbiddenCursor` override (🚫 — "not over a valid drop target," the default state until proven otherwise), and on every subsequent `positionChanged`, updates `Drag.hotSpot` to the cursor's current position in `trackRow`-local coordinates:
    ```
    scenePt = mapToItem(null, mouse.x, mouse.y)   // cursor in scene space
    rowPt   = trackRow.mapToItem(null, 0, 0)       // trackRow origin in scene space
    Drag.hotSpot = scenePt - rowPt                 // hotspot follows cursor
    ```
    `trackRow` itself never moves from its layout position. The hotspot tracking is what causes Qt's drop system to report the drag to DropAreas under the actual cursor.
-3. As the cursor enters `PlaybackQueue`, its `DropArea.containsDrag` becomes `true` — the panel highlights in secondary colour.
+3. As the cursor enters `PlaybackQueue`, its `DropArea.containsDrag` becomes `true` — the panel highlights in secondary colour, and `onEntered` calls `engine.setDragCursorAllowed(true)`, switching the cursor to `Qt::DragCopyCursor` (➕ with arrow) via `QGuiApplication::changeOverrideCursor()` — changing the shape of the already-pushed override rather than pushing a second one. Leaving the panel (`onExited`) calls `setDragCursorAllowed(false)`, switching back to `Qt::ForbiddenCursor`. This means the cursor only ever shows "+" while actually over the one valid drop target, and "not allowed" everywhere else for the whole gesture.
 4. User releases. `DropArea.onDropped` reads `drop.source.trackData`, calls `engine.addTracks([trackData])`, accepts `Qt.CopyAction`.
 5. `trackMA.onReleased` calls `engine.restoreOverrideCursor()` to revert the cursor. `PlaybackEngine` appends the track; `PlaybackQueue` ListView updates.
 
@@ -1469,7 +1470,7 @@ The `albumList` ListView is interactive (flick-scrollable). Without `preventStea
 - **No multi-selection**: `AlbumCard` carries no selection state — no `selectedIndices` JS object, no Ctrl+click logic.
 - **No context menus**: `QtQuick.Controls.Menu` removed from `AlbumCard`. Each `Menu` is backed by a `QQuickPopup` overlay; instantiating dozens of them per genre change was the primary source of UI lag.
 - **No album drag**: the cover area is not a drag source; only individual track rows are draggable.
-- **Minimal engine reference in `AlbumCard`**: `engine` is an optional `property var` on `AlbumCard`, used only for double-click add-to-queue and the drag cursor override via `setDragCopyCursor` / `restoreOverrideCursor`. `AlbumBrowser` itself has no engine reference. Setting the cursor via a C++ invokable (`QGuiApplication::setOverrideCursor`) is necessary because a QML `cursorShape` binding on `trackMA` is ineffective once the mouse leaves the `MouseArea`'s bounds during a drag — the global override persists regardless of which item is under the cursor.
+- **Minimal engine reference in `AlbumCard`**: `engine` is an optional `property var` on `AlbumCard`, used only for double-click add-to-queue and the drag cursor override via `beginDragCursor` / `setDragCursorAllowed` / `restoreOverrideCursor`. `AlbumBrowser` itself has no engine reference. Setting the cursor via a C++ invokable (`QGuiApplication`'s override-cursor stack) is necessary because a QML `cursorShape` binding on `trackMA` is ineffective once the mouse leaves the `MouseArea`'s bounds during a drag — the global override persists regardless of which item is under the cursor. `setDragCursorAllowed()` deliberately uses `QGuiApplication::changeOverrideCursor()` (changes the shape of the currently-active override) rather than another `setOverrideCursor()` call while switching between "+"/"not allowed" mid-drag — stacking a second override there would require a second `restoreOverrideCursor()` to unwind it, which nothing in the drag flow calls.
 
 ---
 
@@ -3143,6 +3144,16 @@ color: Qt.rgba(Theme.surfaceContainerLowest.r * paneOpacity,
   effect at all*. Fixed by scaling both `GradientStop` colors' alpha by
   `paneOpacity` the same way the bars background is.
 
+**Foreground-only bar opacity** (`visualizerConfig.audioVisualizerBarOpacity`,
+0.0–1.0, independent of the background setting above): a plain `opacity:`
+binding on `barsRow` — the `Row` containing every level-bar and peak-tick
+`Rectangle` — so the whole foreground fades or stays crisp as one unit,
+mirroring how the background setting treats the pane's `color` and placeholder
+gradient as one unit. Unlike the pane background, this needs **no** premultiply
+treatment: `barsRow` is an ordinary in-scene `Item`, not a `Window`'s own clear
+color, so Qt Quick's scenegraph alpha blending already composites it correctly
+at any opacity, including 0%.
+
 **A stricter variant of the scoping gotcha, found and fixed after the pane shipped
 not opening at all**: this pane's own config property is named `visualizerConfig`,
 *not* `appConfig`, deliberately. It was originally named `appConfig` (matching the
@@ -3204,8 +3215,11 @@ identically to the CROSSFADE/AUTO PLAY tabs it was built from: custom-styled
 (8-64), decay speed (0.0-1.0), sensitivity (0-100%, displayed as a percentage,
 divided by 100 when calling `setAudioVisualizerSensitivity`; 50% is "no
 change" from the original fixed dB mapping — see the `AudioVisualizerController`
-pipeline above), and pane opacity (0-100%, displayed as a percentage,
-divided by 100 when calling `setAudioVisualizerPaneOpacity`), the same hand-rolled
+pipeline above), pane opacity (0-100%, displayed as a percentage,
+divided by 100 when calling `setAudioVisualizerPaneOpacity`), and bar opacity
+(0-100%, same percentage convention, calling `setAudioVisualizerBarOpacity` —
+an identical slider block placed directly below pane opacity, independent
+setting for the bars/peak ticks themselves), the same hand-rolled
 48×24 toggle track for peak-hold, and — for color — a fixed 16-column `Grid`
 (not `Row`; 32 swatches at 32px + 16px spacing no longer fit on one line at the
 dialog's content width, so `columns: 16` lays them out as two full rows of 16

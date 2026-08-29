@@ -506,9 +506,14 @@ QVariantList PlaybackEngine::trackList() const
     }
     return result;
 }
-void PlaybackEngine::setDragCopyCursor()
+void PlaybackEngine::beginDragCursor()
 {
-    QGuiApplication::setOverrideCursor(Qt::DragCopyCursor);
+    QGuiApplication::setOverrideCursor(Qt::ForbiddenCursor);
+}
+
+void PlaybackEngine::setDragCursorAllowed(bool allowed)
+{
+    QGuiApplication::changeOverrideCursor(allowed ? Qt::DragCopyCursor : Qt::ForbiddenCursor);
 }
 
 void PlaybackEngine::restoreOverrideCursor()
