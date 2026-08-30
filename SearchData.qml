@@ -2,11 +2,14 @@ import QtQuick
 
 // Non-visual data object for the SEARCH tab — deliberately independent of
 // LibraryData: it never reads or writes LibraryData's selection state, and
-// LibraryData never reads it back. The one intentional exception is
-// activeGenreNames, bound one-way from LibraryData in Main.qml so the
-// "Consider Genre" checkbox can read which genres are currently active in
-// GenreBar; that's a read-only value the spec itself requires, not a
-// structural coupling of search's behavior to the library's.
+// LibraryData never reads it back. Two intentional read-only exceptions:
+// activeGenreNames (bound one-way from LibraryData in Main.qml, the genres
+// currently toggled active in GenreBar this session -- used when "Consider
+// Genre" is checked) and enabledGenreNames (bound one-way from AppConfig,
+// every genre currently enabled to appear in GenreBar at all -- the baseline
+// used when "Consider Genre" is unchecked, see UC-03/UC-21). Both exist only
+// to keep search's scope from ever exceeding what's visible/enabled; neither
+// is a structural coupling of search's behavior to the library's.
 // Instantiated once in Main.qml (id: search) and passed down via a
 // `property SearchData searchData` on SearchPanel.qml/SearchResultBrowser.qml.
 Item {
@@ -19,6 +22,8 @@ Item {
 
     // Set (one-way) by Main.qml from LibraryData.activeGenreNames.
     property var activeGenreNames: []
+    // Set (one-way) by Main.qml from AppConfig.enabledGenres.
+    property var enabledGenreNames: []
 
     property string query:          ""
     property string mode:           "all"   // "all" | "artists" | "albums" | "tracks"
@@ -35,7 +40,8 @@ Item {
     onModeChanged:           _scheduleSearch()
     onConsiderGenreChanged:  _scheduleSearch()
     onMatchWholeWordChanged: _scheduleSearch()
-    onActiveGenreNamesChanged: if (considerGenre) _scheduleSearch()
+    onActiveGenreNamesChanged:  if (considerGenre)  _scheduleSearch()
+    onEnabledGenreNamesChanged: if (!considerGenre) _scheduleSearch()
 
     function _scheduleSearch() {
         if (query.trim() === "") {
@@ -53,9 +59,17 @@ Item {
         interval: 250
         repeat:   false
         onTriggered: {
+            // Baseline (unchecked) restricts to every enabled genre -- a
+            // disabled genre must never surface in search even though
+            // "Consider Genre" itself is off; checked narrows further to
+            // just the genres currently toggled active in GenreBar. Either
+            // way genre filtering is now always applied (considerGenre: true
+            // passed to searchLibrary()), just against a different list.
+            const genresForSearch = root.considerGenre ? root.activeGenreNames
+                                                         : root.enabledGenreNames
             results = root.libraryModel
                 ? root.libraryModel.searchLibrary(root.query.trim(), root.mode,
-                                                   root.activeGenreNames, root.considerGenre,
+                                                   genresForSearch, true,
                                                    root.matchWholeWord)
                 : []
         }

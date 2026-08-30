@@ -135,43 +135,90 @@ User clicks an album row in `LibraryTree`:
 
 | Field | Detail |
 |-------|--------|
-| **Goal** | User defines the list of genre names that appear as toggle buttons in `GenreBar`. |
+| **Goal** | User defines the list of genre names used to organize/scan the library, and chooses which subset of them appear as toggle buttons in `GenreBar`. |
 | **Actor** | User |
 | **Precondition** | Setup dialog is open on the GENRES tab. |
 | **Trigger** | User interacts with genre management controls. |
+
+Two related but distinct lists are involved: `AppConfig.genres` (up to 40, the full
+configured set — drives library scanning/filtering via
+`LibraryModel::startFullScan()`/`startStatCheck()`, and is what the SetupDialog grid
+manages) and `AppConfig.enabledGenres` (a subset of it, up to 30, the set actually
+shown as `GenreBar` buttons). Deliberately kept separate so hiding a genre's button
+never excludes its tracks from the scanned library — only from the `GenreBar` filter
+row.
 
 ### Normal Flow — Add genre
 
 1. User types a genre name into the text input (e.g. "Techno").
 2. User presses **Enter** or clicks **ADD**.
 3. `SetupDialog.doAddGenre()` calls `appConfig.addGenre(name)`.
-4. `AppConfig` performs a case-insensitive duplicate check, appends the name to `m_genres`, emits `genresChanged`, and auto-saves to `Topaz.config`.
-5. `LibraryData` receives `genresChanged` → `rebuildGenreModel()` clears and repopulates `genreModel` from `appConfig.genres`.
-6. `GenreBar` `Repeater` re-evaluates → the new genre button appears immediately.
+4. `AppConfig` performs a case-insensitive duplicate check, rejects the add if
+   `genres` is already at its 40-entry ceiling, otherwise appends the name to
+   `m_genres`. If fewer than 30 genres are currently enabled, the new genre is
+   also added to `m_enabledGenreSet` (so it behaves exactly as before for anyone
+   under the enabled cap — new genres just work). Emits `genresChanged` (and
+   `enabledGenresChanged` if newly enabled), auto-saves to `Topaz.config`.
+5. `LibraryData` receives `genresChanged`/`enabledGenresChanged` →
+   `rebuildGenreModel()` clears and repopulates `genreModel` from
+   `appConfig.enabledGenres` (not the full `genres` list).
+6. `GenreBar` `Repeater` re-evaluates → the new genre button appears immediately,
+   if it was auto-enabled.
+
+### Normal Flow — Enable/disable a genre in GenreBar
+
+1. In the SetupDialog GENRES grid, each cell has a small checkbox in its top-right
+   corner reflecting `appConfig.isGenreEnabled(name)`.
+2. User clicks the checkbox → `appConfig.setGenreEnabled(name, !current)`.
+3. If enabling and `enabledGenres` is already at its 30-entry cap, the call is
+   rejected (returns `false`, no state change) — the checkbox simply doesn't
+   flip. Unchecked checkboxes are visually dimmed and their cursor reverts to
+   the default arrow once the cap is reached, so the "why didn't this work"
+   case still reads as blocked rather than broken.
+4. Otherwise `m_enabledGenreSet` is mutated, `enabledGenresChanged` emitted,
+   config auto-saved.
+5. `LibraryData.rebuildGenreModel()` fires → the genre's `GenreBar` button
+   appears or disappears immediately. The genre itself remains fully configured
+   and scanned regardless of this state.
+6. Clicking the checkbox does not also select the cell for deletion (its own
+   `MouseArea` sits above the cell-wide selection `MouseArea`, `z: -1` on the
+   latter — the same layering convention `SetupDialog`'s folder list uses for
+   its per-row subfolders checkbox).
 
 ### Normal Flow — Delete selected genre
 
 1. User clicks a genre cell in the grid to select it (highlighted in `secondaryContainer` colour).
 2. User clicks **DELETE SELECTED**.
-3. `appConfig.removeGenreAt(index)` removes the entry, emits `genresChanged`, auto-saves.
-4. `LibraryData.rebuildGenreModel()` fires; the chip disappears from `GenreBar`.
+3. `appConfig.removeGenreAt(index)` removes the entry from `m_genres` and, if it
+   was enabled, also removes it from `m_enabledGenreSet`; emits `genresChanged`
+   (and `enabledGenresChanged` if it had been enabled), auto-saves.
+4. `LibraryData.rebuildGenreModel()` fires; the button disappears from `GenreBar`
+   if it had been enabled.
 
 ### Normal Flow — Delete all genres
 
 1. User clicks **DELETE ALL**.
-2. `appConfig.clearGenres()` empties the list, emits `genresChanged`, auto-saves.
+2. `appConfig.clearGenres()` empties both `m_genres` and `m_enabledGenreSet`, emits `genresChanged` (and `enabledGenresChanged` if any had been enabled), auto-saves.
 3. `GenreBar` shows empty state; `LibraryTree` and `AlbumBrowser` show their no-genres hints.
 
 ### Rules
 
 - Duplicate names (case-insensitive) are silently ignored.
 - Genre names are stored in their original casing and displayed upper-cased in `GenreBar`.
-- Maximum 30 genres are displayed in `GenreBar` (3 rows × 10 columns); additional genres are
-  still stored but may not be visible until the layout is extended.
-- The GENRES tab in `SetupDialog` lays out configured genres in a fixed 6-column grid
-  (up to 5 rows = 30 cells) sized to always fit without a scrollbar, mirroring
-  `GenreBar`'s own fixed-grid pattern; genres beyond 30 remain stored but may not all
-  be visible, the same accepted ceiling as `GenreBar`.
+- **Configured genres** (`AppConfig.genres`): capped at 40 (`addGenre()` silently
+  rejects beyond that, same convention as the duplicate check). The GENRES tab in
+  `SetupDialog` lays out all configured genres in a fixed 5-column × 8-row grid
+  (40 cells) sized to always fit without a scrollbar.
+- **Enabled genres** (`AppConfig.enabledGenres`, persisted separately as
+  `enabledGenres` in `Topaz.config`): capped at 30, matching `GenreBar`'s own fixed
+  "Grid 30" (3 rows × 10 columns) capacity exactly, so it can never receive more
+  entries than it has room for. Display order always follows `genres`' order —
+  membership is tracked as a plain set (`QSet<QString>`), never a separately
+  ordered list, so it can't desync from add/remove/reorder of the configured list.
+- **Migration**: config files predating this feature have no `enabledGenres` key.
+  On load, `AppConfig` treats that as "enable every configured genre, up to 30" —
+  every pre-existing install keeps showing exactly the `GenreBar` buttons it did
+  before, until the user configures more than 30 and starts using the checkboxes.
 
 ---
 
@@ -3785,10 +3832,14 @@ playback pauses mid-fade.
    `Rectangle`+`TextInput` convention as `SetupDialog`'s "add genre" input).
    `onTextEdited` writes directly to `SearchData.query`.
 3. `SearchData` restarts a 250ms debounce `Timer` on every `query`/`mode`/
-   `considerGenre`/`matchWholeWord`/`activeGenreNames` change. When it
+   `considerGenre`/`matchWholeWord`/`activeGenreNames`/`enabledGenreNames`
+   change (the latter two gated so only the one actually in effect
+   re-triggers a search — see "Alternate: Consider Genre" below). When it
    fires, it calls `LibraryModel.searchLibrary(query.trim(), mode,
-   activeGenreNames, considerGenre, matchWholeWord)` and assigns the result
-   to `SearchData.results`.
+   considerGenre ? activeGenreNames : enabledGenreNames, true,
+   matchWholeWord)` and assigns the result to `SearchData.results`.
+   `considerGenre` is always passed as `true` to the C++ call now — search
+   is always genre-restricted, only the source list changes.
 4. `SearchResultBrowser`'s `ListView` is bound directly to
    `searchData.results` — no additional refresh plumbing needed, since
    `SearchData` already centralizes the debounce. Each result renders as an
@@ -3835,11 +3886,19 @@ playback pauses mid-fade.
 ### Alternate: Consider Genre
 
 - `SearchPanel`'s "Consider Genre" checkbox (unchecked by default) is bound
-  to `SearchData.considerGenre`. When checked, search additionally requires
-  `t.genre` to be one of `LibraryData.activeGenreNames` (the genres
-  currently toggled on in `GenreBar`) — this is the one deliberate,
-  read-only dependency `SearchData` has on `LibraryData`; nothing else
-  couples the two. When unchecked, genre is ignored entirely.
+  to `SearchData.considerGenre`. Search is **always** genre-restricted
+  (`searchLibrary()`'s `considerGenre` parameter is always passed `true`);
+  the checkbox only chooses which list `t.genre` is checked against:
+  - **Unchecked (baseline)**: `AppConfig.enabledGenres` — every genre
+    currently enabled in Setup, i.e. every genre that has a button in
+    `GenreBar` at all, regardless of whether that button is currently
+    toggled on. This is what keeps a *disabled* genre's tracks out of search
+    results even without the user touching this checkbox — see UC-03.
+  - **Checked**: `LibraryData.activeGenreNames` — narrows further to only
+    the genres currently toggled *active* in `GenreBar` this session.
+  `SearchData` therefore has two deliberate, read-only dependencies now
+  (`activeGenreNames` from `LibraryData`, `enabledGenreNames` from
+  `AppConfig`) — nothing else couples it to either.
 
 ### Empty-State Rules
 
@@ -3859,6 +3918,10 @@ playback pauses mid-fade.
   `LibraryData`'s tree-building functions. Switching tabs cannot leave one
   side's state corrupted by the other.
 - **PLAYLISTS tab**: has its own dedicated panel content — see UC-22.
+  Deliberately has no equivalent enabled-genre restriction: a playlist's
+  saved tracks remain fully browsable/loadable regardless of any genre's
+  enabled/disabled state in `GenreBar` — `PlaylistsData`/`PlaylistsPanel`/
+  `PlaylistViewer` have no genre-filtering path at all, unlike `SearchData`.
 - **Loader-based panel swap, not `visible` toggling**: a `Loader` destroys/
   recreates its content on swap, so `LibraryTree`'s local transient UI state
   (expanded-artist set, its own scroll position) resets when the user

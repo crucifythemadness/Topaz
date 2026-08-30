@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QQmlEngine>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -12,6 +13,12 @@
 // Schema:
 //   {
 //     "genres":  [ "Techno", "IDM", ... ],
+//     "enabledGenres": [ "Techno", ... ],   // subset of "genres", <= 30 entries,
+//                                           // shown as buttons in GenreBar (see
+//                                           // UC-03). Missing key (older config
+//                                           // files) means "enable every genre up
+//                                           // to 30", preserving pre-existing
+//                                           // behavior.
 //     "folders": [ { "volume": "MusicDrive", "relPath": "/Music", "rawPath": "D:/Music",
 //                    "includeSubfolders": true }, ... ],
 //                  // Anchored on the volume label (VolumePath, see volumepath.h) rather
@@ -58,6 +65,9 @@ class AppConfig : public QObject
     QML_ELEMENT
 
     Q_PROPERTY(QStringList  genres  READ genres  NOTIFY genresChanged)
+    // Subset of genres (<= kMaxEnabledGenres) shown as GenreBar buttons; order
+    // always follows genres' order. See UC-03.
+    Q_PROPERTY(QStringList  enabledGenres READ enabledGenres NOTIFY enabledGenresChanged)
     Q_PROPERTY(QVariantList folders READ folders NOTIFY foldersChanged)
 
     // ── Layout state (window size + panel widths) ─────────────────────────
@@ -150,6 +160,7 @@ public:
     explicit AppConfig(QObject *parent = nullptr);
 
     QStringList  genres()  const;
+    QStringList  enabledGenres() const;
     QVariantList folders() const;
 
     int windowWidth()          const { return m_windowWidth;        }
@@ -213,9 +224,19 @@ public:
     int  milkdropPaneHeight()     const { return m_milkdropPaneHeight;     }
 
     // ── Genre operations ─────────────────────────────────────────────────
+    // Silently rejected (no-op) once genres() would exceed kMaxGenres --
+    // mirrors the existing silent-duplicate-reject convention below.
     Q_INVOKABLE void addGenre(const QString &name);
     Q_INVOKABLE void removeGenreAt(int index);
     Q_INVOKABLE void clearGenres();
+
+    // ── GenreBar visibility (enabled-genre subset, see UC-03) ─────────────
+    Q_INVOKABLE bool isGenreEnabled(const QString &name) const;
+    // Returns false (no-op) if enabling would exceed kMaxEnabledGenres;
+    // otherwise mutates, auto-saves, and returns true.
+    Q_INVOKABLE bool setGenreEnabled(const QString &name, bool enabled);
+    Q_INVOKABLE int  maxGenres()        const { return kMaxGenres;        }
+    Q_INVOKABLE int  maxEnabledGenres() const { return kMaxEnabledGenres; }
 
     // ── Folder operations ────────────────────────────────────────────────
     // rawPath may be a plain path or a file:// URL — both are accepted.
@@ -323,6 +344,7 @@ public:
 
 signals:
     void genresChanged();
+    void enabledGenresChanged();
     void foldersChanged();
     void windowGeometryChanged();
     void panelWidthsChanged();
@@ -347,7 +369,14 @@ private:
     void    load();
     QString configFilePath() const;
 
+    static constexpr int kMaxGenres        = 40;
+    static constexpr int kMaxEnabledGenres = 30;
+
     QStringList  m_genres;
+    // Membership only -- display order is always derived fresh from m_genres'
+    // own order (enabledGenres()), never stored separately, so it can never
+    // desync from add/remove/reorder of m_genres itself.
+    QSet<QString> m_enabledGenreSet;
     // Each entry is a QVariantMap: { "path": QString, "includeSubfolders": bool }
     QVariantList m_folders;
 

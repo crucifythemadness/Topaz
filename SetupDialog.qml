@@ -5,7 +5,9 @@ import QtQuick.Dialogs
 
 // ── SetupDialog ──────────────────────────────────────────────────────────
 // Modal setup window with four tabs:
-//   • GENRES        — add/delete genre names that drive GenreBar buttons
+//   • GENRES        — add/delete genre names (up to 40) and choose which of them
+//                     (up to 30) are enabled via a per-cell checkbox to appear as
+//                     GenreBar buttons
 //   • FILE MONITORING — add/delete monitored folders (with subfolders toggle)
 //   • CROSSFADE     — enable/disable crossfade and set its length (see UC-15)
 //   • AUTO PLAY     — settings for the still-unimplemented AUTO PLAY feature:
@@ -240,17 +242,22 @@ Popup {
                             color: Theme.fgSurfaceVariant
                         }
 
-                        // Fixed no-scroll grid — sized to hold up to 30 genres
-                        // (6 columns × 5 rows), mirroring GenreBar's own
-                        // fixed-capacity "Grid 30" pattern.
+                        // Fixed no-scroll grid — sized to hold up to 40 configured
+                        // genres (5 columns × 8 rows). Each cell carries its own
+                        // enable/disable checkbox (top right) controlling whether
+                        // that genre is one of the <= 30 shown as a GenreBar
+                        // button — see AppConfig.enabledGenres / UC-03. The
+                        // configured-genre ceiling here is intentionally higher
+                        // than GenreBar's own fixed "Grid 30" capacity.
                         Grid {
                             id: genreManageGrid
                             anchors.fill: parent
                             visible: root.appConfig !== null && root.appConfig.genres.length > 0
-                            clip: true              // defensive: beyond 30 genres, extra
+                            clip: true              // defensive: beyond 40 genres, extra
                                                      // rows clip rather than overflow —
-                                                     // same ceiling GenreBar accepts
-                            columns: 6
+                                                     // AppConfig.addGenre() enforces that
+                                                     // ceiling so this should never trigger
+                            columns: 5
                             rowSpacing:    8
                             columnSpacing: 8
 
@@ -262,11 +269,24 @@ Popup {
                                     width:  (genreManageGrid.width
                                              - (genreManageGrid.columns - 1) * genreManageGrid.columnSpacing)
                                             / genreManageGrid.columns
-                                    height: 48
+                                    height: 54
                                     radius: Theme.radiusSm
 
                                     readonly property bool isSelected:
                                         root.selectedGenreIndex === index
+                                    // Deliberately reads the enabledGenres property
+                                    // directly (not isGenreEnabled()) -- QML only
+                                    // re-evaluates a binding off a NOTIFYing
+                                    // Q_PROPERTY it reads, not off an arbitrary
+                                    // Q_INVOKABLE call, so this must not be
+                                    // isGenreEnabled(modelData) or the checkbox
+                                    // would freeze after its first paint.
+                                    readonly property bool isEnabled:
+                                        root.appConfig !== null
+                                        && root.appConfig.enabledGenres.indexOf(modelData) !== -1
+                                    readonly property bool atCap:
+                                        root.appConfig !== null
+                                        && root.appConfig.enabledGenres.length >= root.appConfig.maxEnabledGenres()
 
                                     color: isSelected
                                            ? Theme.secondaryContainer
@@ -285,21 +305,74 @@ Popup {
 
                                     Text {
                                         anchors.centerIn: parent
+                                        anchors.verticalCenterOffset: 5
                                         text: modelData.toUpperCase()
                                         font.family:        Theme.fontFamilyBody
                                         font.pixelSize:     Theme.labelMd
                                         font.letterSpacing: 1.2
                                         elide: Text.ElideRight
-                                        width: parent.width - 12
+                                        width: parent.width - 28
                                         horizontalAlignment: Text.AlignHCenter
                                         color: genreCell.isSelected
                                                ? Theme.fgSecondaryContainer
                                                : Theme.fgSurfaceVariant
                                     }
 
+                                    // Enable/disable checkbox — whether this genre
+                                    // is one of the <= 30 shown in GenreBar. Given
+                                    // its own reserved column (see cellHover below)
+                                    // rather than overlapping it with z-stacking,
+                                    // so there's no ambiguity over which MouseArea
+                                    // a click in this corner reaches. Hit area
+                                    // (28x28) is deliberately bigger than the
+                                    // visible 18x18 checkbox glyph for an easier
+                                    // target.
+                                    Item {
+                                        id: genreEnableHit
+                                        width: 28; height: 28
+                                        anchors { top: parent.top; right: parent.right; margins: 2 }
+
+                                        Rectangle {
+                                            id: genreEnableBox
+                                            width: 18; height: 18
+                                            anchors.centerIn: parent
+                                            radius: 3
+                                            opacity: genreCell.isEnabled || !genreCell.atCap ? 1.0 : 0.35
+                                            color: genreCell.isEnabled
+                                                   ? Theme.secondaryContainer
+                                                   : "transparent"
+                                            border.width: genreCell.isEnabled ? 0 : 1
+                                            border.color: Theme.outlineVariant
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                visible: genreCell.isEnabled
+                                                text: "✓"   // ✓
+                                                font.pixelSize: 11
+                                                font.weight:    Font.Bold
+                                                color: Theme.fgSecondaryContainer
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: (genreCell.isEnabled || !genreCell.atCap)
+                                                         ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            onClicked: {
+                                                if (root.appConfig)
+                                                    root.appConfig.setGenreEnabled(
+                                                        modelData, !genreCell.isEnabled)
+                                            }
+                                        }
+                                    }
+
+                                    // Cell-wide selection (for DELETE SELECTED) --
+                                    // deliberately stops short of genreEnableHit's
+                                    // column above so the two never overlap.
                                     MouseArea {
                                         id: cellHover
-                                        anchors.fill: parent
+                                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                                        width: parent.width - 30
                                         hoverEnabled: true
                                         cursorShape:  Qt.PointingHandCursor
                                         onClicked: root.selectedGenreIndex =

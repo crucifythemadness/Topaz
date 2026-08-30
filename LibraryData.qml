@@ -15,19 +15,23 @@ Item {
     onAppConfigChanged: {
         if (appConfig) {
             appConfig.genresChanged.connect(rebuildGenreModel)
+            appConfig.enabledGenresChanged.connect(rebuildGenreModel)
             rebuildGenreModel()
         }
     }
 
-    // Rebuild the genre toggle model from the persisted config.
+    // Rebuild the genre toggle model from the persisted config. Sourced from
+    // enabledGenres (<= 30, see UC-03) rather than the full genres list, so
+    // GenreBar only ever shows the subset the user chose to activate in
+    // SetupDialog -- the full list still drives library scanning separately.
     function rebuildGenreModel() {
         _genreModel.clear()
         activeGenreNames = []
         selectedArtist   = ""
         selectedAlbum    = ""
         if (!appConfig) return
-        for (let i = 0; i < appConfig.genres.length; i++)
-            _genreModel.append({ name: appConfig.genres[i], active: false })
+        for (let i = 0; i < appConfig.enabledGenres.length; i++)
+            _genreModel.append({ name: appConfig.enabledGenres[i], active: false })
     }
 
     // ── LibraryModel binding ──────────────────────────────────────────────

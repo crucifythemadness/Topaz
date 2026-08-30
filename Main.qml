@@ -244,12 +244,14 @@ ApplicationWindow {
     LibraryModel { id: libraryModel; appConfig: appConfig }
 
     // Search state -- deliberately independent of LibraryData (see
-    // SearchData.qml). activeGenreNames is the one read-only exception,
-    // needed for the SEARCH tab's "Consider Genre" checkbox.
+    // SearchData.qml). activeGenreNames/enabledGenreNames are the two
+    // read-only exceptions, needed for the SEARCH tab's "Consider Genre"
+    // checkbox and its enabled-genres baseline respectively.
     SearchData {
         id: search
-        libraryModel:     libraryModel
-        activeGenreNames: lib.activeGenreNames
+        libraryModel:      libraryModel
+        activeGenreNames:  lib.activeGenreNames
+        enabledGenreNames: appConfig.enabledGenres
     }
 
     // Audio playback engine — owns QMediaPlayer + queue model.

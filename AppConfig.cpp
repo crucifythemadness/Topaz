@@ -35,6 +35,16 @@ QStringList AppConfig::genres() const
     return m_genres;
 }
 
+QStringList AppConfig::enabledGenres() const
+{
+    QStringList result;
+    for (const QString &g : m_genres) {
+        if (m_enabledGenreSet.contains(g))
+            result.append(g);
+    }
+    return result;
+}
+
 QVariantList AppConfig::folders() const
 {
     // m_folders persists {volume, relPath, rawPath, includeSubfolders}; each
@@ -63,13 +73,24 @@ void AppConfig::addGenre(const QString &name)
     const QString trimmed = name.trimmed();
     if (trimmed.isEmpty())
         return;
+    if (m_genres.size() >= kMaxGenres)
+        return;
     // Case-insensitive duplicate check
     for (const QString &g : std::as_const(m_genres)) {
         if (g.compare(trimmed, Qt::CaseInsensitive) == 0)
             return;
     }
     m_genres.append(trimmed);
+    // Default a new genre to enabled while under the cap -- preserves today's
+    // behavior (every configured genre shows in GenreBar) for anyone who
+    // never exceeds kMaxEnabledGenres.
+    bool nowEnabled = false;
+    if (m_enabledGenreSet.size() < kMaxEnabledGenres) {
+        m_enabledGenreSet.insert(trimmed);
+        nowEnabled = true;
+    }
     emit genresChanged();
+    if (nowEnabled) emit enabledGenresChanged();
     save();
 }
 
@@ -77,8 +98,11 @@ void AppConfig::removeGenreAt(int index)
 {
     if (index < 0 || index >= m_genres.size())
         return;
+    const QString name = m_genres.at(index);
     m_genres.removeAt(index);
+    const bool wasEnabled = m_enabledGenreSet.remove(name);
     emit genresChanged();
+    if (wasEnabled) emit enabledGenresChanged();
     save();
 }
 
@@ -87,8 +111,32 @@ void AppConfig::clearGenres()
     if (m_genres.isEmpty())
         return;
     m_genres.clear();
+    const bool hadEnabled = !m_enabledGenreSet.isEmpty();
+    m_enabledGenreSet.clear();
     emit genresChanged();
+    if (hadEnabled) emit enabledGenresChanged();
     save();
+}
+
+bool AppConfig::isGenreEnabled(const QString &name) const
+{
+    return m_enabledGenreSet.contains(name);
+}
+
+bool AppConfig::setGenreEnabled(const QString &name, bool enabled)
+{
+    if (!m_genres.contains(name))
+        return false;
+    const bool currentlyEnabled = m_enabledGenreSet.contains(name);
+    if (currentlyEnabled == enabled)
+        return true;
+    if (enabled && m_enabledGenreSet.size() >= kMaxEnabledGenres)
+        return false;
+    if (enabled) m_enabledGenreSet.insert(name);
+    else         m_enabledGenreSet.remove(name);
+    emit enabledGenresChanged();
+    save();
+    return true;
 }
 
 // ── Folder operations ─────────────────────────────────────────────────────
@@ -515,6 +563,26 @@ void AppConfig::load()
     for (const QJsonValue &v : genresArr)
         m_genres.append(v.toString());
 
+    m_enabledGenreSet.clear();
+    if (root.contains(QStringLiteral("enabledGenres"))) {
+        const QJsonArray enabledArr = root[QStringLiteral("enabledGenres")].toArray();
+        for (const QJsonValue &v : enabledArr) {
+            const QString name = v.toString();
+            // Defensive: ignore names no longer present in genres(), and never
+            // load past kMaxEnabledGenres even if the file was hand-edited.
+            if (m_genres.contains(name) && m_enabledGenreSet.size() < kMaxEnabledGenres)
+                m_enabledGenreSet.insert(name);
+        }
+    } else {
+        // Migration: no prior concept of enabled/disabled genres existed, so
+        // every config file predating this feature implicitly had all its
+        // genres shown in GenreBar. Preserve that behavior exactly.
+        for (const QString &g : std::as_const(m_genres)) {
+            if (m_enabledGenreSet.size() >= kMaxEnabledGenres) break;
+            m_enabledGenreSet.insert(g);
+        }
+    }
+
     m_folders.clear();
     const QJsonArray foldersArr = root[QStringLiteral("folders")].toArray();
     for (const QJsonValue &v : foldersArr) {
@@ -617,6 +685,13 @@ void AppConfig::save()
     for (const QString &g : std::as_const(m_genres))
         genresArr.append(g);
     root[QStringLiteral("genres")] = genresArr;
+
+    QJsonArray enabledGenresArr;
+    for (const QString &g : std::as_const(m_genres)) {
+        if (m_enabledGenreSet.contains(g))
+            enabledGenresArr.append(g);
+    }
+    root[QStringLiteral("enabledGenres")] = enabledGenresArr;
 
     QJsonArray foldersArr;
     for (const QVariant &v : std::as_const(m_folders))
