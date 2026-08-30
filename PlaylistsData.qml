@@ -58,4 +58,17 @@ Item {
         selectedRawTracks   = []
         albums              = []
     }
+
+    // Called after LOAD replaces the queue with `fileName`'s tracks. Selects
+    // the next playlist in the list, or the previous one if `fileName` was
+    // last, instead of leaving PlaylistViewer on its empty state -- mirrors
+    // LibraryData.toggleGenre()'s neighbor-selection convention. Falls back
+    // to clearSelection() if `fileName` isn't found or no other playlist
+    // exists.
+    function selectNeighborOf(fileName) {
+        const pos = playlists.findIndex(p => p.fileName === fileName)
+        if (pos === -1 || playlists.length <= 1) { clearSelection(); return }
+        const neighborIdx = pos < playlists.length - 1 ? pos + 1 : pos - 1
+        selectPlaylist(playlists[neighborIdx].fileName)
+    }
 }

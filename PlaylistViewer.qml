@@ -81,7 +81,8 @@ Rectangle {
                 cursorShape: loadBtn.active ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: {
                     if (!loadBtn.active) return
-                    const tracks = root.playlistsData ? root.playlistsData.selectedRawTracks : []
+                    const tracks         = root.playlistsData ? root.playlistsData.selectedRawTracks : []
+                    const loadedFileName = root.playlistsData ? root.playlistsData.selectedFileName   : ""
                     if (root.engine && tracks.length > 0) {
                         // loadPlaylistTracks() always replaces the queue --
                         // it crossfades into the new playlist when CROSSFADE
@@ -89,9 +90,9 @@ Rectangle {
                         // otherwise it's an instant replace (see UC-23).
                         if (root.autoPlay) root.autoPlay.clearHistory()
                         root.engine.loadPlaylistTracks(tracks)
-                        root.engine.setActivePlaylistName(root.playlistsData.selectedFileName)
+                        root.engine.setActivePlaylistName(loadedFileName)
                     }
-                    if (root.playlistsData) root.playlistsData.clearSelection()
+                    if (root.playlistsData) root.playlistsData.selectNeighborOf(loadedFileName)
                 }
 
                 ToolTip.visible: containsMouse && loadBtn.active

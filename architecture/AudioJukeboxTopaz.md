@@ -1369,6 +1369,7 @@ configurable via the app JSON config) will be introduced at that point.
       +refreshPlaylists()
       +selectPlaylist(fileName)
       +clearSelection()
+      +selectNeighborOf(fileName)
     }
 
     class AppConfig {
@@ -3973,7 +3974,12 @@ playback pauses mid-fade.
    see Design notes) calls `PlaylistsData.refreshPlaylists()`, which calls
    `PlaylistManager.listPlaylists()` — a `QDir` listing of `*.xml` files in
    `playlistDirectory()`, sorted by display name ascending
-   (case-insensitive).
+   (case-insensitive). If `PlaylistsData.selectedFileName` is currently
+   empty (nothing selected yet this session), the first playlist that isn't
+   already active in the queue is auto-selected via `selectPlaylist()` —
+   this only fires on empty selection, so re-entering PLAYLISTS after
+   browsing LIBRARY/SEARCH preserves whatever was already selected instead
+   of resetting it.
 3. `PlaylistsPanel` renders one row per playlist (styled like
    `LibraryTree`'s genre row: bullet + name, `Theme.fontFamilyBody`/
    `labelLg`/`Font.Bold`, `Theme.s10` background when selected).
@@ -4005,8 +4011,12 @@ playback pauses mid-fade.
    `PlaybackEngine.loadPlaylistTracks()`, which **always** replaces the
    queue, crossfading into it if eligible (see UC-23), followed by
    `engine.setActivePlaylistName(selectedFileName)` — exactly the same
-   step-6 flow UC-10 uses. `PlaylistsData.clearSelection()` is then called,
-   returning `PlaylistViewer` to its empty state.
+   step-6 flow UC-10 uses. `PlaylistsData.selectNeighborOf(selectedFileName)`
+   is then called instead of clearing the selection outright: it selects the
+   next playlist in the list, or the previous one if the just-loaded
+   playlist was last, so `PlaylistViewer` keeps showing a preview rather
+   than dropping to its empty state. Only falls back to the empty state
+   (`clearSelection()`) if no other playlist exists.
 
 ### Alternate: Playlist already active in the queue
 

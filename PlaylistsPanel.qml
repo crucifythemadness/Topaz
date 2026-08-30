@@ -17,7 +17,20 @@ Rectangle {
     // Component.onCompleted) already ran, so playlistsData would still be
     // null at that point -- the same ordering pitfall AlbumBrowser/
     // SearchResultBrowser already solve via onLibChanged/onSearchDataChanged.
-    onPlaylistsDataChanged: if (playlistsData) playlistsData.refreshPlaylists()
+    //
+    // Also auto-selects the first playlist not already active in the queue,
+    // but only if nothing is currently selected -- PlaylistsData lives
+    // outside the Loader specifically so its selection survives switching
+    // away and back (same as LibraryData/SearchData), so this must not
+    // clobber an existing selection on re-entry.
+    onPlaylistsDataChanged: {
+        if (!playlistsData) return
+        playlistsData.refreshPlaylists()
+        if (playlistsData.selectedFileName !== "") return
+        const activeInQueue = playlistsData.engine ? playlistsData.engine.activePlaylistName : ""
+        const first = playlistsData.playlists.find(p => p.fileName !== activeInQueue)
+        if (first) playlistsData.selectPlaylist(first.fileName)
+    }
 
     // Ghost right border -- same chrome as LibraryTree/SearchPanel
     Rectangle {
