@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 
 // Replaces LibraryTree/SearchPanel in the same SplitView slot when TopBar's
 // PLAYLISTS tab is active (see Main.qml's Loader). Entirely independent of
@@ -53,6 +54,52 @@ Rectangle {
             font.weight:        Font.Bold
             font.letterSpacing: Theme.lsWidest
             color: Theme.primary
+        }
+
+        // Placeholder for a v2.0 playlist manager -- intentionally not wired
+        // to anything yet (no signal, no onClicked action). Styled to match
+        // NowPlaying's NEW/LOAD pill buttons for a preview of its look.
+        Rectangle {
+            id: managerBtn
+            anchors { right: parent.right; rightMargin: 20; verticalCenter: parent.verticalCenter }
+            width:  132
+            height: 36
+            radius: Theme.radiusSm
+            color: managerHover.containsMouse ? Theme.surfaceContainerHigh
+                                               : Theme.surfaceContainer
+            border.color: Theme.ov20
+            border.width: 1
+
+            Row {
+                anchors.centerIn: parent
+                spacing: 6
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "⚙"
+                    font.pixelSize: Theme.titleMd
+                    color: Theme.fgSurfaceVariant
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("MANAGER")
+                    font.family:        Theme.fontFamilyBody
+                    font.pixelSize:     Theme.labelLg
+                    font.weight:        Font.Medium
+                    font.letterSpacing: Theme.lsWide
+                    color: Theme.fgSurface
+                }
+            }
+
+            MouseArea {
+                id: managerHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+
+                ToolTip.visible: containsMouse
+                ToolTip.delay:   600
+                ToolTip.text:    qsTr("OFFLINE PLAYLIST MANAGER")
+            }
         }
     }
 
