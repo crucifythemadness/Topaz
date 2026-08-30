@@ -1570,6 +1570,30 @@ them. It does *not* re-trigger on ordinary playback advancing to the next track 
 3. `PlaybackEngine` toggles `QMediaPlayer` between playing and paused states.
 4. `engine.isPlaying` property changes → button icon updates immediately.
 
+### Design note — blinking the Play/Pause button while manually paused
+
+`engine.userPaused` (`bool`) drives a looping blink animation on the
+Play/Pause button (`NowPlaying.qml`, the same `SequentialAnimation on
+opacity` idiom used for the AUTO PLAY button's active-state blink and
+`PlaybackQueue`'s new-track flicker). It is deliberately **not** derived
+from `!isPlaying` — several other states (most notably the queue having
+finished naturally, see UC-16, and the brief instant during any track
+transition) also produce `isPlaying() == false` without the user having
+paused anything, and would blink incorrectly if used directly.
+`m_userPaused` is instead set explicitly, only by `togglePlay()`'s pause
+branch, and cleared at exactly three points: `togglePlay()`'s resume
+branch (same track resumed), `switchCurrentIndexTo()` (the single choke
+point shared by every "a new track becomes current" path — both hard cuts
+via `loadTrack()` and the crossfade midpoint in `onFadeTick()` — so a
+crossfade transition also correctly ends a stale pause state), and
+`clearQueue()` (no current track left to be "paused"). Deliberately
+*not* cleared by `previous()`'s "restart current track" branch (`position
+> 3s` or already the first track) — that branch only seeks to position 0
+without calling `play()`, so a paused track stays paused (and keeps
+blinking) at the reset position, matching "blinks until the user resumes
+playback or a different track plays" literally: rewinding the same track
+is neither of those.
+
 ### Normal Flow — Next / Previous
 
 - **Next** (⏭): `engine.next()` → loads `m_currentIndex + 1`, calls `play()`.
@@ -1628,6 +1652,7 @@ explicitly. See UC-15 for the full crossfade flow.
 |-------------------|------|-------------|
 | `currentIndex` | `int` | Index of the currently loaded track (−1 = nothing) |
 | `isPlaying` | `bool` | `true` when `QMediaPlayer` is in `PlayingState` |
+| `userPaused` | `bool` | `true` only while the current track is paused via `togglePlay()`'s explicit pause branch — never for any other "not playing" state (see UC-07's design note). Drives `NowPlaying`'s Play/Pause button blink. |
 | `position` | `qint64` | Playback position in milliseconds |
 | `duration` | `qint64` | Duration of current track in milliseconds |
 | `positionString` | `QString` | `position` formatted as "M:SS" |
@@ -1649,8 +1674,8 @@ explicitly. See UC-15 for the full crossfade flow.
 | `playlistLocked` | `bool` | When `true`, queue mutations (add, remove, move) do **not** update the XSPF file on disk. Default: `false`. Reset to `false` automatically when `activePlaylistName` changes or `clearQueue()` is called. When set from `true` → `false`, the XSPF is immediately rewritten with the current queue contents. |
 | `playlistManager` | `PlaylistManager*` | Reference to the `PlaylistManager` instance set from `Main.qml`. Used internally to sync the XSPF file when tracks are added, removed, or reordered. |
 | `appConfig` | `AppConfig*` | Reference to the `AppConfig` instance set from `Main.qml`. `crossfadeEnabled`/`crossfadeSeconds` are read live from it on every crossfade eligibility check (see UC-15) — never cached. |
-| `addTrack(map, autoPlayAdded=false)` | invokable | Append a single track map to the queue. If `activePlaylistName` is set **and** `playlistLocked` is `false`, calls `playlistManager.appendTrack()` to persist the change. `autoPlayAdded` is set only by `AutoPlayController`'s 3 add call sites (see UC-16); when `true`, marks the new row's `autoPlayAdded` queue role `true` and clears it again after ~2s. |
-| `addTracks(list)` | invokable | Batch-append a QVariantList of track maps. Calls `appendTrack` for each new entry when a playlist is active and not locked. |
+| `addTrack(map, autoPlayAdded=false)` | invokable | Append a single track map to the queue. If `activePlaylistName` is set **and** `playlistLocked` is `false`, calls `playlistManager.appendTrack()` to persist the change. `autoPlayAdded` is set only by `AutoPlayController`'s 3 add call sites (see UC-16); when `true`, marks the new row's `autoPlayAdded` queue role `true` and clears it again after ~2s. Auto-plays the new track when the queue was empty **or** `m_queueFinished` (every queued track already played through to its natural end) — never while merely paused (see UC-16). |
+| `addTracks(list)` | invokable | Batch-append a QVariantList of track maps. Calls `appendTrack` for each new entry when a playlist is active and not locked. Same widened auto-play condition as `addTrack()` above — also used for manual single-track adds (`AlbumCard` double-click, drag-and-drop into `PlaybackQueue`), not just playlist loading. |
 | `removeAt(index)` | invokable | Remove track at given queue index. Captures `filePath` before removal; calls `playlistManager.removeTrackByPath()` when a playlist is active and not locked. |
 | `moveUp(index)` | invokable | Swap track with predecessor (not allowed on playing track). Calls `playlistManager.rewritePlaylist()` when a playlist is active and not locked. |
 | `moveDown(index)` | invokable | Swap track with successor (not allowed on playing track). Calls `playlistManager.rewritePlaylist()` when a playlist is active and not locked. |
@@ -2220,8 +2245,17 @@ volumes to `1.0` — runs before `loadTrack()`, `seek()`, and every queue-mutati
 mid-crossfade abandons the fade and snaps to a clean single-deck state rather than
 attempting to reconcile the interruption with an in-progress fade — a deliberate
 simplification, since this is a narrow, few-second window. `togglePlay()` pauses/resumes
-both decks together when `m_crossfading` is true, so a paused fade doesn't leave the
-standby deck silently continuing to ramp.
+both decks together when `m_crossfading` is true — and, critically, also stops/restarts
+`m_fadeTimer` itself in lockstep. `m_fadeElapsedMs` advances purely on the timer's
+wall-clock ticks, independent of the decks' actual playback state, so pausing only the
+decks without also stopping the timer would let the fade keep advancing in the
+background — including past the midpoint (`switchCurrentIndexTo()`, which also clears
+`userPaused`, see UC-07) or to completion — while the user sits paused, silently
+swapping the current track out from under them and ending the Play/Pause blink early.
+Stopping `m_fadeTimer` is what actually makes "stopping the `QTimer` freezes the fade
+exactly in place" (above) true for a user-initiated pause, not just for
+`cancelCrossfade()`; resuming restarts the timer, which continues the ramp from the
+exact `frac` it was frozen at, since `m_fadeElapsedMs` was never touched.
 
 ### Design notes
 
@@ -2270,15 +2304,20 @@ itself reads) and forwarded as `autoPlay` to `BottomBar`, `AlbumBrowser`→`Albu
 2. `BottomBar` calls `autoPlay.toggle()` → `start()`.
 3. `start()` clears the in-memory play-history (`QHash<QString /*filePath*/, int>
    m_playCounts`) — a fresh history every session.
-4. If the queue is empty, `pickNextCandidate()` (below) selects one track and
-   `PlaybackEngine::addTrack()` adds it — `addTrack`'s existing auto-play-when-empty
-   behavior starts it playing immediately, satisfying "add the first track immediately
-   and play it" with no `PlaybackEngine` changes. If no candidate exists at all (the
-   library has nothing matching the current filters), `start()` returns without
-   activating — the button stays green.
-5. Otherwise (queue already has content), `m_active` becomes `true` and the poll timer
-   starts at the configured interval — no immediate top-up; the first addition beyond
-   an empty-queue kickstart always happens on the first tick (see below).
+4. If the queue is empty **or** `engine.queueFinished()` is `true` (every queued
+   track has already played through to its natural end — see "Auto-play a
+   newly-added track" below), `pickNextCandidate()` (below) selects one track and
+   `PlaybackEngine::addTrack(candidate, true)` adds it — `addTrack`'s auto-play
+   condition (queue empty or finished) starts it playing immediately, satisfying
+   "add the first track immediately and play it" whether the queue was genuinely
+   empty or just has nothing left to play. A track that's merely *paused* leaves
+   `queueFinished()` `false`, so starting AUTO PLAY in that state does **not**
+   force a new track over it — falls through to case 5 instead. If no candidate
+   exists at all (the library has nothing matching the current filters), `start()`
+   returns without activating — the button stays green.
+5. Otherwise (something is actually playing or paused), `m_active` becomes `true`
+   and the poll timer starts at the configured interval — no immediate top-up; the
+   next addition happens on the first tick (see below).
 6. `activeChanged()`/`manualQueueEditingAllowedChanged()`/`queueClearAllowedChanged()`
    fire — `BottomBar` turns red; the queue's clear button and (unless Allow Manual
    Modification is on) add/remove/reorder controls become disabled.
@@ -2398,13 +2437,41 @@ the user's attention. No other path (manual drag/double-click add, batch
 
 ### Alternate: playback stalls at end of queue
 
-`advanceToNext()`'s existing "no next track" branch (queue exhausted) now also emits a
-new `PlaybackEngine::queueExhausted()` signal — needed because neither
+`advanceToNext()`'s existing "no next track" branch (queue exhausted) sets
+`m_queueFinished = true` (see "Auto-play a newly-added track" below) and emits a
+`PlaybackEngine::queueExhausted()` signal — needed because neither
 `queueCountChanged` nor `currentIndexChanged` fires in that branch, so nothing would
 otherwise notice playback has silently stopped. `AutoPlayController::onQueueExhausted()`
 reacts immediately (not on the next poll tick, since music has already stopped):
-`pickNextCandidate()`, and if found, `addTrack()` followed by an explicit `playAt()` on
-the new index; if not found, `stop(true)`.
+`pickNextCandidate()`, and if found, `addTrack(candidate, true)` — which now auto-plays
+the new track on its own, since `m_queueFinished` is still `true` at this point; no
+separate `playAt()` call is needed (an earlier version called both, redundantly
+reloading the same track twice). If no candidate is found, `stop(true)`.
+
+### Auto-play a newly-added track (queue empty or finished)
+
+`PlaybackEngine::addTrack()`/`addTracks()` auto-play the newly-added track
+when `m_currentIndex < 0` (queue was completely empty — the original
+rule) **or** `m_queueFinished` is `true` (every queued track has already
+played through to its natural end). The two states otherwise look
+identical from `m_currentIndex`/`isPlaying()` alone — both leave
+`m_currentIndex` pointing at the last track and `isPlaying() == false` —
+so a dedicated flag is needed to tell "queue naturally finished" apart
+from "current track is merely paused," which must **never** auto-start a
+newly-added track. `m_queueFinished` is set only by `advanceToNext()`'s
+no-next-track branch, and cleared by `loadTrack()` — the single choke
+point every track-loading path (`playAt`, `next`, `previous`,
+`togglePlay`'s from-empty branch, `advanceToNext`'s has-next-track branch,
+and `addTrack`/`addTracks`' own auto-play branches) already funnels
+through — so it's always accurate regardless of *how* a track next gets
+loaded. This applies uniformly to AUTO PLAY additions and manual ones
+(`AlbumCard`'s double-click, drag-and-drop into `PlaybackQueue`) alike,
+since both call through `addTrack()`/`addTracks()`. `PlaybackEngine` also
+exposes a plain public `queueFinished()` getter (not `Q_PROPERTY`/
+`Q_INVOKABLE` — C++-only) so `AutoPlayController::start()` can apply the
+exact same "empty or finished" test when deciding whether *starting* a
+session should also play immediately (Normal Flow step 4 above), not just
+`addTrack()`/`addTracks()` themselves.
 
 ### Alternate: starvation
 

@@ -361,11 +361,27 @@ Rectangle {
 
                     // Play/Pause (primary action)
                     Rectangle {
+                        id: playPauseBtn
                         width: 44; height: 44
                         radius: 22
                         color: playHover.containsMouse ? Theme.surfaceBright
                                                        : Theme.surfaceContainerHighest
                         anchors.verticalCenter: parent.verticalCenter
+
+                        // Blinks while the current track is manually paused
+                        // (see UC-07) -- stops the instant playback resumes
+                        // or a different track becomes current, never for
+                        // any other "not playing" state (e.g. the queue
+                        // having finished naturally).
+                        readonly property bool userPaused: root.engine && root.engine.userPaused
+
+                        SequentialAnimation on opacity {
+                            running: playPauseBtn.userPaused
+                            loops: Animation.Infinite
+                            NumberAnimation { from: 1.0; to: 0.3; duration: 500 }
+                            NumberAnimation { from: 0.3; to: 1.0; duration: 500 }
+                        }
+                        onUserPausedChanged: if (!userPaused) opacity = 1.0   // animation.stop() can land mid-fade
 
                         Text {
                             anchors.centerIn: parent

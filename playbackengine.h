@@ -50,6 +50,7 @@ class PlaybackEngine : public QAbstractListModel
 
     Q_PROPERTY(int     currentIndex     READ currentIndex     NOTIFY currentIndexChanged)
     Q_PROPERTY(bool    isPlaying        READ isPlaying        NOTIFY isPlayingChanged)
+    Q_PROPERTY(bool    userPaused       READ userPaused       NOTIFY userPausedChanged)
     Q_PROPERTY(qint64  position         READ position         NOTIFY positionChanged)
     Q_PROPERTY(qint64  duration         READ duration         NOTIFY durationChanged)
     Q_PROPERTY(QString positionString   READ positionString   NOTIFY positionChanged)
@@ -100,6 +101,10 @@ public:
     // ── Properties ────────────────────────────────────────────────────────
     int     currentIndex()      const { return m_currentIndex; }
     bool    isPlaying()         const;
+    // True only while the current track is paused via togglePlay()'s
+    // explicit pause branch -- never for any other "not playing" state
+    // (queue finished, mid-transition, etc.). See UC-07.
+    bool    userPaused()        const { return m_userPaused; }
     qint64  position()          const;
     qint64  duration()          const;
     QString positionString()    const;
@@ -117,6 +122,11 @@ public:
     QString currentCoverSource()      const;
     QString currentLargeCoverSource()  const { return m_largeCoverSource; }
     int     queueCount()               const { return m_queue.size(); }
+    // True when every track in the queue has already played through to its
+    // natural end (see UC-16) -- lets AutoPlayController::start() know
+    // whether it should also play immediately, same as an empty queue.
+    // Plain C++ getter, not QML-facing (no Q_PROPERTY/Q_INVOKABLE needed).
+    bool    queueFinished()            const { return m_queueFinished; }
     QString activePlaylistName()        const { return m_activePlaylistName; }
     bool    playlistLocked()             const { return m_playlistLocked; }
     PlaylistManager* playlistManager()  const { return m_playlistManager; }
@@ -206,6 +216,7 @@ public:
 signals:
     void currentIndexChanged();
     void isPlayingChanged();
+    void userPausedChanged();
     void positionChanged();
     void durationChanged();
     void currentTrackChanged();
@@ -263,6 +274,19 @@ private:
     QString                   m_largeCoverSource;
     QString                   m_activePlaylistName;
     bool                      m_playlistLocked    = false;
+    // True from the moment advanceToNext() finds no next track (natural
+    // end-of-queue) until the next loadTrack() call of any kind. Lets
+    // addTrack()/addTracks() tell "queue finished naturally" apart from
+    // "current track is merely paused" -- both otherwise look identical
+    // (m_currentIndex unchanged, isPlaying() false). See UC-16/UC-06.
+    bool                      m_queueFinished      = false;
+    // True only while the current track is paused via togglePlay()'s
+    // explicit pause branch -- never for any other "not playing" state.
+    // Cleared by resuming the same track (togglePlay()), any new track
+    // becoming current (switchCurrentIndexTo(), shared by hard cuts and
+    // crossfade), or clearQueue(). Drives NowPlaying's Play/Pause button
+    // blink -- see UC-07.
+    bool                      m_userPaused         = false;
     PlaylistManager          *m_playlistManager    = nullptr;
     AppConfig                 *m_appConfig          = nullptr;
 

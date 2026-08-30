@@ -275,7 +275,10 @@ void PlaybackEngine::addTrack(const QVariantMap &trackMap, bool autoPlayAdded)
     if (m_playlistManager && !m_activePlaylistName.isEmpty())
         m_playlistManager->appendTrack(m_activePlaylistName, trackMap);
 
-    if (m_currentIndex < 0) {
+    // Auto-play when the queue was empty OR every queued track has already
+    // played through to its natural end (m_queueFinished) -- but never
+    // while merely paused mid-track, which leaves m_queueFinished false.
+    if (m_currentIndex < 0 || m_queueFinished) {
         loadTrack(row);
         m_player->play();
     }
@@ -312,7 +315,8 @@ void PlaybackEngine::addTracks(const QVariantList &trackList)
             m_playlistManager->appendTrack(m_activePlaylistName, v.toMap());
     }
 
-    if (m_currentIndex < 0) {
+    // Same widened auto-play condition as addTrack() -- see there.
+    if (m_currentIndex < 0 || m_queueFinished) {
         loadTrack(first);
         m_player->play();
     }
@@ -453,6 +457,8 @@ void PlaybackEngine::clearQueue()
     cancelCrossfade();
     m_player->stop();
     m_currentIndex = -1;
+    m_queueFinished = false;   // cleared, not "finished" -- see addTrack()/addTracks()
+    if (m_userPaused) { m_userPaused = false; emit userPausedChanged(); }   // no current track left to be paused
     clearCoverSource();
     beginResetModel();
     m_queue.clear();
@@ -621,9 +627,18 @@ void PlaybackEngine::togglePlay()
         // Keep both decks in lockstep while a crossfade is in progress —
         // otherwise the standby deck would keep fading in while paused.
         if (m_crossfading) m_players[1 - m_activeDeck]->pause();
+        // m_fadeTimer runs on wall-clock ticks independent of the decks'
+        // playback state -- without stopping it too, the fade keeps
+        // advancing (and can cross the midpoint/complete) while both decks
+        // sit paused, silently swapping the current track out from under a
+        // paused user. See UC-15's "interrupted mid-crossfade".
+        if (m_crossfading) m_fadeTimer->stop();
+        if (!m_userPaused) { m_userPaused = true; emit userPausedChanged(); }
     } else {
         m_player->play();
         if (m_crossfading) m_players[1 - m_activeDeck]->play();
+        if (m_crossfading) m_fadeTimer->start();
+        if (m_userPaused) { m_userPaused = false; emit userPausedChanged(); }
     }
 }
 
@@ -661,6 +676,7 @@ void PlaybackEngine::loadTrack(int idx)
 {
     if (idx < 0 || idx >= m_queue.size()) return;
 
+    m_queueFinished = false;
     cancelCrossfade();
     m_audioOutput->setVolume(1.0f);   // in case a fade left this deck's volume < 1
     m_player->setSource(QUrl::fromLocalFile(m_queue.at(idx).filePath));
@@ -674,6 +690,11 @@ void PlaybackEngine::switchCurrentIndexTo(int idx)
 
     const int oldIndex = m_currentIndex;
     m_currentIndex = idx;
+
+    // A new track becoming current (hard cut or crossfade midpoint --
+    // this is the single choke point shared by both) always ends any
+    // prior manual pause. See UC-07.
+    if (m_userPaused) { m_userPaused = false; emit userPausedChanged(); }
 
     // Resolve this track's rating identity/value now — the single canonical
     // point every playback path (queue add, playlist load, crossfade) funnels
@@ -729,6 +750,7 @@ void PlaybackEngine::advanceToNext()
         m_player->play();
     } else {
         // End of queue — stay on last track, stopped
+        m_queueFinished = true;
         emit isPlayingChanged();
         emit queueExhausted();
     }

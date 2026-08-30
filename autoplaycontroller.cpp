@@ -151,10 +151,15 @@ void AutoPlayController::start()
 
     m_playCounts.clear();   // fresh history for this session
 
-    if (m_engine->queueCount() == 0) {
+    // Play immediately if there's nothing currently playing to keep the
+    // user listening -- an empty queue, or one where every track has
+    // already played through to its natural end (see UC-16). Otherwise
+    // (something's actually playing or paused) just join in via the
+    // normal poll-tick top-up below.
+    if (m_engine->queueCount() == 0 || m_engine->queueFinished()) {
         const QVariantMap candidate = pickNextCandidate();
         if (candidate.isEmpty()) return;   // nothing to play at all — stay inactive
-        m_engine->addTrack(candidate, true);   // auto-plays since the queue was empty
+        m_engine->addTrack(candidate, true);   // auto-plays (queue empty or finished)
     }
 
     m_active = true;
@@ -233,8 +238,12 @@ void AutoPlayController::onQueueExhausted()
         stop(true);
         return;
     }
+    // addTrack() now auto-plays on its own here: the queue just became
+    // "finished" (advanceToNext() set that immediately before emitting
+    // queueExhausted(), which is what triggered this handler), so no
+    // separate playAt() call is needed -- it would just reload the same
+    // track a second time.
     m_engine->addTrack(candidate, true);
-    m_engine->playAt(m_engine->queueCount() - 1);
 }
 
 QVariantMap AutoPlayController::pickNextCandidate() const
