@@ -17,6 +17,10 @@ Rectangle {
     property var autoPlay: null
     color: Theme.surface
 
+    // Emitted after LOAD when the just-loaded playlist had tracks whose file
+    // couldn't be found -- Main.qml opens MissingTracksDialog. See UC-22.
+    signal missingPlaylistTracks(var missingTracks)
+
     readonly property var currentAlbums: playlistsData ? playlistsData.albums : []
 
     // Restore the scroll position saved from this same playlistsData the
@@ -44,8 +48,13 @@ Rectangle {
             height: 44
             radius: Theme.radiusSm
 
+            // Also active when there's nothing loadable but something to
+            // *report* -- a playlist whose tracks are all missing should
+            // still let LOAD explain why, rather than being permanently
+            // disabled with no feedback. See UC-22.
             readonly property bool active: root.playlistsData
-                                            && root.playlistsData.selectedRawTracks.length > 0
+                                            && (root.playlistsData.selectedRawTracks.length > 0
+                                                || root.playlistsData.selectedMissingTracks.length > 0)
                                             && (!root.autoPlay || root.autoPlay.queueClearAllowed)
 
             color:  active && loadHover.containsMouse ? Theme.surfaceContainerHigh
@@ -82,6 +91,7 @@ Rectangle {
                 onClicked: {
                     if (!loadBtn.active) return
                     const tracks         = root.playlistsData ? root.playlistsData.selectedRawTracks : []
+                    const missing        = root.playlistsData ? root.playlistsData.selectedMissingTracks : []
                     const loadedFileName = root.playlistsData ? root.playlistsData.selectedFileName   : ""
                     if (root.engine && tracks.length > 0) {
                         // loadPlaylistTracks() always replaces the queue --
@@ -93,6 +103,7 @@ Rectangle {
                         root.engine.setActivePlaylistName(loadedFileName)
                     }
                     if (root.playlistsData) root.playlistsData.selectNeighborOf(loadedFileName)
+                    if (missing.length > 0) root.missingPlaylistTracks(missing)
                 }
 
                 ToolTip.visible: containsMouse && loadBtn.active
@@ -101,16 +112,39 @@ Rectangle {
             }
         }
 
-        Text {
+        Row {
             anchors { right: parent.right; rightMargin: 32; bottom: parent.bottom; bottomMargin: 20 }
-            text: (playlistsData && playlistsData.selectedFileName !== "")
-                  ? (_trackCount(root.currentAlbums) + " TRACKS  —  "
-                     + playlistsData.selectedDisplayName.toUpperCase())
-                  : ""
-            font.family:        Theme.fontFamilyMono
-            font.pixelSize:     Theme.monoSm
-            font.letterSpacing: 1.5
-            color: Theme.fgSurfaceVariant
+            spacing: 4
+
+            readonly property int offlineCount:
+                root.playlistsData ? root.playlistsData.selectedMissingTracks.length : 0
+
+            Text {
+                text: (playlistsData && playlistsData.selectedFileName !== "")
+                      ? (_trackCount(root.currentAlbums) + " TRACKS  —  "
+                         + playlistsData.selectedDisplayName.toUpperCase())
+                      : ""
+                font.family:        Theme.fontFamilyMono
+                font.pixelSize:     Theme.monoSm
+                font.letterSpacing: 1.5
+                color: Theme.fgSurfaceVariant
+            }
+            Text {
+                visible: parent.offlineCount > 0
+                text: "|"
+                font.family:        Theme.fontFamilyMono
+                font.pixelSize:     Theme.monoSm
+                font.letterSpacing: 1.5
+                color: Theme.fgSurfaceVariant
+            }
+            Text {
+                visible: parent.offlineCount > 0
+                text: parent.offlineCount + " OFFLINE"
+                font.family:        Theme.fontFamilyMono
+                font.pixelSize:     Theme.monoSm
+                font.letterSpacing: 1.5
+                color: Theme.error
+            }
         }
     }
 

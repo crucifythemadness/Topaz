@@ -18,6 +18,9 @@ Rectangle {
     // Emitted when the user left-clicks the album cover — opens the
     // detachable BigCoverWindow pane (see Main.qml's Loader wiring).
     signal bigCoverRequested()
+    // Emitted after LOAD when the just-loaded playlist had tracks whose file
+    // couldn't be found -- Main.qml opens MissingTracksDialog. See UC-10.
+    signal missingPlaylistTracks(var missingTracks)
 
     // ── Load playlist file dialog ───────────────────────────────────────
     FileDialog {
@@ -40,6 +43,8 @@ Rectangle {
                 root.engine.loadPlaylistTracks(tracks)
                 root.engine.setActivePlaylistName(result.fileName)
             }
+            if (result.missing && result.missing.length > 0)
+                root.missingPlaylistTracks(result.missing)
         }
     }
 

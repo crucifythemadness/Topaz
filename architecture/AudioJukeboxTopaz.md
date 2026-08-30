@@ -511,7 +511,7 @@ Topaz module
 ├── PlaylistsData.qml   independent playlists-tab state model — see UC-22 (deliberately not coupled to LibraryData/SearchData beyond one read-only property)
 │                         property PlaylistManager playlistManager, property LibraryModel libraryModel
 │                         property var engine  (one-way ref to PlaybackEngine, read-only — used only to recognize the playlist currently active in the queue)
-│                         property var playlists, property string selectedFileName/selectedDisplayName, property var albums, property var selectedRawTracks
+│                         property var playlists, property string selectedFileName/selectedDisplayName, property var albums, property var selectedRawTracks, property var selectedMissingTracks
 │                         property real resultScrollY  (PlaylistViewer's ListView.contentY, persisted here so it survives the Loader swap, see UC-22)
 ├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, SearchData, PlaylistsData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, AudioVisualizerController, SetupDialog, NewPlaylistDialog
 │                         property string activeTab ("library"/"playlists"/"search")  — drives TopBar's tab highlighting and which components the SplitView's first two Loaders load, see UC-21/UC-22
@@ -529,6 +529,10 @@ Topaz module
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 │                         signal playlistCreated()  ← emitted on success; Main.qml calls playlistsData.refreshPlaylists() so the PLAYLISTS tab stays live even while already active, see UC-22
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
+├── MissingTracksDialog.qml Informational popup listing tracks (artist/album/title/location)
+│                         a playlist LOAD couldn't find on disk; opened from both NowPlaying and
+│                         PlaylistViewer's LOAD flows via a missingPlaylistTracks(missingTracks)
+│                         signal — see UC-10/UC-22
 ├── FloatingPane.qml    Reusable base Window for detachable panes (frameless, movable, resizable, right-click-to-close) — see "Detachable panes" below
 ├── BigCoverWindow.qml  FloatingPane specialization: shows only the current track's cover art
 ├── TagInfoWindow.qml   FloatingPane specialization: shows the current track's tag metadata, content scales with pane size — see UC-18
@@ -1408,6 +1412,7 @@ configurable via the app JSON config) will be introduced at that point.
       +selectedDisplayName string
       +albums QVariantList
       +selectedRawTracks QVariantList
+      +selectedMissingTracks QVariantList
       +resultScrollY real
       +refreshPlaylists()
       +selectPlaylist(fileName)
@@ -2037,13 +2042,21 @@ This is valid XSPF and no special handling is required.
    always mean "load this playlist now.")
 7. `engine.setActivePlaylistName(result.fileName)` sets the display name in the `PlaybackQueue` header.
 
-### Alternate: All tracks missing
+### Alternate: All or some tracks missing
 
-If no tracks resolve successfully, `result.tracks` is empty.  `addTracks` is not called; queue stays empty and nothing plays.  No error dialog is shown (silent skip by design).
-
-### Alternate: Partial tracks missing
-
-Only the found tracks are added; the missing ones are silently omitted.  The loaded playlist file on disk is unchanged.
+`VolumePath::resolve()` (`volumepath.cpp`) already calls `QFileInfo::exists()`
+at every candidate it tries, so `loadPlaylist()`'s per-track resolution
+failure *is* "this file no longer exists on disk" — not merely "its volume
+isn't mounted." Rather than silently dropping these, `loadPlaylist()`
+collects them into `result.missing`, one entry per skipped track, built
+entirely from what the XSPF itself stored (`artist`, `album`, `title`,
+`location`) since there's no file left to re-read tags from. `onAccepted`
+loads whatever's in `result.tracks` as normal (empty queue, nothing plays,
+if *every* track was missing) and, if `result.missing` is non-empty, emits
+`missingPlaylistTracks(result.missing)` — `Main.qml` opens
+`MissingTracksDialog` with it, listing every missing track's artist/album/
+title/location. The playlist file on disk is never rewritten by this —
+purely an in-memory filter for this one load.
 
 ### Alternate: Load from PlaylistViewer (PLAYLISTS tab)
 
@@ -2055,7 +2068,10 @@ steps 1-5 entirely: the file was already selected via `PlaylistsPanel`, and
 preview) by `PlaylistsData.selectPlaylist()`. The already-parsed track list
 is reused from `PlaylistsData.selectedRawTracks` rather than re-reading and
 re-parsing the XSPF file and re-running `TagReader::read()` on every track
-a second time.
+a second time. `result.missing` from that same earlier call is cached as
+`PlaylistsData.selectedMissingTracks` and only surfaced (via the same
+`missingPlaylistTracks` signal/`MissingTracksDialog`) when LOAD is actually
+clicked, not at selection/preview time.
 
 ### Alternate: Crossfade into the new playlist
 
@@ -4048,8 +4064,12 @@ playback pauses mid-fade.
    right; the left side (where `AlbumBrowser`/`SearchResultBrowser` show
    "ALBUM BROWSER"/"SEARCH RESULT") instead shows a compact **LOAD**
    button (see step 6).
-6. User clicks **LOAD**. Identical effect to UC-10's LOAD button, except
-   no `FileDialog` is shown (the file was already picked in step 4) and no
+6. User clicks **LOAD** — active whenever there's something loadable *or*
+   something to report (`selectedRawTracks.length > 0 ||
+   selectedMissingTracks.length > 0`), so a playlist whose tracks are all
+   missing still lets LOAD explain why rather than being permanently
+   disabled. Identical effect to UC-10's LOAD button, except no
+   `FileDialog` is shown (the file was already picked in step 4) and no
    `PlaylistManager.loadPlaylist()` re-parse happens — the already-cached
    `PlaylistsData.selectedRawTracks` is handed straight to
    `PlaybackEngine.loadPlaylistTracks()`, which **always** replaces the
@@ -4060,7 +4080,10 @@ playback pauses mid-fade.
    next playlist in the list, or the previous one if the just-loaded
    playlist was last, so `PlaylistViewer` keeps showing a preview rather
    than dropping to its empty state. Only falls back to the empty state
-   (`clearSelection()`) if no other playlist exists.
+   (`clearSelection()`) if no other playlist exists. If
+   `PlaylistsData.selectedMissingTracks` is non-empty (cached at selection
+   time, see UC-10's "All or some tracks missing"), `MissingTracksDialog`
+   opens listing them.
 
 ### Alternate: Playlist already active in the queue
 

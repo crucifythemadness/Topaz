@@ -72,8 +72,10 @@ public:
     // Loads an XSPF playlist file (accepts both a local path and a file:// URL).
     // For each <track>, resolves the stored <volume>/<location> pair back to an
     // absolute path via VolumePath::resolve() (tries the named volume first,
-    // then falls back to probing every mounted volume). Tracks whose file
-    // cannot be found are silently skipped.
+    // then falls back to probing every mounted volume) -- this already checks
+    // the file actually exists on disk (see volumepath.cpp), so a track whose
+    // file is missing/deleted/moved is what ends up in "missing" below. Never
+    // rewrites the playlist file itself.
     //
     // Returns a QVariantMap with:
     //   "fileName" – QString  base name + ".xml" (e.g. "GothicRock01.xml")
@@ -81,6 +83,10 @@ public:
     //                PlaybackEngine.addTracks();
     //              each map contains: filePath, title, artist, albumArtist,
     //                                 album, number, trackNumber, durationMs
+    //   "missing"  – QVariantList of tracks whose file could not be found,
+    //                sourced entirely from what's stored in the XSPF itself
+    //                (the file can't be re-read): each map contains
+    //                artist, album, title, location. See UC-10/UC-22.
     Q_INVOKABLE QVariantMap loadPlaylist(const QString &filePath);
 
 private:

@@ -32,6 +32,10 @@ Item {
     // can hand them straight to PlaybackEngine.addTracks() without
     // re-parsing the XSPF file and re-reading every tag a second time.
     property var    selectedRawTracks:   []
+    // Tracks from the same loadPlaylist() call whose file couldn't be found
+    // (see UC-10/UC-22) -- cached here at selection time, surfaced only when
+    // LOAD is actually clicked (PlaylistViewer.qml), not at preview time.
+    property var    selectedMissingTracks: []
 
     // PlaylistViewer's ListView.contentY, persisted here so it survives the
     // view being destroyed/recreated by Main.qml's Loader -- same pattern as
@@ -46,17 +50,19 @@ Item {
         if (!playlistManager || !libraryModel) return
         const path   = playlistManager.playlistDirectory() + "/" + fileName
         const result = playlistManager.loadPlaylist(path)
-        selectedFileName    = fileName
-        selectedDisplayName = fileName.replace(/\.xml$/i, "")
-        selectedRawTracks   = result.tracks || []
-        albums              = libraryModel.buildStandaloneTrackCards(selectedRawTracks)
+        selectedFileName      = fileName
+        selectedDisplayName   = fileName.replace(/\.xml$/i, "")
+        selectedRawTracks     = result.tracks || []
+        selectedMissingTracks = result.missing || []
+        albums                = libraryModel.buildStandaloneTrackCards(selectedRawTracks)
     }
 
     function clearSelection() {
-        selectedFileName    = ""
-        selectedDisplayName = ""
-        selectedRawTracks   = []
-        albums              = []
+        selectedFileName      = ""
+        selectedDisplayName   = ""
+        selectedRawTracks     = []
+        selectedMissingTracks = []
+        albums                = []
     }
 
     // Called after LOAD replaces the queue with `fileName`'s tracks. Selects

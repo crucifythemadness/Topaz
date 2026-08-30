@@ -346,7 +346,8 @@ bool PlaylistManager::rewritePlaylist(const QString &nameWithExt,
 QVariantMap PlaylistManager::loadPlaylist(const QString &filePath)
 {
     QVariantMap result;
-    result[QStringLiteral("tracks")] = QVariantList{};
+    result[QStringLiteral("tracks")]  = QVariantList{};
+    result[QStringLiteral("missing")] = QVariantList{};
 
     // Accept both file:// URLs and plain local paths
     QUrl url(filePath);
@@ -361,14 +362,27 @@ QVariantMap PlaylistManager::loadPlaylist(const QString &filePath)
     const QList<QStorageInfo> mounted = QStorageInfo::mountedVolumes();
 
     QVariantList tracks;
+    QVariantList missing;
     for (const XspfEntry &e : entries) {
         VolumePath vp;
         vp.volumeName   = e.volume;
         vp.relativePath = e.location;
         vp.rawPath      = e.location; // in case it was written as a raw fallback path
         const QString resolved = vp.resolve(mounted);
-        if (resolved.isEmpty())
-            continue;   // file not found on any mounted volume — skip silently
+        if (resolved.isEmpty()) {
+            // File doesn't exist anywhere currently mounted -- report it
+            // using only what the XSPF itself stored (there's no file left
+            // to re-read tags from). See UC-10/UC-22.
+            QVariantMap mm;
+            mm[QStringLiteral("artist")]   = e.creator;
+            mm[QStringLiteral("album")]    = e.album;
+            mm[QStringLiteral("title")]    = e.title;
+            mm[QStringLiteral("location")] = e.volume.isEmpty()
+                                              ? e.location
+                                              : e.volume + QStringLiteral(":") + e.location;
+            missing.append(mm);
+            continue;
+        }
 
         QVariantMap m;
         m[QStringLiteral("filePath")]    = resolved;
@@ -396,6 +410,7 @@ QVariantMap PlaylistManager::loadPlaylist(const QString &filePath)
         m[QStringLiteral("durationMs")]  = dur;
         tracks.append(m);
     }
-    result[QStringLiteral("tracks")] = tracks;
+    result[QStringLiteral("tracks")]  = tracks;
+    result[QStringLiteral("missing")] = missing;
     return result;
 }

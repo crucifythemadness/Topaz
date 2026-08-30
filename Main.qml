@@ -317,6 +317,12 @@ ApplicationWindow {
         onPlaylistCreated: playlistsData.refreshPlaylists()
     }
 
+    // Missing-playlist-tracks notice — opened after a LOAD (NowPlaying or
+    // PlaylistViewer) finds tracks whose file no longer exists. See UC-10/UC-22.
+    MissingTracksDialog {
+        id: missingTracksDialog
+    }
+
     // Kick off cache load + background stat-check once QML engine is ready
     Component.onCompleted: libraryModel.loadCacheAndStartStatCheck()
 
@@ -434,9 +440,17 @@ ApplicationWindow {
                     if (!item) return
                     item.engine   = engine
                     item.autoPlay = autoPlay
-                    if (root.activeTab === "search")         item.searchData    = search
-                    else if (root.activeTab === "playlists") item.playlistsData = playlistsData
-                    else                                      item.lib          = lib
+                    if (root.activeTab === "search") {
+                        item.searchData = search
+                    } else if (root.activeTab === "playlists") {
+                        item.playlistsData = playlistsData
+                        item.missingPlaylistTracks.connect(function(missing) {
+                            missingTracksDialog.missingTracks = missing
+                            missingTracksDialog.open()
+                        })
+                    } else {
+                        item.lib = lib
+                    }
                 }
             }
 
@@ -460,6 +474,10 @@ ApplicationWindow {
                 onWidthChanged: saveLayoutTimer.restart()
                 onNewPlaylistRequested: newPlaylistDialog.open()
                 onBigCoverRequested: root.bigCoverPaneOpen = true
+                onMissingPlaylistTracks: (missing) => {
+                    missingTracksDialog.missingTracks = missing
+                    missingTracksDialog.open()
+                }
             }
         }
 
