@@ -240,12 +240,25 @@ row.
 5. `AppConfig` converts the `file://` URL to a local path via `QUrl::toLocalFile()`,
    converts it to a volume-anchored `VolumePath` (`volumepath.h`), performs a
    duplicate check by `(volume, relPath)`, appends the entry with
-   `includeSubfolders: true`, emits `foldersChanged`, and auto-saves.
-6. The new row appears in the folder list with the **SUBFOLDERS** checkbox ticked.
-   If the folder's volume is later unmounted (disk unplugged, moved elsewhere),
-   the row dims and shows a "not connected" indicator instead of removing itself
-   from the list — `AppConfig::folders()` still returns the entry, just with an
-   empty resolved `path` and `available: false` (see "Config file format" below).
+   `includeSubfolders: true, active: true`, emits `foldersChanged`, and auto-saves.
+6. The new row appears in the folder list with both the **ACTIVE** and
+   **SUBFOLDERS** checkboxes ticked. If the folder's volume is later
+   unmounted (disk unplugged, moved elsewhere), the row dims and shows a
+   "not connected" indicator instead of removing itself from the list —
+   `AppConfig::folders()` still returns the entry, just with an empty
+   resolved `path` and `available: false` (see "Config file format" below).
+
+### Normal Flow — Toggle active
+
+1. User clicks the checkbox in the **ACTIVE** column of any folder row.
+2. `appConfig.setFolderActive(index, !current)` flips the flag, emits
+   `foldersChanged`, auto-saves.
+3. The checkbox visual updates immediately, and the row dims (same as an
+   unavailable/disconnected-volume row) to signal it's excluded from
+   scanning. The folder itself stays configured — this does not delete or
+   forget it, and does not trigger an immediate rescan: it takes effect the
+   same way toggling SUBFOLDERS or adding/removing a folder already does,
+   on the next scan (manual rescan button or app restart) — see UC-05.
 
 ### Normal Flow — Toggle subfolders
 
@@ -269,6 +282,27 @@ row.
 
 - Duplicate paths (exact string match) are silently ignored.
 - The `includeSubfolders` flag defaults to `true` when a folder is first added.
+- The `active` flag also defaults to `true` when a folder is first added, and
+  for every folder in a config file predating this feature (`AppConfig::load()`
+  treats a missing `active` key as `true`) — every pre-existing monitored
+  folder keeps scanning exactly as before until the user unchecks it.
+
+### Design notes
+
+- **Auto-rescan on close**: `SetupDialog` tracks a session-scoped
+  `_foldersDirty` flag, set by a `Connections { target: appConfig;
+  function onFoldersChanged() {...} }` block — every folder mutation above
+  emits `foldersChanged`, and (confirmed by grepping the whole codebase)
+  nothing outside the FILE MONITORING tab ever calls those methods or
+  connects to that signal, so it's already, structurally, exactly "a FILE
+  MONITORING edit happened this session," with no separate dirty-tracking
+  needed. Deliberately does **not** react to `genresChanged`/other settings
+  changes elsewhere in the dialog. Reset to `false` in `onAboutToShow` (so
+  only changes made *during the current open session* count) and consumed
+  in `onClosed`, which calls `libraryModel.startFullScan()` if the flag is
+  set — `closePolicy: Popup.NoAutoClose` means the header's ✕ button is the
+  dialog's only way to close, so this is a single, reliable hook. See
+  UC-05 for the resulting scan.
 
 ---
 
@@ -279,13 +313,21 @@ row.
 | **Goal** | Topaz scans all configured folders for audio files whose genre matches a configured genre and populates the library. |
 | **Actor** | User / System |
 | **Precondition** | At least one genre and one folder are configured in `AppConfig`. |
-| **Trigger** | User clicks **SCAN DIRECTORIES** in `BottomBar`, OR startup stat-check finds new/changed files. |
+| **Trigger** | User clicks **SCAN DIRECTORIES** in `BottomBar`, OR startup/watcher stat-check finds new/changed files, OR `SetupDialog` closes after a FILE MONITORING change (see UC-04's "Auto-rescan on close"). |
 
 ### Normal Flow — Full scan
 
 1. `BottomBar` emits `scanRequested()`.
 2. `Main.qml` calls `libraryModel.startFullScan()`.
-3. `LibraryModel` copies genres + folders from `AppConfig`, emits `_requestFullScan` to worker thread.
+3. `LibraryModel` copies genres from `AppConfig` and folders from its own
+   `activeFolders()` helper — `AppConfig.folders()` filtered down to entries
+   whose `active` key (default `true`) is truthy — then emits
+   `_requestFullScan` to the worker thread. An inactive folder's files are
+   excluded from discovery entirely (not scanned, not watched) until
+   reactivated and rescanned; `LibraryScanner` itself stays unaware of the
+   active/inactive distinction, same as it's unaware of which genres are
+   `GenreBar`-enabled vs merely configured (see UC-03). The startup/watcher
+   stat-check below uses the same `activeFolders()` filter.
 4. `LibraryScanner.fullScan()` delegates to the shared `performScan()` pipeline on
    the worker thread (`statCheck()` delegates to the same pipeline — see the
    Startup stat-check flow below; the two have always had near-identical
@@ -1000,6 +1042,7 @@ what "configured" means — absent means that pane has never been positioned yet
 | `removeFolderAt(index)` | Remove folder by index; auto-saves. |
 | `clearFolders()` | Remove all folders; auto-saves. |
 | `setFolderSubfolders(index, flag)` | Toggle the includeSubfolders flag; auto-saves. |
+| `setFolderActive(index, flag)` | Toggle whether this folder is scanned at all (default `true`); auto-saves. Takes effect on the next scan, not immediately — see UC-04/UC-05. |
 | `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. |
 | `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s CROSSFADE tab toggle (see UC-15). |
 | `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 10.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s CROSSFADE tab slider. |
@@ -1389,6 +1432,7 @@ configurable via the app JSON config) will be introduced at that point.
       +removeGenreAt(index)
       +addFolder(path, subfolders)
       +removeFolderAt(index)
+      +setFolderActive(index, active)
       +setCrossfadeEnabled(enabled)
       +setCrossfadeSeconds(seconds)
       +setAutoPlayQueueHorizon(tracks)

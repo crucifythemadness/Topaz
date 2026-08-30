@@ -276,7 +276,7 @@ void LibraryModel::loadCacheAndStartStatCheck()
     emit scanProgressChanged();
 
     emit _requestStatCheck(m_appConfig->genres(),
-                           m_appConfig->folders(),
+                           activeFolders(),
                            m_tracks);
 }
 
@@ -291,8 +291,21 @@ void LibraryModel::startFullScan()
     emit scanProgressChanged();
 
     emit _requestFullScan(m_appConfig->genres(),
-                          m_appConfig->folders(),
+                          activeFolders(),
                           m_tracks);
+}
+
+QVariantList LibraryModel::activeFolders() const
+{
+    QVariantList result;
+    if (!m_appConfig) return result;
+    const QVariantList all = m_appConfig->folders();
+    result.reserve(all.size());
+    for (const QVariant &v : all) {
+        if (v.toMap().value(QStringLiteral("active"), true).toBool())
+            result.append(v);
+    }
+    return result;
 }
 
 // ── Scan result slots ─────────────────────────────────────────────────────

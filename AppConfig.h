@@ -20,7 +20,9 @@
 //                                           // to 30", preserving pre-existing
 //                                           // behavior.
 //     "folders": [ { "volume": "MusicDrive", "relPath": "/Music", "rawPath": "D:/Music",
-//                    "includeSubfolders": true }, ... ],
+//                    "includeSubfolders": true, "active": true }, ... ],
+//                  // "active" (default true when absent, for pre-existing configs)
+//                  // gates whether this folder is scanned at all -- see UC-04/UC-05.
 //                  // Anchored on the volume label (VolumePath, see volumepath.h) rather
 //                  // than a drive letter, so a folder still resolves after the disk is
 //                  // reassigned a different letter or remounted elsewhere (incl. Linux).
@@ -244,6 +246,10 @@ public:
     Q_INVOKABLE void removeFolderAt(int index);
     Q_INVOKABLE void clearFolders();
     Q_INVOKABLE void setFolderSubfolders(int index, bool includeSubfolders);
+    // Gates whether this folder is scanned at all -- see UC-04/UC-05. Takes
+    // effect on the next scan (manual rescan or app restart), same as every
+    // other folder-list mutation here; no change is applied immediately.
+    Q_INVOKABLE void setFolderActive(int index, bool active);
 
     // ── Layout persistence ────────────────────────────────────────────────
     // Saves window size and all resizable panel widths in one atomic write.

@@ -295,8 +295,9 @@ ApplicationWindow {
 
     // Setup dialog — opened by TopBar's gear icon
     SetupDialog {
-        id:        setupDialog
-        appConfig: appConfig
+        id:           setupDialog
+        appConfig:    appConfig
+        libraryModel: libraryModel
     }
 
     // About Topaz dialog — opened by TopBar's rightmost (info) icon

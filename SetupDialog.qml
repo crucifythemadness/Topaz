@@ -24,11 +24,26 @@ Popup {
 
     // Required: bind to the AppConfig instance declared in Main.qml
     property AppConfig appConfig: null
+    // Required: bind to the LibraryModel instance declared in Main.qml --
+    // used only to trigger an automatic rescan on close, see below.
+    property LibraryModel libraryModel: null
 
     // ── Internal selection state ─────────────────────────────────────────
     property int selectedGenreIndex:  -1
     property int selectedFolderIndex: -1
     property int selectedMilkdropFolderIndex: -1
+
+    // Set whenever AppConfig.foldersChanged fires while this dialog is open
+    // (every folder add/remove/clear and SUBFOLDERS/ACTIVE toggle emits it,
+    // and nothing outside the FILE MONITORING tab does -- see UC-04/UC-05).
+    // Reset per open session in onAboutToShow so only changes made *this*
+    // time trigger the auto-rescan in onClosed below.
+    property bool _foldersDirty: false
+
+    Connections {
+        target: root.appConfig
+        function onFoldersChanged() { root._foldersDirty = true }
+    }
 
     // ── Geometry ─────────────────────────────────────────────────────────
     // Deliberately NOT anchors.centerIn: Popup's anchors.centerIn is backed
@@ -54,6 +69,15 @@ Popup {
     onAboutToShow: {
         x = Overlay.overlay ? (Overlay.overlay.width  - width)  / 2 : 0
         y = Overlay.overlay ? (Overlay.overlay.height - height) / 2 : 0
+        _foldersDirty = false
+    }
+
+    // Auto-rescan if FILE MONITORING was touched this session -- see UC-04/
+    // UC-05. closePolicy: Popup.NoAutoClose (below) means the header's ✕
+    // button is the only way this fires, so this is a single reliable hook.
+    onClosed: {
+        if (_foldersDirty && libraryModel) libraryModel.startFullScan()
+        _foldersDirty = false
     }
 
     // Dark scrim behind the dialog
@@ -548,6 +572,8 @@ Popup {
 
                         RowLayout {
                             anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
+                            spacing: 8   // must match the folder-row delegate's RowLayout below,
+                                         // or ACTIVE/SUBFOLDERS drift out of column alignment
                             Text {
                                 Layout.fillWidth: true
                                 text: "FOLDER"
@@ -558,7 +584,21 @@ Popup {
                                 color: Theme.fgSurfaceVariant
                             }
                             Text {
-                                width: 100
+                                // Layout.preferredWidth, not plain width -- RowLayout
+                                // sizes an unfilled child from its implicitWidth when
+                                // that's non-zero (always true for Text), silently
+                                // overriding a bare width: binding.
+                                Layout.preferredWidth: 70
+                                text: "ACTIVE"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelXs
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWidest
+                                color: Theme.fgSurfaceVariant
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+                            Text {
+                                Layout.preferredWidth: 100
                                 text: "SUBFOLDERS"
                                 font.family:        Theme.fontFamilyBody
                                 font.pixelSize:     Theme.labelXs
@@ -601,7 +641,7 @@ Popup {
                                     width:  folderList.width
                                     height: 38
                                     radius: Theme.radiusSm
-                                    opacity: modelData.available === false ? 0.5 : 1.0
+                                    opacity: (modelData.available === false || modelData.active === false) ? 0.5 : 1.0
 
                                     readonly property bool isSelected:
                                         root.selectedFolderIndex === index
@@ -633,9 +673,46 @@ Popup {
                                             verticalAlignment: Text.AlignVCenter
                                         }
 
+                                        // Active checkbox cell
+                                        Item {
+                                            Layout.preferredWidth: 70
+                                            height: parent.height
+
+                                            Rectangle {
+                                                width: 18; height: 18
+                                                anchors.centerIn: parent
+                                                radius: 3
+                                                color: modelData.active
+                                                       ? Theme.secondaryContainer
+                                                       : "transparent"
+                                                border.width: modelData.active ? 0 : 1
+                                                border.color: Theme.outlineVariant
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    visible: modelData.active
+                                                    text: "✓"   // ✓
+                                                    font.pixelSize: 11
+                                                    font.weight:    Font.Bold
+                                                    color: Theme.fgSecondaryContainer
+                                                }
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape:  Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        if (root.appConfig)
+                                                            root.appConfig.setFolderActive(
+                                                                index,
+                                                                !modelData.active)
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         // Subfolders checkbox cell
                                         Item {
-                                            width:  100
+                                            Layout.preferredWidth: 100
                                             height: parent.height
 
                                             Rectangle {

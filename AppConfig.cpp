@@ -166,6 +166,7 @@ void AppConfig::addFolder(const QString &rawPath, bool includeSubfolders)
 
     QVariantMap entry = vp.toVariantMap();
     entry[QStringLiteral("includeSubfolders")] = includeSubfolders;
+    entry[QStringLiteral("active")] = true;
     m_folders.append(entry);
     emit foldersChanged();
     save();
@@ -185,6 +186,17 @@ void AppConfig::clearFolders()
     if (m_folders.isEmpty())
         return;
     m_folders.clear();
+    emit foldersChanged();
+    save();
+}
+
+void AppConfig::setFolderActive(int index, bool active)
+{
+    if (index < 0 || index >= m_folders.size())
+        return;
+    QVariantMap entry = m_folders.at(index).toMap();
+    entry[QStringLiteral("active")] = active;
+    m_folders[index] = entry;
     emit foldersChanged();
     save();
 }
@@ -589,6 +601,7 @@ void AppConfig::load()
         const QJsonObject fo = v.toObject();
         QVariantMap entry = fo.toVariantMap();
         entry[QStringLiteral("includeSubfolders")] = fo[QStringLiteral("includeSubfolders")].toBool(false);
+        entry[QStringLiteral("active")] = fo[QStringLiteral("active")].toBool(true);
         m_folders.append(entry);
     }
 

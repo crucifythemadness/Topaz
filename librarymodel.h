@@ -196,6 +196,11 @@ private slots:
 private:
     void applyTracks(QList<TrackInfo> &&tracks);
     void startWorkerThread();
+    // m_appConfig->folders() filtered down to entries whose "active" key
+    // (default true, see AppConfig::load()) is truthy -- used instead of
+    // folders() when dispatching a scan, so an inactive folder is excluded
+    // from discovery entirely. See UC-04/UC-05.
+    QVariantList activeFolders() const;
 
     AppConfig        *m_appConfig    = nullptr;
     QList<TrackInfo>  m_tracks;
