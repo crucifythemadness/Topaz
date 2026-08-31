@@ -258,6 +258,24 @@ ApplicationWindow {
     // Passed as `engine` property to AlbumBrowser, PlaybackQueue, NowPlaying.
     PlaybackEngine { id: engine; playlistManager: playlistManager; appConfig: appConfig }
 
+    // Startup notice for PlaybackEngine's silent BASS->FFmpeg fallback (see
+    // UC-15 "Step 2b") -- a separate top-level instance from SetupDialog's
+    // own PLAYBACK-tab MessageBoxes since it must work even if Setup isn't
+    // open when the fallback happens.
+    MessageBox {
+        id: bassFallbackNoticeBox
+        title: "PLAYBACK ENGINE"
+        message: "BASS Audio Library was selected, but its files could not be found.<br><br>" +
+                 "Topaz switched back to <b>FFmpeg</b> for this session.<br><br>" +
+                 "To use BASS Audio Library, download <b>bass.dll</b>, <b>bassflac.dll</b> and " +
+                 "<b>bassopus.dll</b> and place them next to Topaz.exe, then reselect it in Setup." +
+                 "<br><br><a href=\"https://www.un4seen.com/\">https://www.un4seen.com/</a>"
+    }
+    Connections {
+        target: engine
+        function onBassUnavailableFallback() { bassFallbackNoticeBox.open() }
+    }
+
     // Playlist manager — handles XSPF file creation.
     PlaylistManager { id: playlistManager }
 
@@ -295,9 +313,10 @@ ApplicationWindow {
 
     // Setup dialog — opened by TopBar's gear icon
     SetupDialog {
-        id:           setupDialog
-        appConfig:    appConfig
-        libraryModel: libraryModel
+        id:             setupDialog
+        appConfig:      appConfig
+        libraryModel:   libraryModel
+        playbackEngine: engine
     }
 
     // About Topaz dialog — opened by TopBar's rightmost (info) icon

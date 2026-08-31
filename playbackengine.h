@@ -1,13 +1,11 @@
 #pragma once
 
+#include "audiodeck.h"
 #include "playlistmanager.h"
 #include "trackinfo.h"
 
 #include <QAbstractListModel>
 #include <QQmlEngine>
-#include <QMediaPlayer>
-#include <QAudioOutput>
-#include <QAudioBufferOutput>
 #include <QAudioBuffer>
 #include <QFutureWatcher>
 #include <QTimer>
@@ -16,7 +14,8 @@ class AppConfig;
 
 // ── PlaybackEngine ────────────────────────────────────────────────────────
 // QAbstractListModel that IS the playback queue model.
-// Wraps QMediaPlayer + QAudioOutput and exposes queue state to QML.
+// Wraps two AudioDeck instances (FFmpeg- or BASS-backed, see UC-15) and
+// exposes queue state to QML.
 //
 // Track maps accepted by addTrack / addTracks must contain at minimum:
 //   filePath (string), title (string), artist (string),
@@ -30,14 +29,16 @@ class AppConfig;
 // PlaybackQueue.qml: pos, trackName, subLabel, kbps, playing.
 //
 // ── Dual-deck crossfade ───────────────────────────────────────────────────
-// Two independent QMediaPlayer/QAudioOutput pairs ("decks") back playback so a
-// track can fade in on one deck while the previous track fades out on the
-// other — Qt Multimedia cannot play two sources from a single player. m_player
-// / m_audioOutput are alias pointers that always point at whichever deck is
+// Two independent AudioDeck instances ("decks") back playback so a track can
+// fade in on one deck while the previous track fades out on the other --
+// neither backend (see AudioDeck) can play two sources from one instance.
+// m_deck is an alias pointer that always points at whichever deck is
 // m_activeDeck, so every pre-existing single-deck code path (position(),
 // duration(), seek(), etc.) keeps working unchanged; only the crossfade logic
 // itself (loadTrack()/startCrossfade()/onFadeTick()/cancelCrossfade()) needs
-// to reason about both decks explicitly. See UC-15 in the architecture doc.
+// to reason about both decks explicitly. See UC-15 in the architecture doc
+// ("Step 2") for why this orchestration never needed to know which concrete
+// AudioDeck implementation it's driving.
 // Crossfade only engages when a transition's current AND next tracks both
 // have a duration longer than the configured crossfade length — a track
 // shorter than that can supply neither a valid fade-out nor fade-in window,
@@ -72,6 +73,15 @@ class PlaybackEngine : public QAbstractListModel
     Q_PROPERTY(bool    playlistLocked          READ playlistLocked          WRITE setPlaylistLocked NOTIFY playlistLockedChanged)
     Q_PROPERTY(PlaylistManager* playlistManager READ playlistManager WRITE setPlaylistManager NOTIFY playlistManagerChanged)
     Q_PROPERTY(AppConfig* appConfig READ appConfig WRITE setAppConfig NOTIFY appConfigChanged)
+    // Which concrete AudioDeck is actually backing playback THIS session --
+    // "FFmpeg" or "BASS Audio Library", or an empty string before decks
+    // exist. Distinct from AppConfig.audioBackend (the stored preference for
+    // the *next* launch): if BASS was selected but createDecksIfNeeded()
+    // couldn't actually use it, this reports what's really running while
+    // audioBackend gets silently corrected back to "ffmpeg" -- see UC-15
+    // "Step 2b". Shown in SetupDialog's PLAYBACK tab so switching backends
+    // can be confirmed before testing playback.
+    Q_PROPERTY(QString activeBackendName READ activeBackendName NOTIFY activeBackendNameChanged)
 
 public:
     enum QueueRole {
@@ -138,12 +148,14 @@ public:
 
     // Bound from Main.qml. Crossfade settings are always read live from here
     // (never cached), so a change in Setup takes effect on the next transition.
+    // Also the trigger for createDecksIfNeeded() -- see its own doc comment.
     AppConfig* appConfig() const { return m_appConfig; }
-    void setAppConfig(AppConfig *cfg) {
-        if (m_appConfig == cfg) return;
-        m_appConfig = cfg;
-        emit appConfigChanged();
-    }
+    void setAppConfig(AppConfig *cfg);
+
+    // "FFmpeg" or "BASS Audio Library" once createDecksIfNeeded() has run,
+    // otherwise an empty string. See the activeBackendName Q_PROPERTY doc
+    // comment above.
+    QString activeBackendName() const;
 
     // Sets the active playlist name (called from QML after creating/loading a playlist).
     Q_INVOKABLE void setActivePlaylistName(const QString &name);
@@ -227,6 +239,13 @@ signals:
     void playlistLockedChanged();
     void playlistManagerChanged();
     void appConfigChanged();
+    void activeBackendNameChanged();
+    // Fired once, at most, per launch -- only when BASS was the stored
+    // preference but createDecksIfNeeded() couldn't actually use it (DLLs
+    // missing/removed, or BassLibrary::load() failed), so it silently fell
+    // back to FfmpegAudioDeck and corrected the persisted setting. See
+    // UC-15 "Step 2b" and Main.qml's bassFallbackNoticeBox.
+    void bassUnavailableFallback();
 
     // Emitted only on NATURAL track completion (reaching end-of-media, whether
     // via a hard cut or a crossfade), never on manual next()/previous() — the
@@ -246,6 +265,14 @@ signals:
     void audioBufferAvailable(const QAudioBuffer &buffer);
 
 private:
+    // Constructs m_decks[0]/[1] the first time m_appConfig becomes non-null
+    // (called from setAppConfig()) -- deferred out of the constructor since
+    // deciding FfmpegAudioDeck vs BassAudioDeck needs AppConfig.audioBackend()/
+    // bassLibraryAvailable(), neither available yet at construction time. Only
+    // ever runs once per PlaybackEngine instance: the backend choice is read
+    // once per app launch, not hot-swapped -- see UC-15 "Step 2".
+    void createDecksIfNeeded();
+
     void loadTrack(int index);
     void advanceToNext();
     void clearCoverSource();
@@ -263,7 +290,10 @@ private:
     void onFadeTick();
     // deckIndex-aware handlers shared by both decks' signal connections.
     void onDeckPositionChanged(int deckIndex);
-    void onDeckMediaStatusChanged(int deckIndex, QMediaPlayer::MediaStatus status);
+    // Connected to each AudioDeck's endOfMedia() -- equivalent of the old
+    // QMediaPlayer::mediaStatusChanged(EndOfMedia) check, now unambiguous
+    // since the signal itself only ever means that.
+    void onDeckEnded(int deckIndex);
 
     static QString msToString(qint64 ms);
     static QString formatFromPath(const QString &path);
@@ -290,17 +320,14 @@ private:
     PlaylistManager          *m_playlistManager    = nullptr;
     AppConfig                 *m_appConfig          = nullptr;
 
-    // Dual-deck playback. m_player/m_audioOutput always alias
-    // m_players[m_activeDeck]/m_audioOutputs[m_activeDeck].
-    QMediaPlayer              *m_players[2]        = { nullptr, nullptr };
-    QAudioOutput               *m_audioOutputs[2]   = { nullptr, nullptr };
-    // Parallel to m_audioOutputs — decoded-buffer tap for the visualizer.
-    // Independent of m_audioOutputs (a player can have both simultaneously);
-    // doesn't touch normal playback in any way.
-    QAudioBufferOutput         *m_audioBufferOutputs[2] = { nullptr, nullptr };
+    // Dual-deck playback. m_deck always aliases m_decks[m_activeDeck]. See
+    // createDecksIfNeeded() for construction timing/backend choice, and
+    // AudioDeck's own doc comment for why the audio-buffer visualizer tap
+    // isn't part of this array (FfmpegAudioDeck-specific, wired up
+    // separately in createDecksIfNeeded()).
+    AudioDeck                 *m_decks[2]          = { nullptr, nullptr };
     int                         m_activeDeck        = 0;
-    QMediaPlayer              *m_player            = nullptr;
-    QAudioOutput               *m_audioOutput       = nullptr;
+    AudioDeck                  *m_deck              = nullptr;
 
     bool    m_crossfading       = false;
     bool    m_fadeMidpointFired = false;

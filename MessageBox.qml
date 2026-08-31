@@ -13,6 +13,7 @@ Popup {
     id: root
 
     property string message: ""
+    property string title: "NOTICE"
 
     anchors.centerIn: Overlay.overlay
     width:  460
@@ -53,7 +54,7 @@ Popup {
 
             Text {
                 anchors { left: parent.left; leftMargin: 24; verticalCenter: parent.verticalCenter }
-                text: "NOTICE"
+                text: root.title
                 font.family:        Theme.fontFamilyHeadline
                 font.pixelSize:     Theme.headlineSm
                 font.weight:        Font.Bold
@@ -63,6 +64,10 @@ Popup {
         }
 
         // ── Message body ─────────────────────────────────────────────────
+        // textFormat/onLinkActivated let a caller embed a clickable
+        // <a href="..."> in `message` (e.g. a download link) -- a plain
+        // message with no markup renders identically to before under
+        // RichText, so every existing call site is unaffected.
         Text {
             Layout.fillWidth:    true
             Layout.topMargin:    24
@@ -70,11 +75,14 @@ Popup {
             Layout.leftMargin:   24
             Layout.rightMargin:  24
             text: root.message
+            textFormat: Text.RichText
             wrapMode: Text.Wrap
             font.family:    Theme.fontFamilyBody
             font.pixelSize: Theme.labelLg
             color: Theme.fgSurface
+            linkColor: Theme.primary
             lineHeight: 1.4
+            onLinkActivated: (link) => Qt.openUrlExternally(link)
         }
 
         // ── OK button row ─────────────────────────────────────────────────

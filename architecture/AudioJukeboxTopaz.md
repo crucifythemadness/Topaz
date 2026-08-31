@@ -525,7 +525,7 @@ Topaz module
 │                         Loader { active: milkdropPaneOpen; sourceComponent: MilkdropWindow {...} }  — see UC-20
 │                         SplitView slot 1: Loader { sourceComponent: activeTab === "search" ? SearchPanel : activeTab === "playlists" ? PlaylistsPanel : LibraryTree }  — see UC-21/UC-22
 │                         SplitView slot 2: Loader { sourceComponent: activeTab === "search" ? SearchResultBrowser : activeTab === "playlists" ? PlaylistViewer : AlbumBrowser }  — see UC-21/UC-22
-├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | CROSSFADE | AUTO PLAY | AUDIO VISUALIZER | MILKDROP, see UC-15 / UC-14 / UC-19 / UC-20)
+├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | PLAYBACK | AUTO PLAY | AUDIO VISUALIZER | MILKDROP, see UC-15 / UC-14 / UC-19 / UC-20)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 │                         signal playlistCreated()  ← emitted on success; Main.qml calls playlistsData.refreshPlaylists() so the PLAYLISTS tab stays live even while already active, see UC-22
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
@@ -1048,8 +1048,10 @@ what "configured" means — absent means that pane has never been positioned yet
 | `setFolderSubfolders(index, flag)` | Toggle the includeSubfolders flag; auto-saves. |
 | `setFolderActive(index, flag)` | Toggle whether this folder is scanned at all (default `true`); auto-saves. Takes effect on the next scan, not immediately — see UC-04/UC-05. |
 | `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. |
-| `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s CROSSFADE tab toggle (see UC-15). |
-| `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 10.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s CROSSFADE tab slider. |
+| `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s PLAYBACK tab toggle (see UC-15). |
+| `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 10.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s PLAYBACK tab slider. |
+| `audioBackend` / `setAudioBackend(mode)` | Playback backend, `"ffmpeg"` (default) or `"bass"`; ignored for any other value; auto-saves. Set from `SetupDialog`'s PLAYBACK tab radio group. Selecting `"bass"` is only honored once `bassLibraryAvailable()` is true — inert until `PlaybackEngine` gains a real dual-backend abstraction (see UC-15). |
+| `bassLibraryAvailable()` | `true` only if `bass.dll`, `bassflac.dll`, and `bassopus.dll` are all present next to the running executable. Checked before `audioBackend` can be set to `"bass"` (see UC-15). |
 | `autoPlayQueueHorizon` / `setAutoPlayQueueHorizon(tracks)` | How many tracks the (still-unimplemented) AUTO PLAY feature should keep filled into `PlaybackQueue` as a lookahead (default `5`); clamped to `[1, 15]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Queue Horizon"); not yet consumed by any queue-filling logic (see UC-14). |
 | `autoPlayTitleAddingIntervalSeconds` / `setAutoPlayTitleAddingIntervalSeconds(seconds)` | Polling interval, in seconds, the (still-unimplemented) AUTO PLAY feature should use to add one new track at a time to the queue (default `30`); clamped to `[5, 90]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Title Adding"); not yet consumed by any poller (see UC-14). |
 | `autoPlayConsiderGenre` / `setAutoPlayConsiderGenre(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should factor genre into track selection (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Consider Genre"); not yet consumed by any selection logic (see UC-14). |
@@ -1440,6 +1442,8 @@ configurable via the app JSON config) will be introduced at that point.
       +setFolderActive(index, active)
       +setCrossfadeEnabled(enabled)
       +setCrossfadeSeconds(seconds)
+      +setAudioBackend(mode)
+      +bassLibraryAvailable()
       +setAutoPlayQueueHorizon(tracks)
       +setAutoPlayTitleAddingIntervalSeconds(seconds)
       +setAutoPlayConsiderGenre(enabled)
@@ -1494,8 +1498,9 @@ configurable via the app JSON config) will be introduced at that point.
     TagReader ..> TrackInfo         : produces
     LibraryModel "1" *-- "0..*" TrackInfo : m_tracks
     PlaybackEngine "1" *-- "0..*" TrackInfo : m_queue
-    PlaybackEngine --> QMediaPlayer  : wraps ×2 (dual-deck, see UC-15)
-    PlaybackEngine --> QAudioOutput  : wraps ×2 (dual-deck, see UC-15)
+    PlaybackEngine --> AudioDeck     : owns ×2 (dual-deck, see UC-15)
+    AudioDeck <|-- FfmpegAudioDeck   : wraps QMediaPlayer/QAudioOutput
+    AudioDeck <|-- BassAudioDeck     : wraps BASS HSTREAM (Step 2b)
     PlaybackEngine --> AppConfig     : reads crossfadeEnabled/crossfadeSeconds live
     AutoPlayController --> PlaybackEngine : addTrack/playAt/trackList/clearQueue; listens trackPlayedToCompletion + queueExhausted (see UC-16)
     AutoPlayController --> LibraryModel   : calls autoPlayCandidatePool() (see UC-16)
@@ -1731,24 +1736,25 @@ is neither of those.
 `PlaybackEngine` is a C++ `QAbstractListModel` subclass marked `QML_ELEMENT`.
 It serves as **both the queue model** (rows = `TrackInfo` records) and the **playback controller**.  The queue is the single source of truth; `PlaybackQueue.qml` binds its `ListView.model` directly to the engine instance.
 
-**Dual-deck playback (crossfade)**: rather than a single `QMediaPlayer`/`QAudioOutput`
-pair, `PlaybackEngine` owns two independent pairs (`m_players[2]`/`m_audioOutputs[2]`,
-"decks") because Qt Multimedia cannot play two sources from one player — a real
-crossfade needs the outgoing and incoming track playing simultaneously on separate
-players while their volumes ramp in opposite directions. `m_player`/`m_audioOutput`
-remain as member names but are now **alias pointers**, always equal to
-`m_players[m_activeDeck]`/`m_audioOutputs[m_activeDeck]`; every pre-existing
-single-deck code path (`position()`, `duration()`, `seek()`, etc.) is unchanged and
-simply operates on "whichever deck is active." Only the crossfade-specific code
-(`startCrossfade()`, `onFadeTick()`, `cancelCrossfade()`) reasons about both decks
-explicitly. See UC-15 for the full crossfade flow.
+**Dual-deck playback (crossfade)**: rather than a single playback backend
+instance, `PlaybackEngine` owns two independent `AudioDeck` instances
+(`m_decks[2]`, "decks") because neither backend (FFmpeg's `QMediaPlayer` nor
+BASS) can play two sources from one instance — a real crossfade needs the
+outgoing and incoming track playing simultaneously on separate decks while
+their volumes ramp in opposite directions. `m_deck` is an **alias pointer**,
+always equal to `m_decks[m_activeDeck]`; every pre-existing single-deck code
+path (`position()`, `duration()`, `seek()`, etc.) is unchanged and simply
+operates on "whichever deck is active." Only the crossfade-specific code
+(`startCrossfade()`, `onFadeTick()`, `cancelCrossfade()`) reasons about both
+decks explicitly. See UC-15 for the full crossfade flow and the `AudioDeck`
+abstraction that makes this backend-agnostic.
 
 ### Public API
 
 | Method / Property | Type | Description |
 |-------------------|------|-------------|
 | `currentIndex` | `int` | Index of the currently loaded track (−1 = nothing) |
-| `isPlaying` | `bool` | `true` when `QMediaPlayer` is in `PlayingState` |
+| `isPlaying` | `bool` | `true` when the active `AudioDeck` reports it's playing (`false` if no deck exists yet — see UC-15 "AudioDeck abstraction") |
 | `userPaused` | `bool` | `true` only while the current track is paused via `togglePlay()`'s explicit pause branch — never for any other "not playing" state (see UC-07's design note). Drives `NowPlaying`'s Play/Pause button blink. |
 | `position` | `qint64` | Playback position in milliseconds |
 | `duration` | `qint64` | Duration of current track in milliseconds |
@@ -1803,12 +1809,15 @@ these maps: `LibraryModel::filteredAlbums()`'s per-track map (used when queueing
 `TrackInfo`, it just wasn't being copied into the maps that cross into the queue.
 
 **`audioBufferAvailable(const QAudioBuffer &buffer)` signal (added for the audio
-visualizer, UC-19)**: not a `Q_PROPERTY`/QML-facing signal — only
-`AudioVisualizerController` (plain C++) connects to it. Emitted from a per-deck
-`QAudioBufferOutput::audioBufferReceived` handler, filtered to `m_activeDeck` only
-(a deliberate simplification during crossfades — see UC-19's "Known limitations").
-`QAudioBufferOutput` requires Qt Multimedia's FFmpeg backend; see UC-19 for how that
-was confirmed present on the reference toolchain.
+visualizer, UC-19; also consumed by Milkdrop, UC-20)**: not a `Q_PROPERTY`/QML-facing
+signal — `AudioVisualizerController` and `MilkdropView` (both plain C++) independently
+connect to it. Emitted from each deck's `AudioDeck::audioBufferReceived` (a shared
+interface signal both `FfmpegAudioDeck` and `BassAudioDeck` provide — see UC-15
+"Step 3"), filtered to `m_activeDeck` only (a deliberate simplification during
+crossfades — see UC-19's "Known limitations"). `FfmpegAudioDeck` sources it from
+`QAudioBufferOutput` (Qt Multimedia's FFmpeg backend); `BassAudioDeck` polls
+`BASS_ChannelGetData()` on its own timer, since BASS has no equivalent push
+notification.
 
 ### Queue model roles (used by PlaybackQueue.qml delegate)
 
@@ -2278,7 +2287,8 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
 
 ### Normal Flow — Configure crossfade
 
-1. User opens **Setup → CROSSFADE**.
+1. User opens **Setup → PLAYBACK** (renamed from CROSSFADE — this tab now also hosts
+   the playback-backend choice below, see "Normal Flow — Choose playback backend").
 2. User toggles the **Crossfade** switch (same visual pattern as `PlaybackQueue`'s LOCK
    PLAYLIST toggle) → `appConfig.setCrossfadeEnabled(...)` → auto-saves to
    `Topaz.config`. The **Length** row (label, value, slider, min/max) dims to 35%
@@ -2293,14 +2303,201 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
    check (never cached), so a change takes effect starting with the very next
    transition — no restart needed.
 
+### Normal Flow — Choose playback backend
+
+Step 1 of a multi-step initiative to offer BASS Audio Library as an
+alternative to today's FFmpeg-based playback (`QMediaPlayer`/`QAudioOutput`),
+aimed at eliminating occasional audible stutter some users hit. Selecting
+BASS here only changes the *stored preference* — see "AudioDeck abstraction
+(Step 2)" below for how (and when) that preference actually takes effect,
+now that a real `BassAudioDeck` (Step 2b) exists. The Audio Visualizer
+(UC-19) and Milkdrop (UC-20) also work under BASS (Step 3) — both consume
+`PlaybackEngine::audioBufferAvailable`, which now fires for either backend.
+
+1. At the top of the PLAYBACK tab, above the Crossfade switch, a "Playback
+   with" row shows two radio options — **FFmpeg** (default) and **BASS Audio
+   Library** — using the same radio-button idiom as AUTO PLAY's "Play a
+   Title" row (UC-14: circular border/dot `Rectangle`, label `Text`,
+   `MouseArea`), bound to `AppConfig.audioBackend`.
+2. Clicking **FFmpeg** always calls `appConfig.setAudioBackend("ffmpeg")`
+   directly.
+3. Clicking **BASS Audio Library** first calls
+   `appConfig.bassLibraryAvailable()` — `true` only if `bass.dll`,
+   `bassflac.dll`, and `bassopus.dll` are all present next to `Topaz.exe`
+   (checked via `QCoreApplication::applicationDirPath()`). BASS's core
+   library natively decodes MP3/OGG/WAV only; FLAC and Opus (both of which
+   Topaz already plays, see `TagReader`) each need their own official add-on
+   for feature parity with today's FFmpeg playback, hence checking for all
+   three rather than `bass.dll` alone.
+4. If unavailable, a `MessageBox` (`missingBassDllsBox`) opens explaining
+   which files are needed and linking to `https://www.un4seen.com/` — the
+   radio selection does not change. `MessageBox.qml`'s message `Text` was
+   extended (`textFormat: Text.RichText`, `onLinkActivated:
+   Qt.openUrlExternally(link)`) so a caller can embed a clickable link;
+   every pre-existing plain-text call site renders identically, since plain
+   text contains no markup for `RichText` to interpret differently.
+5. If available, `appConfig.setAudioBackend("bass")` is called and
+   auto-saves. `audioBackend` is persisted as a new field inside the
+   existing `crossfade` JSON object (`"ffmpeg"` or `"bass"`; any other value
+   or a missing key both default to `"ffmpeg"`) — deliberately not renamed
+   alongside the tab, to avoid a migration path for existing config files.
+
+### AudioDeck abstraction (Step 2)
+
+`PlaybackEngine`'s dual-deck crossfade code never talked to `QMediaPlayer`/
+`QAudioOutput` for its own sake — only to load/play/pause/stop/seek and to
+read position/duration/playing-state/end-of-track. `AudioDeck` (`audiodeck.h`)
+is an abstract interface capturing exactly that surface (`setSource()`,
+`play()`/`pause()`/`stop()`, `position()`/`setPosition()`/`duration()`,
+`isPlaying()`, `setVolume()`, and signals `positionChanged`/
+`durationChanged`/`playingChanged(bool)`/`endOfMedia`), so
+`startCrossfade()`/`onFadeTick()`/`cancelCrossfade()`/
+`onDeckPositionChanged()`'s eligibility math/`switchCurrentIndexTo()` needed
+**zero** changes when this landed — they already only ever needed this
+generic surface. `m_players[2]`/`m_audioOutputs[2]` became `AudioDeck
+*m_decks[2]`; the `m_player`/`m_audioOutput` alias pair collapsed into one
+`AudioDeck *m_deck` (volume is now a deck-level concern, not a separate
+audio-output object).
+
+- **`FfmpegAudioDeck`** (`ffmpegaudiodeck.h`/`.cpp`, Step 2a, shipped):
+  wraps one `QMediaPlayer`+`QAudioOutput`+`QAudioBufferOutput` trio,
+  functionally identical to the pre-abstraction code. Sources the
+  audio-buffer visualizer/Milkdrop tap (UC-19/UC-20) from
+  `QAudioBufferOutput::audioBufferReceived`, connected straight through to
+  the inherited `AudioDeck::audioBufferReceived` signal (promoted into the
+  shared interface in Step 3, below — no longer FFmpeg-specific).
+- **`BassAudioDeck`** (`bassaudiodeck.h`/`.cpp`, Step 2b, shipped): wraps one
+  BASS `HSTREAM` handle, created via `BassLibrary::instance()`. Two
+  consequences of BASS's plain-C, callback-based API (vs. `QMediaPlayer`'s
+  Qt signals):
+  - No push-based position/duration notifications — a ~100 ms `QTimer`
+    polls `BASS_ChannelGetPosition()` and re-emits `positionChanged()`,
+    which drives the UI progress bar and the crossfade proximity check
+    exactly as `QMediaPlayer::positionChanged` already did for
+    `FfmpegAudioDeck`. `duration()` is cached once per `setSource()` call
+    (`BASS_ChannelGetLength()` converted via `BASS_ChannelBytes2Seconds()`)
+    rather than queried live, since it doesn't change mid-stream.
+  - End-of-stream is BASS's `BASS_SYNC_END` sync callback
+    (`BASS_ChannelSetSync()`), which fires on **BASS's own internal
+    thread** — `BassAudioDeck::syncEndProc()` (a `static` function, the
+    callback BASS actually invokes) does nothing but marshal to the deck's
+    own thread via `QMetaObject::invokeMethod(self,
+    &BassAudioDeck::handleStreamEnded, Qt::QueuedConnection)`;
+    `handleStreamEnded()` is what actually stops the poll timer and emits
+    `endOfMedia()`. Touching `QObject`/Qt state directly from
+    `syncEndProc()` itself would be a cross-thread violation.
+  - FLAC/Opus support comes from `BASS_PluginLoad()`-ing `bassflac.dll`/
+    `bassopus.dll` once (in `BassLibrary::load()`, after `BASS_Init()`),
+    not separate functions — `BASS_StreamCreateFile()` then transparently
+    handles those formats too. All file paths (the plugin filenames and
+    every track's path) are passed with the `BASS_UNICODE` flag, since
+    neither is guaranteed ASCII-safe.
+  - Volume ramping during crossfade uses the same plain
+    `setVolume()`/`BASS_ChannelSetAttribute(BASS_ATTRIB_VOL, ...)` calls
+    `onFadeTick()` already made for `FfmpegAudioDeck` — crossfade behavior
+    is identical regardless of backend.
+- **`BassLibrary`** (`basslibrary.h`/`.cpp`, Step 2b, shipped): a singleton
+  runtime loader (`QLibrary`, never linked at build time — `bass.dll` isn't
+  bundled, see "Choose playback backend" above) that hand-declares the
+  stable subset of BASS's C ABI actually needed (function-pointer members
+  named after their BASS export, e.g. `BASS_Init`/`BASS_StreamCreateFile`/
+  `BASS_ChannelSetSync` — a hand-written interface description, not a copy
+  of BASS's source or binary). `load()` resolves every entry point, calls
+  `BASS_Init(-1, 44100, 0, nullptr, nullptr)`, then `BASS_PluginLoad()`s
+  `bassflac.dll`/`bassopus.dll`; idempotent (returns `true` immediately once
+  already loaded) and safe to call every time `createDecksIfNeeded()`
+  considers BASS. Returns `false` if `bass.dll` itself can't be
+  loaded/resolved or `BASS_Init()` fails — a plugin individually failing to
+  load is only logged, not fatal, since losing one format shouldn't take
+  down the other.
+- **Construction timing and backend selection**: decks are created by
+  `createDecksIfNeeded()`, called once from `setAppConfig()` the first time
+  a non-null `AppConfig` is bound — not in the constructor, since choosing
+  FFmpeg vs BASS needs `audioBackend()`/`bassLibraryAvailable()`, neither
+  available that early. It picks BASS only if all three hold: `audioBackend()
+  == "bass"`, `bassLibraryAvailable()` is `true`, and
+  `BassLibrary::instance().load()` itself succeeds; if BASS was the stored
+  preference but any of those fails (DLLs removed since being selected, or
+  `load()` fails for some other reason), it falls back to `FfmpegAudioDeck`
+  **and** calls `appConfig->setAudioBackend("ffmpeg")` to correct the
+  persisted setting, so Setup's UI never shows BASS selected while Topaz is
+  actually running FFmpeg underneath. This construction-timing requirement
+  is also why every `Q_PROPERTY` getter that touches `m_deck`
+  (`isPlaying()`/`position()`/`duration()`) must tolerate it being null —
+  QML evaluates properties reactively and can reach them before
+  `setAppConfig()` ever runs, which a first attempt at this refactor
+  didn't account for (crashed on every launch with `STATUS_ACCESS_VIOLATION`
+  until every such getter got a null guard).
+- **Not hot-swapped**: the backend is read once per launch; changing the
+  PLAYBACK tab's radio while running updates the persisted setting for the
+  *next* launch only, not the live engine — a "Takes effect after
+  restarting Topaz." hint is shown under the radio group for this reason.
+
+### Audio-buffer tap for the Audio Visualizer/Milkdrop (Step 3)
+
+The Audio Visualizer (UC-19) and Milkdrop (UC-20) both independently
+subscribe to the same `PlaybackEngine::audioBufferAvailable(QAudioBuffer)`
+signal, each doing their own `QAudioFormat::Float`/`Int16` interleaved
+downmix — neither has any BASS-specific coupling. This meant a single tap
+added to `BassAudioDeck`, wired through the same signal path
+`FfmpegAudioDeck` already used, fixed both features under BASS at once
+(what could have been two separate future steps collapsed into one).
+
+- `void audioBufferReceived(const QAudioBuffer &buffer)` was **promoted
+  into `AudioDeck` itself** (previously `FfmpegAudioDeck`-only, per Step
+  2's original doc comment) — a plain Qt signal-inheritance promotion, no
+  different from `QAbstractButton::clicked` being inherited by every
+  button subclass. `FfmpegAudioDeck` now connects
+  `QAudioBufferOutput::audioBufferReceived` straight to the inherited
+  `AudioDeck::audioBufferReceived` instead of redeclaring its own.
+  `PlaybackEngine::createDecksIfNeeded()`'s connect for this signal is now
+  a single, type-agnostic `connect(deck, &AudioDeck::audioBufferReceived,
+  ...)` for every deck — the `qobject_cast<FfmpegAudioDeck*>` special-case
+  it used during Step 2 is gone.
+- **`BassAudioDeck`'s tap**: BASS has no push-based buffer notification
+  (unlike `QAudioBufferOutput`), so a second `QTimer` (`m_bufferTapTimer`,
+  ~25ms — much tighter than the existing 100ms position-poll timer, since
+  1024 samples at 44.1kHz is ~23ms and the Audio Visualizer's KissFFT
+  pipeline needs roughly that cadence to stay fed) pulls PCM via
+  `BASS_ChannelGetData(handle, buf, byteLen | BASS_DATA_FLOAT)` — BASS's
+  own documented mechanism for feeding a visualizer, which returns the
+  most recently played audio regardless of the stream's native format.
+  Started/stopped in lockstep with the existing position-poll timer at the
+  same `play()`/`pause()`/`stop()`/`setSource()` call sites. `freq`/`chans`
+  are queried once per `setSource()` via `BASS_ChannelGetInfo()` (cached,
+  same "cache what's static, poll what's dynamic" convention `duration()`
+  already uses) and sanity-checked (`freq` in `[8000, 192000]`, `chans` in
+  `[1, 8]`) before trusting them to build a `QAudioFormat` — mitigation for
+  not having a local `bass.h` to double-check `BASS_CHANNELINFO`'s layout
+  against. The returned byte count is truncated to a whole number of
+  frames before wrapping it in a `QAudioBuffer`, since BASS can legitimately
+  return less than requested (e.g. right after `play()`) and a partial
+  trailing frame would misalign either consumer's interleaved sample math.
+  Unlike `BASS_SYNC_END`, this runs entirely on the deck's own (Qt/GUI)
+  thread — it's driven by our own `QTimer`, not a BASS-internal callback —
+  so no `QMetaObject::invokeMethod` marshaling is needed here.
+- `BassLibrary` gained `BASS_ChannelGetInfo`/`BASS_ChannelGetData` and the
+  `BASS_CHANNELINFO` struct/`BASS_DATA_FLOAT` constant alongside its
+  existing resolved entry points.
+- The crossfade dual-deck simplification (only the active deck's buffers
+  reach `PlaybackEngine::audioBufferAvailable`, via the `d == m_activeDeck`
+  filter) needed no changes — `BASS_ChannelGetData` is a non-destructive,
+  monitoring-style read, so tapping the standby deck redundantly (its
+  result then gets dropped by the filter) has no side effect on that
+  deck's actual audio output.
+- No changes needed in `AudioVisualizerController` or `MilkdropView` —
+  both already handle arbitrary buffer sizes/cadence and only require
+  `QAudioFormat::Float`/`Int16`, exactly what the synthesized BASS buffer
+  advertises.
+
 ### Normal Flow — Crossfade a transition
 
 1. On every `positionChanged` tick of the **active** deck, `PlaybackEngine` checks: is
    crossfade enabled, is a next track queued, and — **the eligibility rule** — do
-   *both* the active track's live `QMediaPlayer::duration()` and the next track's tag
+   *both* the active track's live `AudioDeck::duration()` and the next track's tag
    `TrackInfo.duration` exceed the configured crossfade length? If not, nothing
    happens and the transition falls through to the existing hard-cut path
-   (`EndOfMedia` → `advanceToNext()` → `loadTrack()`).
+   (`AudioDeck::endOfMedia()` → `onDeckEnded()` → `advanceToNext()` → `loadTrack()`).
 2. Once `position >= duration − crossfadeMs`, `startCrossfade()` captures
    `m_fadeOutDeck = m_activeDeck` and `m_fadeInDeck = 1 - m_activeDeck` — fixed for
    this fade's whole lifetime, independent of when the UI-facing `m_activeDeck` alias
@@ -2310,15 +2507,15 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
    stopping the `QTimer` freezes the fade exactly in place, which is what makes pause
    trivial) and linearly sets `m_fadeOutDeck.volume = 1 − frac`,
    `m_fadeInDeck.volume = frac`.
-4. At the **midpoint** (`frac >= 0.5`, fired once): `m_activeDeck` (and the `m_player`/
-   `m_audioOutput` alias pointers) swap to `m_fadeInDeck` **here**, not at
+4. At the **midpoint** (`frac >= 0.5`, fired once): `m_activeDeck` (and the `m_deck`
+   alias pointer) swap to `m_fadeInDeck` **here**, not at
    fade-completion — immediately followed by `switchCurrentIndexTo(nextIdx)`
    (`m_currentIndex` advances, `rating`/`ratingId` resolve for the incoming track, the
    cover fetch kicks off, `currentIndexChanged`/`currentTrackChanged`/
    `currentRatingChanged` fire) and explicit `durationChanged()`/`positionChanged()`/
    `isPlayingChanged()` emissions. This is the single point that satisfies "update
    *everything* in `NowPlaying` — including the length label and play/pause icon, which
-   read through the now-swapped `m_player` alias — and `PlaybackQueue`'s highlighted
+   read through the now-swapped `m_deck` alias — and `PlaybackQueue`'s highlighted
    row in the middle of the crossfade." `PlaybackQueue`'s highlight comes from
    `IsPlayingRole`, refreshed by the same `dataChanged` call inside
    `switchCurrentIndexTo()`. Swapping the alias at the midpoint rather than
@@ -2367,11 +2564,11 @@ exact `frac` it was frozen at, since `m_fadeElapsedMs` was never touched.
 
 ### Design notes
 
-- **Why dual-deck**: `QMediaPlayer` cannot play two sources at once, so a real
-  crossfade requires two independent `QMediaPlayer`/`QAudioOutput` pairs. `m_player`/
-  `m_audioOutput` are kept as alias pointers to `m_players[m_activeDeck]`/
-  `m_audioOutputs[m_activeDeck]` specifically so every pre-existing single-deck code
-  path continues to work unchanged.
+- **Why dual-deck**: neither backend (`QMediaPlayer` nor BASS) can play two
+  sources at once, so a real crossfade requires two independent `AudioDeck`
+  instances. `m_deck` is kept as an alias pointer to `m_decks[m_activeDeck]`
+  specifically so every pre-existing single-deck code path continues to
+  work unchanged — see "AudioDeck abstraction (Step 2)" above.
 - **Linear fade**: volumes are set directly from the elapsed fraction with no easing
   curve, per the requirement.
 - **AUTO PLAY feature is unrelated**: this use case is purely a playback-transition
@@ -3247,17 +3444,21 @@ Confirmed present and default on the reference Qt 6.10.2 mingw_64 toolchain befo
 writing any code (`plugins/multimedia/ffmpegmediaplugin.dll` and `bin/avcodec-61.dll`
 both exist; nothing in the codebase overrides `QT_MEDIA_BACKEND`) — this was the one
 real feasibility risk in the whole feature, checked and cleared up front rather than
-discovered mid-implementation.
+discovered mid-implementation. This was written before the BASS dual-backend work
+(UC-15 "Step 2") existed; see below for how the tap generalized to cover both backends.
 
-`PlaybackEngine` runs two independent `QMediaPlayer`/`QAudioOutput` decks for
-crossfading (see UC-15). A parallel `QAudioBufferOutput m_audioBufferOutputs[2]`
-array is constructed inside the same per-deck loop that builds `m_players`/
-`m_audioOutputs`, via `m_players[d]->setAudioBufferOutput(m_audioBufferOutputs[d])`
-— independent of `setAudioOutput()`, doesn't touch normal playback in any way. Each
-deck's `audioBufferReceived` signal is connected to a `[this, d]` lambda that emits
-a new signal, `void audioBufferAvailable(const QAudioBuffer &buffer)`, **only when
-`d == m_activeDeck`** (see the `PlaybackEngine` Public API section above for the
-signal's own doc comment).
+`PlaybackEngine` runs two independent `AudioDeck` instances for crossfading (see
+UC-15) — originally two `QMediaPlayer`/`QAudioOutput` pairs directly, refactored
+behind the `AudioDeck` interface in Step 2, with `FfmpegAudioDeck` now owning the
+`QAudioBufferOutput` internally. `void audioBufferReceived(const QAudioBuffer&)` is
+a signal on `AudioDeck` itself (promoted there in Step 3, once `BassAudioDeck`
+gained an equivalent tap — see "Audio-buffer tap for the Audio Visualizer/Milkdrop
+(Step 3)" under UC-15). `PlaybackEngine::createDecksIfNeeded()` connects it
+identically for every deck, regardless of concrete type, to a `[this, d]` lambda
+that emits `PlaybackEngine`'s own public signal, `void audioBufferAvailable(const
+QAudioBuffer &buffer)`, **only when `d == m_activeDeck`** (see the `PlaybackEngine`
+Public API section above for the signal's own doc comment) — this filtering is
+backend-agnostic and needed no changes when BASS's tap was added.
 
 **Known limitation — crossfade simplification**: outside a crossfade, `m_activeDeck`
 always matches the one deck that's actually audible, so this is exact. *During* a
@@ -3453,7 +3654,7 @@ full property list and JSON shape.
 ### `SetupDialog.qml` — "AUDIO VISUALIZER" tab
 
 Fifth tab, appended to the existing tab-strip `Repeater`'s model array. Styled
-identically to the CROSSFADE/AUTO PLAY tabs it was built from: custom-styled
+identically to the PLAYBACK/AUTO PLAY tabs it was built from: custom-styled
 `Slider`s (4px track / 16px handle, `Theme.secondary` accent) for bar count
 (8-64), decay speed (0.0-1.0), sensitivity (0-100%, displayed as a percentage,
 divided by 100 when calling `setAudioVisualizerSensitivity`; 50% is "no

@@ -9,13 +9,14 @@ import QtQuick.Dialogs
 //                     (up to 30) are enabled via a per-cell checkbox to appear as
 //                     GenreBar buttons
 //   • FILE MONITORING — add/delete monitored folders (with subfolders toggle)
-//   • CROSSFADE     — enable/disable crossfade and set its length (see UC-15)
+//   • PLAYBACK      — choose the playback backend (FFmpeg/BASS Audio Library) and
+//                     enable/disable crossfade and set its length (see UC-15)
 //   • AUTO PLAY     — settings for the still-unimplemented AUTO PLAY feature:
 //                     Queue Horizon lookahead, Consider Genre, and Consider
 //                     Rating + Minimum Rating (see UC-14)
 //
 // Usage in Main.qml:
-//   SetupDialog { id: setupDialog; appConfig: appConfig }
+//   SetupDialog { id: setupDialog; appConfig: appConfig; playbackEngine: engine }
 //   ...
 //   setupDialog.open()
 
@@ -27,6 +28,10 @@ Popup {
     // Required: bind to the LibraryModel instance declared in Main.qml --
     // used only to trigger an automatic rescan on close, see below.
     property LibraryModel libraryModel: null
+    // Required: bind to the PlaybackEngine instance declared in Main.qml --
+    // used only to read activeBackendName for the PLAYBACK tab's "Currently
+    // active" indicator, see below.
+    property PlaybackEngine playbackEngine: null
 
     // ── Internal selection state ─────────────────────────────────────────
     property int selectedGenreIndex:  -1
@@ -181,7 +186,7 @@ Popup {
                 spacing: 0
 
                 Repeater {
-                    model: ["GENRES", "FILE MONITORING", "CROSSFADE", "AUTO PLAY", "AUDIO VISUALIZER", "MILKDROP"]
+                    model: ["GENRES", "FILE MONITORING", "PLAYBACK", "AUTO PLAY", "AUDIO VISUALIZER", "MILKDROP"]
 
                     delegate: Item {
                         width:  tabLabel.implicitWidth + 32
@@ -866,7 +871,7 @@ Popup {
             } // end FILE MONITORING panel
 
             // ────────────────────────────────────────────────────────────
-            // PANEL 3 — CROSSFADE
+            // PANEL 3 — PLAYBACK
             // ────────────────────────────────────────────────────────────
             Item {
                 anchors.fill: parent
@@ -878,6 +883,128 @@ Popup {
 
                     readonly property bool crossfadeOn:
                         root.appConfig !== null && root.appConfig.crossfadeEnabled
+
+                    // Shown if the user picks BASS Audio Library while its DLLs
+                    // aren't present next to Topaz.exe -- see UC-15. Local to
+                    // this panel, same pattern NewPlaylistDialog.qml uses for
+                    // its own "already exists" errorBox.
+                    MessageBox {
+                        id: missingBassDllsBox
+                        title: "PLAYBACK ENGINE"
+                        message: "BASS Audio Library was not found.<br><br>" +
+                                 "To use it, download <b>bass.dll</b>, <b>bassflac.dll</b> and " +
+                                 "<b>bassopus.dll</b> and place them next to Topaz.exe, then try again." +
+                                 "<br><br><a href=\"https://www.un4seen.com/\">https://www.un4seen.com/</a>"
+                    }
+
+                    // Shown right when the user actually switches backends --
+                    // see UC-15 "Step 2b". Not shown for clicking the
+                    // already-selected option, and not shown on the
+                    // missing-DLLs path above (missingBassDllsBox handles that).
+                    MessageBox {
+                        id: playbackBackendChangedBox
+                        title: "PLAYBACK ENGINE"
+                        message: "You changed the way Topaz is playing Audio Tracks.<br><br>" +
+                                 "This takes effect after restarting Topaz.<br><br>" +
+                                 "(Please check afterwards which Playback Engine is active)"
+                    }
+
+                    // ── Playback with row ──────────────────────────────
+                    // See UC-15 "Step 2b". PlaybackEngine reads this choice
+                    // once per app launch (when its two AudioDecks are first
+                    // constructed) -- switching here takes effect after
+                    // restarting Topaz, not live, hence playbackBackendChangedBox
+                    // below (opened only when the selection actually changes).
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text {
+                            text: "Playback with"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Row {
+                            Layout.leftMargin: 24
+                            spacing: 32
+
+                            Repeater {
+                                model: [
+                                    { value: "ffmpeg", label: "FFmpeg" },
+                                    { value: "bass",    label: "BASS Audio Library" }
+                                ]
+
+                                delegate: RowLayout {
+                                    spacing: 8
+
+                                    readonly property bool selected:
+                                        root.appConfig !== null
+                                        && root.appConfig.audioBackend === modelData.value
+
+                                    Rectangle {
+                                        width: 18; height: 18
+                                        radius: 9
+                                        color: "transparent"
+                                        border.width: 2
+                                        border.color: selected ? Theme.secondary : Theme.outlineVariant
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 10; height: 10
+                                            radius: 5
+                                            color: Theme.secondary
+                                            visible: selected
+                                        }
+                                    }
+
+                                    Text {
+                                        text: modelData.label
+                                        font.family:    Theme.fontFamilyBody
+                                        font.pixelSize: Theme.labelLg
+                                        color: Theme.fgSurface
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (!root.appConfig) return
+                                            if (selected) return // already this backend, nothing changed
+                                            if (modelData.value === "bass"
+                                                && !root.appConfig.bassLibraryAvailable()) {
+                                                missingBassDllsBox.open()
+                                                return
+                                            }
+                                            root.appConfig.setAudioBackend(modelData.value)
+                                            playbackBackendChangedBox.open()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Reports what's actually running THIS session --
+                        // distinct from the radio group above, which is only
+                        // the stored preference for the *next* launch (and
+                        // silently gets corrected back to FFmpeg if BASS was
+                        // selected but turned out unusable). See UC-15
+                        // "Step 2b" / PlaybackEngine.activeBackendName.
+                        Text {
+                            Layout.leftMargin: 24
+                            Layout.topMargin: 16
+                            text: "Currently active: " +
+                                  (root.playbackEngine && root.playbackEngine.activeBackendName
+                                       ? root.playbackEngine.activeBackendName
+                                       : "—")
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.labelSm
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+                    }
 
                     // ── Crossfade on/off row ──────────────────────────
                     RowLayout {
@@ -1044,7 +1171,7 @@ Popup {
 
                     Item { Layout.fillHeight: true }   // push content to top
                 }
-            } // end CROSSFADE panel
+            } // end PLAYBACK panel
 
             // ────────────────────────────────────────────────────────────
             // PANEL 4 — AUTO PLAY
@@ -1278,7 +1405,7 @@ Popup {
 
                         Item { Layout.fillWidth: true }
 
-                        // Toggle switch — same visual pattern as the CROSSFADE tab's
+                        // Toggle switch — same visual pattern as the PLAYBACK tab's
                         // on/off toggle.
                         Rectangle {
                             id: considerGenreTrack
@@ -1326,7 +1453,7 @@ Popup {
 
                         Item { Layout.fillWidth: true }
 
-                        // Toggle switch — same visual pattern as the CROSSFADE tab's
+                        // Toggle switch — same visual pattern as the PLAYBACK tab's
                         // and Consider Genre's on/off toggle.
                         Rectangle {
                             id: considerRatingTrack
@@ -1445,7 +1572,7 @@ Popup {
 
                         Item { Layout.fillWidth: true }
 
-                        // Toggle switch — same visual pattern as the CROSSFADE tab's
+                        // Toggle switch — same visual pattern as the PLAYBACK tab's
                         // and Consider Genre's on/off toggle.
                         Rectangle {
                             id: allowManualModificationTrack
@@ -1556,7 +1683,7 @@ Popup {
                     } // end Allow Manual Modification + Exceptions group
 
                     // ── New Tracks are Flickering row ────────────────────
-                    // Toggle switch — same visual pattern as the CROSSFADE
+                    // Toggle switch — same visual pattern as the PLAYBACK
                     // tab's and Allow Manual Modification's on/off toggle.
                     // Gates PlaybackQueue's brief flicker on a row AUTO PLAY
                     // just added — see UC-16.
@@ -2027,7 +2154,7 @@ Popup {
 
                         Item { Layout.fillWidth: true }
 
-                        // Toggle switch — same visual pattern as the CROSSFADE
+                        // Toggle switch — same visual pattern as the PLAYBACK
                         // tab's on/off toggle.
                         Rectangle {
                             id: peakHoldTrack

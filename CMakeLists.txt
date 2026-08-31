@@ -74,6 +74,13 @@ qt_add_executable(topaz
     libraryscanner.cpp
     librarymodel.h
     librarymodel.cpp
+    audiodeck.h
+    ffmpegaudiodeck.h
+    ffmpegaudiodeck.cpp
+    basslibrary.h
+    basslibrary.cpp
+    bassaudiodeck.h
+    bassaudiodeck.cpp
     playbackengine.h
     playbackengine.cpp
     playlistmanager.h

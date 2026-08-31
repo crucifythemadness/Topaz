@@ -1,5 +1,8 @@
 #include "playbackengine.h"
 #include "appconfig.h"
+#include "bassaudiodeck.h"
+#include "basslibrary.h"
+#include "ffmpegaudiodeck.h"
 #include "ratingcache.h"
 #include "tagreader.h"
 
@@ -14,46 +17,9 @@
 PlaybackEngine::PlaybackEngine(QObject *parent)
     : QAbstractListModel(parent)
 {
-    for (int d = 0; d < 2; ++d) {
-        m_players[d]      = new QMediaPlayer(this);
-        m_audioOutputs[d] = new QAudioOutput(this);
-        m_players[d]->setAudioOutput(m_audioOutputs[d]);
-        m_audioOutputs[d]->setVolume(1.0f);
-
-        // Decoded-buffer tap for the audio visualizer (UC-19) — independent of
-        // setAudioOutput() above, doesn't affect normal playback. Only the
-        // active deck's buffers are forwarded; see audioBufferAvailable()'s
-        // doc comment in the header for the crossfade simplification.
-        m_audioBufferOutputs[d] = new QAudioBufferOutput(this);
-        m_players[d]->setAudioBufferOutput(m_audioBufferOutputs[d]);
-        connect(m_audioBufferOutputs[d], &QAudioBufferOutput::audioBufferReceived,
-                this, [this, d](const QAudioBuffer &buffer) {
-                    if (d == m_activeDeck) emit audioBufferAvailable(buffer);
-                });
-
-        connect(m_players[d], &QMediaPlayer::positionChanged,
-                this, [this, d](qint64) { onDeckPositionChanged(d); });
-        connect(m_players[d], &QMediaPlayer::durationChanged,
-                this, [this, d](qint64) {
-                    if (d == m_activeDeck) emit durationChanged();
-                });
-        connect(m_players[d], &QMediaPlayer::playbackStateChanged,
-                this, [this, d](QMediaPlayer::PlaybackState) {
-                    if (d != m_activeDeck) return;
-                    emit isPlayingChanged();
-                    if (m_currentIndex >= 0 && m_currentIndex < m_queue.size()) {
-                        const QModelIndex idx = index(m_currentIndex);
-                        emit dataChanged(idx, idx, { IsPlayingRole });
-                    }
-                });
-        connect(m_players[d], &QMediaPlayer::mediaStatusChanged,
-                this, [this, d](QMediaPlayer::MediaStatus status) {
-                    onDeckMediaStatusChanged(d, status);
-                });
-    }
-
-    m_player      = m_players[m_activeDeck];
-    m_audioOutput = m_audioOutputs[m_activeDeck];
+    // Decks are NOT created here -- deciding FfmpegAudioDeck vs BassAudioDeck
+    // needs AppConfig, which isn't bound yet at construction time. See
+    // createDecksIfNeeded(), called from setAppConfig().
 
     m_fadeTimer = new QTimer(this);
     m_fadeTimer->setInterval(40); // ~25 volume updates/sec — smooth enough for a linear fade
@@ -79,6 +45,87 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
 }
 
 PlaybackEngine::~PlaybackEngine() = default;
+
+void PlaybackEngine::setAppConfig(AppConfig *cfg)
+{
+    if (m_appConfig == cfg) return;
+    m_appConfig = cfg;
+    emit appConfigChanged();
+    createDecksIfNeeded();
+}
+
+// Picks FfmpegAudioDeck or BassAudioDeck per m_appConfig->audioBackend() and
+// constructs both decks accordingly. Runs at most once per instance: called
+// from setAppConfig(), guarded by m_decks[0] already existing -- the backend
+// choice is read once per app launch, not hot-swapped (see UC-15 "Step 2b").
+void PlaybackEngine::createDecksIfNeeded()
+{
+    if (m_decks[0]) return;
+
+    const bool wantsBass = m_appConfig && m_appConfig->audioBackend() == QStringLiteral("bass");
+    const bool useBass = wantsBass
+        && m_appConfig->bassLibraryAvailable()
+        && BassLibrary::instance().load();
+
+    // BASS was selected but isn't actually usable right now (DLLs removed
+    // since being selected, or BassLibrary::load() itself failed) -- correct
+    // the persisted setting so Setup's UI never shows BASS selected while
+    // Topaz is actually running FFmpeg underneath.
+    if (wantsBass && !useBass) {
+        m_appConfig->setAudioBackend(QStringLiteral("ffmpeg"));
+        // Deferred to the next event-loop tick: this method runs synchronously
+        // during Main.qml's initial property-binding construction, before the
+        // window is necessarily shown or a Connections element listening for
+        // this signal is guaranteed to exist yet.
+        QTimer::singleShot(0, this, [this]() { emit bassUnavailableFallback(); });
+    }
+
+    for (int d = 0; d < 2; ++d) {
+        AudioDeck *deck = useBass
+            ? static_cast<AudioDeck *>(new BassAudioDeck(this))
+            : static_cast<AudioDeck *>(new FfmpegAudioDeck(this));
+        m_decks[d] = deck;
+
+        // Both concrete decks provide decoded buffers for the Audio
+        // Visualizer (UC-19)/Milkdrop (UC-20) -- see AudioDeck's doc
+        // comment ("Step 3"). Only the active deck's buffers are forwarded;
+        // see audioBufferAvailable()'s doc comment in the header for the
+        // crossfade simplification.
+        connect(deck, &AudioDeck::audioBufferReceived,
+                this, [this, d](const QAudioBuffer &buffer) {
+                    if (d == m_activeDeck) emit audioBufferAvailable(buffer);
+                });
+
+        connect(m_decks[d], &AudioDeck::positionChanged,
+                this, [this, d]() { onDeckPositionChanged(d); });
+        connect(m_decks[d], &AudioDeck::durationChanged,
+                this, [this, d]() {
+                    if (d == m_activeDeck) emit durationChanged();
+                });
+        connect(m_decks[d], &AudioDeck::playingChanged,
+                this, [this, d](bool) {
+                    if (d != m_activeDeck) return;
+                    emit isPlayingChanged();
+                    if (m_currentIndex >= 0 && m_currentIndex < m_queue.size()) {
+                        const QModelIndex idx = index(m_currentIndex);
+                        emit dataChanged(idx, idx, { IsPlayingRole });
+                    }
+                });
+        connect(m_decks[d], &AudioDeck::endOfMedia,
+                this, [this, d]() { onDeckEnded(d); });
+    }
+
+    m_deck = m_decks[m_activeDeck];
+    emit activeBackendNameChanged();
+}
+
+QString PlaybackEngine::activeBackendName() const
+{
+    if (!m_decks[0]) return {};
+    return qobject_cast<BassAudioDeck *>(m_decks[0])
+        ? QStringLiteral("BASS Audio Library")
+        : QStringLiteral("FFmpeg");
+}
 
 // ── QAbstractListModel ────────────────────────────────────────────────────
 
@@ -151,16 +198,20 @@ QHash<int, QByteArray> PlaybackEngine::roleNames() const
 
 // ── Properties ────────────────────────────────────────────────────────────
 
+// m_deck is null until createDecksIfNeeded() runs (from setAppConfig()) --
+// QML evaluates these properties reactively and can reach them before that
+// binding is ever set, so every one of these needs its own null guard,
+// unlike the old always-constructed QMediaPlayer.
 bool PlaybackEngine::isPlaying() const
 {
-    return m_player->playbackState() == QMediaPlayer::PlayingState;
+    return m_deck && m_deck->isPlaying();
 }
 
-qint64 PlaybackEngine::position() const { return m_player->position(); }
-qint64 PlaybackEngine::duration() const { return m_player->duration(); }
+qint64 PlaybackEngine::position() const { return m_deck ? m_deck->position() : 0; }
+qint64 PlaybackEngine::duration() const { return m_deck ? m_deck->duration() : 0; }
 
-QString PlaybackEngine::positionString() const { return msToString(m_player->position()); }
-QString PlaybackEngine::durationString() const { return msToString(m_player->duration()); }
+QString PlaybackEngine::positionString() const { return msToString(position()); }
+QString PlaybackEngine::durationString() const { return msToString(duration()); }
 
 QString PlaybackEngine::currentTitle() const
 {
@@ -278,9 +329,9 @@ void PlaybackEngine::addTrack(const QVariantMap &trackMap, bool autoPlayAdded)
     // Auto-play when the queue was empty OR every queued track has already
     // played through to its natural end (m_queueFinished) -- but never
     // while merely paused mid-track, which leaves m_queueFinished false.
-    if (m_currentIndex < 0 || m_queueFinished) {
+    if ((m_currentIndex < 0 || m_queueFinished) && m_deck) {
         loadTrack(row);
-        m_player->play();
+        m_deck->play();
     }
 
     // Clears the "just added by AUTO PLAY" flag ~2s later so
@@ -316,9 +367,9 @@ void PlaybackEngine::addTracks(const QVariantList &trackList)
     }
 
     // Same widened auto-play condition as addTrack() -- see there.
-    if (m_currentIndex < 0 || m_queueFinished) {
+    if ((m_currentIndex < 0 || m_queueFinished) && m_deck) {
         loadTrack(first);
-        m_player->play();
+        m_deck->play();
     }
 }
 
@@ -339,14 +390,14 @@ void PlaybackEngine::removeAt(int idx)
         m_playlistManager->removeTrackByPath(m_activePlaylistName, removedPath);
 
     if (wasPlaying) {
-        m_player->stop();
+        m_deck->stop();
         m_currentIndex = -1;
         if (idx < m_queue.size()) {
             loadTrack(idx);
-            m_player->play();
+            m_deck->play();
         } else if (!m_queue.isEmpty()) {
             loadTrack(m_queue.size() - 1);
-            m_player->play();
+            m_deck->play();
         } else {
             clearCoverSource();
             emit currentIndexChanged();
@@ -455,7 +506,7 @@ void PlaybackEngine::clearQueue()
 {
     if (m_queue.isEmpty()) return;
     cancelCrossfade();
-    m_player->stop();
+    m_deck->stop();
     m_currentIndex = -1;
     m_queueFinished = false;   // cleared, not "finished" -- see addTrack()/addTracks()
     if (m_userPaused) { m_userPaused = false; emit userPausedChanged(); }   // no current track left to be paused
@@ -497,7 +548,7 @@ void PlaybackEngine::loadPlaylistTracks(const QVariantList &trackList)
     const qint64 fadeMs = wantsCrossfade
         ? qint64(m_appConfig->crossfadeSeconds() * 1000) : 0;
     const bool eligible = wantsCrossfade
-        && m_player->duration() > fadeMs
+        && m_deck->duration() > fadeMs
         && firstNew.duration    > fadeMs;
 
     if (!eligible) {
@@ -518,9 +569,9 @@ void PlaybackEngine::loadPlaylistTracks(const QVariantList &trackList)
     for (int i = 1; i < trackList.size(); ++i)
         m_pendingQueue.append(trackFromMap(trackList.at(i).toMap()));
 
-    m_players[m_fadeInDeck]->setSource(QUrl::fromLocalFile(firstNew.filePath));
-    m_audioOutputs[m_fadeInDeck]->setVolume(0.0f);
-    m_players[m_fadeInDeck]->play();
+    m_decks[m_fadeInDeck]->setSource(firstNew.filePath);
+    m_decks[m_fadeInDeck]->setVolume(0.0f);
+    m_decks[m_fadeInDeck]->play();
 
     m_crossfading            = true;
     m_crossfadeReplacesQueue = true;
@@ -608,25 +659,25 @@ void PlaybackEngine::restoreOverrideCursor()
 
 void PlaybackEngine::playAt(int idx)
 {
-    if (idx < 0 || idx >= m_queue.size()) return;
+    if (idx < 0 || idx >= m_queue.size() || !m_deck) return;
     loadTrack(idx);
-    m_player->play();
+    m_deck->play();
 }
 
 void PlaybackEngine::togglePlay()
 {
-    if (m_queue.isEmpty()) return;
+    if (m_queue.isEmpty() || !m_deck) return;
     if (m_currentIndex < 0) {
         loadTrack(0);
-        m_player->play();
+        m_deck->play();
         return;
     }
-    const bool playing = (m_player->playbackState() == QMediaPlayer::PlayingState);
+    const bool playing = m_deck->isPlaying();
     if (playing) {
-        m_player->pause();
+        m_deck->pause();
         // Keep both decks in lockstep while a crossfade is in progress —
         // otherwise the standby deck would keep fading in while paused.
-        if (m_crossfading) m_players[1 - m_activeDeck]->pause();
+        if (m_crossfading) m_decks[1 - m_activeDeck]->pause();
         // m_fadeTimer runs on wall-clock ticks independent of the decks'
         // playback state -- without stopping it too, the fade keeps
         // advancing (and can cross the midpoint/complete) while both decks
@@ -635,8 +686,8 @@ void PlaybackEngine::togglePlay()
         if (m_crossfading) m_fadeTimer->stop();
         if (!m_userPaused) { m_userPaused = true; emit userPausedChanged(); }
     } else {
-        m_player->play();
-        if (m_crossfading) m_players[1 - m_activeDeck]->play();
+        m_deck->play();
+        if (m_crossfading) m_decks[1 - m_activeDeck]->play();
         if (m_crossfading) m_fadeTimer->start();
         if (m_userPaused) { m_userPaused = false; emit userPausedChanged(); }
     }
@@ -644,42 +695,43 @@ void PlaybackEngine::togglePlay()
 
 void PlaybackEngine::next()
 {
-    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size() - 1) return;
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size() - 1 || !m_deck) return;
     loadTrack(m_currentIndex + 1);
-    m_player->play();
+    m_deck->play();
 }
 
 void PlaybackEngine::previous()
 {
+    if (!m_deck) return;
     // If more than 3 s in, restart; otherwise go to the previous track
-    if (m_player->position() > 3000 || m_currentIndex <= 0) {
-        m_player->setPosition(0);
+    if (m_deck->position() > 3000 || m_currentIndex <= 0) {
+        m_deck->setPosition(0);
         return;
     }
     loadTrack(m_currentIndex - 1);
-    m_player->play();
+    m_deck->play();
 }
 
 void PlaybackEngine::seek(qint64 ms)
 {
-    if (m_currentIndex < 0) return;
+    if (m_currentIndex < 0 || !m_deck) return;
     // A manual seek abandons any automatic crossfade in progress — reconciling
     // a seek on the fading-out deck with the independently-playing standby
     // deck isn't worth the complexity for what is a rare, few-second window.
     cancelCrossfade();
-    m_player->setPosition(ms);
+    m_deck->setPosition(ms);
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────
 
 void PlaybackEngine::loadTrack(int idx)
 {
-    if (idx < 0 || idx >= m_queue.size()) return;
+    if (idx < 0 || idx >= m_queue.size() || !m_deck) return;
 
     m_queueFinished = false;
     cancelCrossfade();
-    m_audioOutput->setVolume(1.0f);   // in case a fade left this deck's volume < 1
-    m_player->setSource(QUrl::fromLocalFile(m_queue.at(idx).filePath));
+    m_deck->setVolume(1.0f);   // in case a fade left this deck's volume < 1
+    m_deck->setSource(m_queue.at(idx).filePath);
 
     switchCurrentIndexTo(idx);
 }
@@ -747,7 +799,7 @@ void PlaybackEngine::advanceToNext()
 
     if (m_currentIndex < m_queue.size() - 1) {
         loadTrack(m_currentIndex + 1);
-        m_player->play();
+        m_deck->play();
     } else {
         // End of queue — stay on last track, stopped
         m_queueFinished = true;
@@ -767,7 +819,7 @@ void PlaybackEngine::onDeckPositionChanged(int deckIndex)
     if (!m_appConfig || !m_appConfig->crossfadeEnabled()) return;
     if (m_currentIndex < 0 || m_currentIndex >= m_queue.size() - 1) return; // no next track
 
-    QMediaPlayer *active = m_players[m_activeDeck];
+    AudioDeck *active = m_decks[m_activeDeck];
     const qint64 dur = active->duration();
     const qint64 pos = active->position();
     if (dur <= 0) return;
@@ -783,11 +835,10 @@ void PlaybackEngine::onDeckPositionChanged(int deckIndex)
         startCrossfade();
 }
 
-void PlaybackEngine::onDeckMediaStatusChanged(int deckIndex, QMediaPlayer::MediaStatus status)
+void PlaybackEngine::onDeckEnded(int deckIndex)
 {
     if (deckIndex != m_activeDeck || m_crossfading) return;
-    if (status == QMediaPlayer::EndOfMedia)
-        advanceToNext();
+    advanceToNext();
 }
 
 void PlaybackEngine::startCrossfade()
@@ -800,9 +851,9 @@ void PlaybackEngine::startCrossfade()
     m_fadeInDeck   = 1 - m_activeDeck;
     m_fadeOutIndex = m_currentIndex;
 
-    m_players[m_fadeInDeck]->setSource(QUrl::fromLocalFile(m_queue.at(nextIdx).filePath));
-    m_audioOutputs[m_fadeInDeck]->setVolume(0.0f);
-    m_players[m_fadeInDeck]->play();
+    m_decks[m_fadeInDeck]->setSource(m_queue.at(nextIdx).filePath);
+    m_decks[m_fadeInDeck]->setVolume(0.0f);
+    m_decks[m_fadeInDeck]->play();
 
     m_crossfading       = true;
     m_fadeMidpointFired = false;
@@ -819,8 +870,8 @@ void PlaybackEngine::onFadeTick()
     const qint64 fadeMs = qMax<qint64>(1, qint64(m_appConfig->crossfadeSeconds() * 1000));
     const double frac = qMin(1.0, double(m_fadeElapsedMs) / double(fadeMs));
 
-    m_audioOutputs[m_fadeOutDeck]->setVolume(float(1.0 - frac));
-    m_audioOutputs[m_fadeInDeck]->setVolume(float(frac));
+    m_decks[m_fadeOutDeck]->setVolume(float(1.0 - frac));
+    m_decks[m_fadeInDeck]->setVolume(float(frac));
 
     if (!m_fadeMidpointFired && frac >= 0.5) {
         m_fadeMidpointFired = true;
@@ -828,9 +879,8 @@ void PlaybackEngine::onFadeTick()
         // Switch the UI-facing alias now too, so duration/position/isPlaying
         // (progress bar, length label, play/pause icon) switch to the incoming
         // track together with title/artist/cover/rating, all at the midpoint.
-        m_activeDeck  = m_fadeInDeck;
-        m_player      = m_players[m_activeDeck];
-        m_audioOutput = m_audioOutputs[m_activeDeck];
+        m_activeDeck = m_fadeInDeck;
+        m_deck       = m_decks[m_activeDeck];
 
         // loadPlaylistTracks()'s queue-replacing crossfade (see UC-23): swap
         // in the whole new queue right here, before switchCurrentIndexTo()
@@ -854,8 +904,8 @@ void PlaybackEngine::onFadeTick()
         // m_fadeOutDeck is no longer m_activeDeck (swapped at the midpoint above),
         // so its playbackStateChanged from this stop() is correctly suppressed by
         // the per-deck signal guards instead of stomping on isPlaying.
-        m_players[m_fadeOutDeck]->stop();
-        m_audioOutputs[m_fadeOutDeck]->setVolume(1.0f);   // reset for reuse
+        m_decks[m_fadeOutDeck]->stop();
+        m_decks[m_fadeOutDeck]->setVolume(1.0f);   // reset for reuse
         m_crossfading = false;
 
         if (m_crossfadeReplacesQueue) {
@@ -877,9 +927,9 @@ void PlaybackEngine::cancelCrossfade()
     if (!m_crossfading) return;
     m_fadeTimer->stop();
     const int standbyDeck = 1 - m_activeDeck;
-    m_players[standbyDeck]->stop();
-    m_audioOutputs[standbyDeck]->setVolume(1.0f);
-    m_audioOutputs[m_activeDeck]->setVolume(1.0f);
+    m_decks[standbyDeck]->stop();
+    m_decks[standbyDeck]->setVolume(1.0f);
+    m_decks[m_activeDeck]->setVolume(1.0f);
     m_crossfading   = false;
     m_fadeElapsedMs = 0;
     // Must reset -- otherwise an interrupted queue-replacing crossfade (see

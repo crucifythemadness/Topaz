@@ -28,7 +28,15 @@
 //                  // reassigned a different letter or remounted elsewhere (incl. Linux).
 //                  // "path" and "available" are NOT persisted — folders() computes them
 //                  // fresh from currently mounted volumes on every call.
-//     "crossfade": { "enabled": false, "seconds": 5.0 },
+//     "crossfade": { "enabled": false, "seconds": 5.0, "audioBackend": "ffmpeg" },
+//                  // audioBackend backs the PLAYBACK tab's "Playback with" choice
+//                  // ("ffmpeg" or "bass"); kept in this object (not renamed/split
+//                  // out) even though the tab itself is no longer called
+//                  // CROSSFADE, to avoid a migration path for existing config
+//                  // files. Missing key or any other value defaults to "ffmpeg".
+//                  // Selecting "bass" is only honored once bassLibraryAvailable()
+//                  // is true (bass.dll/bassflac.dll/bassopus.dll present next to
+//                  // Topaz.exe) -- see UC-15.
 //     "autoPlay":  { "queueHorizon": 5, "titleAddingIntervalSeconds": 30,
 //                    "considerGenre": false,
 //                    "considerRating": false, "minimumRating": 5,
@@ -79,9 +87,11 @@ class AppConfig : public QObject
     Q_PROPERTY(int playbackQueueWidth READ playbackQueueWidth NOTIFY panelWidthsChanged)
     Q_PROPERTY(int nowPlayingWidth    READ nowPlayingWidth    NOTIFY panelWidthsChanged)
 
-    // ── Crossfade settings ──────────────────────────────────────────────
+    // ── Crossfade settings (PLAYBACK tab) ────────────────────────────────
     Q_PROPERTY(bool   crossfadeEnabled READ crossfadeEnabled NOTIFY crossfadeChanged)
     Q_PROPERTY(double crossfadeSeconds READ crossfadeSeconds NOTIFY crossfadeChanged)
+    // "ffmpeg" (default) or "bass" -- see the schema comment above and UC-15.
+    Q_PROPERTY(QString audioBackend    READ audioBackend    NOTIFY audioBackendChanged)
 
     // ── AUTO PLAY settings ────────────────────────────────────────────────
     Q_PROPERTY(int  autoPlayQueueHorizon             READ autoPlayQueueHorizon             NOTIFY autoPlayQueueHorizonChanged)
@@ -171,8 +181,9 @@ public:
     int playbackQueueWidth()   const { return m_playbackQueueWidth; }
     int nowPlayingWidth()      const { return m_nowPlayingWidth;    }
 
-    bool   crossfadeEnabled() const { return m_crossfadeEnabled; }
-    double crossfadeSeconds() const { return m_crossfadeSeconds; }
+    bool    crossfadeEnabled() const { return m_crossfadeEnabled; }
+    double  crossfadeSeconds() const { return m_crossfadeSeconds; }
+    QString audioBackend()     const { return m_audioBackend;     }
 
     int  autoPlayQueueHorizon()            const { return m_autoPlayQueueHorizon;            }
     int  autoPlayTitleAddingIntervalSeconds() const { return m_autoPlayTitleAddingIntervalSeconds; }
@@ -267,6 +278,14 @@ public:
     // Clamped to [2.0, 10.0] and snapped to the nearest 0.5 s increment.
     Q_INVOKABLE void setCrossfadeSeconds(double seconds);
 
+    // ── Playback backend (PLAYBACK tab) ──────────────────────────────────
+    // Ignored (no-op) unless mode is "ffmpeg" or "bass".
+    Q_INVOKABLE void setAudioBackend(const QString &mode);
+    // True only if bass.dll, bassflac.dll, and bassopus.dll are all present
+    // next to the running executable -- see UC-15. Checked by SetupDialog
+    // before allowing "bass" to actually be selected.
+    Q_INVOKABLE bool bassLibraryAvailable() const;
+
     // ── AUTO PLAY operations ─────────────────────────────────────────────
     // Clamped to [1, 15].
     Q_INVOKABLE void setAutoPlayQueueHorizon(int tracks);
@@ -355,6 +374,7 @@ signals:
     void windowGeometryChanged();
     void panelWidthsChanged();
     void crossfadeChanged();
+    void audioBackendChanged();
     void autoPlayQueueHorizonChanged();
     void autoPlayTitleAddingIntervalSecondsChanged();
     void autoPlayConsiderGenreChanged();
@@ -392,8 +412,9 @@ private:
     int m_playbackQueueWidth = 374;
     int m_nowPlayingWidth    = 359;
 
-    bool   m_crossfadeEnabled = false;
-    double m_crossfadeSeconds = 5.0;
+    bool    m_crossfadeEnabled = false;
+    double  m_crossfadeSeconds = 5.0;
+    QString m_audioBackend     = QStringLiteral("ffmpeg");
 
     int  m_autoPlayQueueHorizon             = 5;
     int  m_autoPlayTitleAddingIntervalSeconds = 30;

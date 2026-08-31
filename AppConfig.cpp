@@ -1,6 +1,7 @@
 #include "appconfig.h"
 #include "volumepath.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -244,6 +245,24 @@ void AppConfig::setCrossfadeSeconds(double seconds)
     m_crossfadeSeconds = seconds;
     emit crossfadeChanged();
     save();
+}
+
+void AppConfig::setAudioBackend(const QString &mode)
+{
+    if (mode != QStringLiteral("ffmpeg") && mode != QStringLiteral("bass"))
+        return;
+    if (m_audioBackend == mode) return;
+    m_audioBackend = mode;
+    emit audioBackendChanged();
+    save();
+}
+
+bool AppConfig::bassLibraryAvailable() const
+{
+    const QString dir = QCoreApplication::applicationDirPath();
+    return QFile::exists(dir + QStringLiteral("/bass.dll"))
+        && QFile::exists(dir + QStringLiteral("/bassflac.dll"))
+        && QFile::exists(dir + QStringLiteral("/bassopus.dll"));
 }
 
 // ── AUTO PLAY operations ──────────────────────────────────────────────────
@@ -615,6 +634,8 @@ void AppConfig::load()
     const QJsonObject crossfade = root[QStringLiteral("crossfade")].toObject();
     m_crossfadeEnabled = crossfade[QStringLiteral("enabled")].toBool(false);
     m_crossfadeSeconds = crossfade[QStringLiteral("seconds")].toDouble(5.0);
+    const QString backend = crossfade[QStringLiteral("audioBackend")].toString();
+    m_audioBackend = (backend == QStringLiteral("bass")) ? backend : QStringLiteral("ffmpeg");
 
     const QJsonObject autoPlay = root[QStringLiteral("autoPlay")].toObject();
     m_autoPlayQueueHorizon   = autoPlay[QStringLiteral("queueHorizon")].toInt(5);
@@ -718,8 +739,9 @@ void AppConfig::save()
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;
 
     QJsonObject crossfade;
-    crossfade[QStringLiteral("enabled")] = m_crossfadeEnabled;
-    crossfade[QStringLiteral("seconds")] = m_crossfadeSeconds;
+    crossfade[QStringLiteral("enabled")]      = m_crossfadeEnabled;
+    crossfade[QStringLiteral("seconds")]      = m_crossfadeSeconds;
+    crossfade[QStringLiteral("audioBackend")] = m_audioBackend;
     root[QStringLiteral("crossfade")] = crossfade;
 
     QJsonObject autoPlay;

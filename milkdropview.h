@@ -84,9 +84,12 @@ protected:
     void itemChange(ItemChange change, const ItemChangeData &value) override;
 
 private slots:
-    // Runs on the GUI thread — PlaybackEngine::audioBufferAvailable is emitted
-    // from the FFmpeg decode thread, but Qt::AutoConnection already queues
-    // delivery onto this object's thread, same as AudioVisualizerController.
+    // Runs on the GUI thread — PlaybackEngine::audioBufferAvailable may be
+    // emitted from a worker thread (FfmpegAudioDeck's decode thread) or
+    // directly from the GUI thread (BassAudioDeck's own QTimer-driven tap,
+    // see UC-15 "Step 3"); Qt::AutoConnection dispatches correctly either
+    // way, queuing delivery only when the emitting thread actually differs,
+    // same as AudioVisualizerController.
     void onAudioBufferAvailable(const QAudioBuffer &buffer);
     // ~30fps QTimer tick (also GUI thread, so never overlaps the slot above):
     // makes the offscreen context current, renders one projectM frame into
