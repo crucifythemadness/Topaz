@@ -11,6 +11,10 @@ import QtQuick.Window
 // Reuses PlaybackEngine's existing current* metadata properties directly (all
 // NOTIFY on currentTrackChanged, same signal NowPlaying.qml's own fields react
 // to) — no polling, no local caching, the pane just updates when the track does.
+// One exception: the DURATION spec field's left half is a live "time
+// remaining" countdown (engine.remainingString, NOTIFY positionChanged) that
+// ticks at playback cadence, same as NowPlaying's ascending elapsed-time
+// counter -- see the technical-specs box below.
 //
 // Content-scales-with-pane-size: every font size/padding/spacing below is
 // multiplied by scaleFactor, a single ratio derived from how far the pane has
@@ -331,7 +335,9 @@ FloatingPane {
                 SpecField {
                     anchors.centerIn: parent
                     label: qsTr("DURATION")
-                    value: tagInfo.engine ? tagInfo.engine.durationString : "0:00"
+                    value: tagInfo.engine
+                           ? (tagInfo.engine.remainingString + " | " + tagInfo.engine.durationString)
+                           : "0:00 | 0:00"
                     scale: tagInfo.scaleFactor
                 }
                 Rectangle {

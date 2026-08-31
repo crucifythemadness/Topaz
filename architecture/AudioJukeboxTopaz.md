@@ -1760,6 +1760,7 @@ abstraction that makes this backend-agnostic.
 | `duration` | `qint64` | Duration of current track in milliseconds |
 | `positionString` | `QString` | `position` formatted as "M:SS" |
 | `durationString` | `QString` | `duration` formatted as "M:SS" |
+| `remainingString` | `QString` | `duration - position` formatted as "M:SS" (added for `TagInfoWindow`'s DURATION countdown, UC-18) |
 | `currentTitle` | `QString` | Title of the current track |
 | `currentArtist` | `QString` | artist (falls back to albumArtist) of the current track |
 | `currentAlbum` | `QString` | Album name of the current track |
@@ -3290,6 +3291,21 @@ specs box while the side margins stayed fixed. Anchoring it independently guaran
 its bottom margin always equals the side margins exactly, at any pane size; leftover
 vertical space now becomes a harmless gap between the metadata grid and the specs
 box instead.
+
+**DURATION's live remaining-time countdown**: unlike every other field in this
+pane (all of which reuse `currentTrackChanged`, firing once per track — see
+above), the DURATION spec field shows `remaining | total` (e.g. `0:34 | 5:10`), where
+the left half is a live countdown that ticks once per position update while the
+track plays — the pane's first field bound to the high-frequency
+`positionChanged` signal, the same one that already drives `NowPlaying`'s
+ascending elapsed-time counter, just running in reverse. `PlaybackEngine` gained
+one new getter for this, `remainingString()` (`Q_PROPERTY`, `NOTIFY
+positionChanged`, matching `positionString`'s own NOTIFY choice for the same
+reason — duration only changes once per track, but remaining time must tick at
+playback cadence): `msToString(duration() - position())`, reusing the existing
+private `msToString()` helper `positionString()`/`durationString()` already share.
+`msToString()`'s existing `ms <= 0 → "0:00"` floor means a timing-granularity
+overshoot right at track-end shows `0:00`, never a negative value.
 
 **Content scales with pane size**: a single computed property,
 ```qml

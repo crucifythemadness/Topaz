@@ -212,6 +212,7 @@ qint64 PlaybackEngine::duration() const { return m_deck ? m_deck->duration() : 0
 
 QString PlaybackEngine::positionString() const { return msToString(position()); }
 QString PlaybackEngine::durationString() const { return msToString(duration()); }
+QString PlaybackEngine::remainingString() const { return msToString(duration() - position()); }
 
 QString PlaybackEngine::currentTitle() const
 {

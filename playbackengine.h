@@ -56,6 +56,11 @@ class PlaybackEngine : public QAbstractListModel
     Q_PROPERTY(qint64  duration         READ duration         NOTIFY durationChanged)
     Q_PROPERTY(QString positionString   READ positionString   NOTIFY positionChanged)
     Q_PROPERTY(QString durationString   READ durationString   NOTIFY durationChanged)
+    // "m:ss" time remaining until the track ends (duration - position) --
+    // used by TagInfoWindow's DURATION field for a live countdown, see
+    // UC-18. NOTIFY positionChanged for the same reason positionString
+    // uses it: this needs to tick at playback cadence, not once per track.
+    Q_PROPERTY(QString remainingString  READ remainingString  NOTIFY positionChanged)
     Q_PROPERTY(QString currentTitle     READ currentTitle     NOTIFY currentTrackChanged)
     Q_PROPERTY(QString currentArtist    READ currentArtist    NOTIFY currentTrackChanged)
     Q_PROPERTY(QString currentAlbum     READ currentAlbum     NOTIFY currentTrackChanged)
@@ -119,6 +124,7 @@ public:
     qint64  duration()          const;
     QString positionString()    const;
     QString durationString()    const;
+    QString remainingString()   const;
     QString currentTitle()      const;
     QString currentArtist()     const;
     QString currentAlbum()      const;
