@@ -1,7 +1,9 @@
 #include "librarymodel.h"
 #include "librarycache.h"
 #include "libraryscanner.h"
+#include "ratingcache.h"
 
+#include <QCoreApplication>
 #include <QThread>
 #include <algorithm>
 #include <numeric>
@@ -357,6 +359,14 @@ void LibraryModel::applyTracks(QList<TrackInfo> &&tracks)
         emit albumCountChanged();
     }
 
+    int ratedCount = 0;
+    for (const TrackInfo &t : std::as_const(m_tracks))
+        if (t.rating > 0) ++ratedCount;
+    if (ratedCount != m_ratingCount) {
+        m_ratingCount = ratedCount;
+        emit ratingCountChanged();
+    }
+
     emit libraryRefreshed();
 }
 
@@ -613,6 +623,66 @@ QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres
         result.append(tm);
     }
     return result;
+}
+
+void LibraryModel::removeAbandonedRatings()
+{
+    if (m_removingAbandonedRatings) return;
+
+    m_removingAbandonedRatings = true;
+    emit removingAbandonedRatingsChanged();
+    m_abandonedRatingsProgress = 0;
+    emit abandonedRatingsProgressChanged();
+
+    // Every currently-known track's identity -> its CURRENT genre. Serves
+    // both the existence check below (.contains) and the genre-drift fix
+    // (.value) -- ratingId doesn't encode genre (see
+    // TrackInfo::computeRatingId()), so a re-tagged track's rating entry
+    // would otherwise keep whatever genre it had at rating time forever.
+    QHash<QUuid, QString> liveGenreByRatingId;
+    liveGenreByRatingId.reserve(m_tracks.size());
+    for (const TrackInfo &t : std::as_const(m_tracks)) {
+        if (!t.ratingId.isNull())
+            liveGenreByRatingId.insert(t.ratingId, t.genre);
+    }
+
+    QList<RatingCache::Entry> entries = RatingCache::loadEntries();
+    QList<RatingCache::Entry> kept;
+    kept.reserve(entries.size());
+    int removedCount = 0;
+    int genreCorrectedCount = 0;
+
+    const int total = entries.size();
+    for (int i = 0; i < total; ++i) {
+        RatingCache::Entry entry = entries.at(i);
+        const auto it = liveGenreByRatingId.constFind(entry.ratingId);
+        if (it == liveGenreByRatingId.constEnd()) {
+            ++removedCount; // no matching track anywhere in the library -- abandoned
+        } else {
+            if (it.value() != entry.genre) {
+                entry.genre = it.value();
+                ++genreCorrectedCount;
+            }
+            kept.append(entry);
+        }
+
+        // Chunked progress -- the whole pass is fast (ratings files are far
+        // smaller than the library itself), but this keeps the MISC tab's
+        // progress bar responsive/visible rather than jumping straight to 100%.
+        if (total > 0 && (i % 25 == 0 || i == total - 1)) {
+            m_abandonedRatingsProgress = (i + 1) * 100 / total;
+            emit abandonedRatingsProgressChanged();
+            QCoreApplication::processEvents();
+        }
+    }
+
+    RatingCache::saveEntries(kept);
+
+    m_removingAbandonedRatings = false;
+    emit removingAbandonedRatingsChanged();
+    m_abandonedRatingsProgress = 100;
+    emit abandonedRatingsProgressChanged();
+    emit abandonedRatingsRemovalFinished(removedCount, genreCorrectedCount, kept.size());
 }
 
 QString LibraryModel::coverThumbForAlbum(const QString &album,

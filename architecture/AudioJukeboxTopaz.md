@@ -778,6 +778,7 @@ current track changes (see `PlaybackEngine::currentLargeCoverSource`).
 | `scanProgress` | 0–100 completion percentage |
 | `trackCount` | Number of tracks currently in the model |
 | `albumCount` | Number of distinct albums currently in the model (canonicalized by trimmed+lowercased `albumArtist\|album`, same normalization as `buildLibraryTree()`). Recomputed in one O(N_tracks) pass whenever `applyTracks()` replaces `m_tracks` (cache load / scan complete) — not recomputed per read. Shown on the About dialog's TOPAZ tab. |
+| `ratingCount` | Number of tracks in the model with a rating set (`rating > 0`). Recomputed alongside `albumCount` in the same `applyTracks()` pass. Shown on the About dialog's TOPAZ tab (red dot, `Theme.error` — same accent `PlaylistViewer`'s OFFLINE indicator uses). |
 | `ratingsReady` | `true` once a scan (full or stat-check) has completed at least once in this session with rating enrichment applied (see UC-14). Gates the AUTO PLAY button in `BottomBar`; never reset back to `false`. |
 | `loadCacheAndStartStatCheck()` | Load cache instantly, then dispatch stat-check |
 | `startFullScan()` | Trigger a full rescan on the worker thread |
@@ -1381,6 +1382,7 @@ configurable via the app JSON config) will be introduced at that point.
       +scanProgress int
       +trackCount int
       +albumCount int
+      +ratingCount int
       +ratingsReady bool
       +loadCacheAndStartStatCheck()
       +startFullScan()
@@ -4485,4 +4487,102 @@ now-irrelevant outgoing deck gets stopped.
   UC-10's Design decisions — crossfading needs the target tracks before it
   can decide anything, which the old eager-clear-on-click structure made
   impossible.
+
+---
+
+## UC-24 Remove Abandoned Ratings (MISC Tab)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | One-click cleanup of `Topaz.rating.json` entries whose track no longer exists in the library, without ever touching genre selection/scanning state. |
+| **Actor** | User |
+| **Precondition** | Topaz is running; the library has been loaded at least once this session. |
+| **Trigger** | User clicks **REMOVE** in Setup → MISC. |
+
+A new **MISC** tab (`SetupDialog.qml`, `tabBar.currentTab === 6`) hosts this
+single action for now — the first tab in this dialog with no per-setting
+persistence of its own, just a one-shot maintenance operation.
+
+### `RatingCache` — exposing the entry API
+
+`Topaz.rating.json` already stores exactly `{genre, ratingId, rating}` per
+entry (see UC-14's schema), but the struct and its load/save helpers
+(`Entry`, `loadEntries()`, `saveEntries()`) were `private` — only
+`RatingCache::load()` (which collapses to a `ratingId → rating` hash,
+discarding `genre`) and `setRating()` (single upsert) were public, neither
+sufficient for a bulk remove-and-rewrite pass. These three were simply
+moved to `public` — no implementation changes — since they already did
+exactly what this feature needs.
+
+### `LibraryModel::removeAbandonedRatings()` — the operation
+
+Lives on `LibraryModel` (`Q_INVOKABLE`) since it already owns both
+`m_tracks` (the live library) and needs no other component's data.
+Exposes two new `Q_PROPERTY`s mirroring the existing `scanning`/
+`scanProgress` shape — `removingAbandonedRatings` (bool, busy flag) and
+`abandonedRatingsProgress` (int, 0-100) — plus a completion signal,
+`abandonedRatingsRemovalFinished(int removedCount, int genreCorrectedCount,
+int remainingCount)` (`remainingCount` is the kept list's final size —
+every rating still in `Topaz.rating.json` now matches a track in the
+library).
+
+**Match semantics — existence only, no genre dependency.** A rating is
+"abandoned" (removed) if no track anywhere in the current library has a
+matching `ratingId` — a UUIDv5 hash of `albumArtist;artist;album;title`
+(`TrackInfo::computeRatingId()`, `trackinfo.h`) that never encodes genre.
+This was **deliberately designed without any genre-enabled dependency**
+after confirming that `LibraryScanner` filters scanned files only against
+`AppConfig.genres()` (the full configured list, up to 40) and never
+`AppConfig.enabledGenres()` (the GenreBar-shown subset, up to 30) — see
+`libraryscanner.cpp`'s filter logic. A track in a genre that's configured
+but currently *disabled* in GenreBar is still fully scanned and present in
+`LibraryModel`/`Topaz.library.json`, so checking existence against the
+full live track list is equally reliable for enabled and disabled genres
+alike; no extra genre-active safeguard is needed for correctness, and none
+is applied. (An earlier draft of this feature included such a safeguard as
+a caution layer before this was confirmed — removed once the underlying
+data was shown to already be fully trustworthy either way.)
+
+**Genre-drift self-correction.** Since `ratingId` doesn't encode genre, a
+track re-tagged to a different genre after being rated leaves its
+`Topaz.rating.json` entry's `genre` field stale — the only other write
+path, `PlaybackEngine::setRating()`, always writes the *current* genre at
+rating time, so nothing else ever refreshes it later. Because this pass
+already builds a `QHash<QUuid, QString>` mapping every live track's
+`ratingId` to its *current* genre (to answer the existence question), it
+gets genre-drift correction for free: any surviving entry (track still
+exists) whose stored `genre` no longer matches the live value has it
+corrected in place before the file is rewritten, counted separately
+(`genreCorrectedCount`) from removals.
+
+**Synchronous with chunked progress, not a worker thread.** `RatingCache`
+reads/writes already happen synchronously on the main thread today (every
+track change and every star click, see UC-14) with no perceptible-lag
+mitigation, and a ratings file is realistically far smaller than the
+library itself (bounded by the same order of magnitude as "12K tracks in
+<100ms", `librarymodel.h`). Rather than introduce a new threading pattern
+for what's fundamentally a small, fast, one-off batch, `removeAbandonedRatings()`
+runs synchronously, emitting `abandonedRatingsProgressChanged()` and
+calling `QCoreApplication::processEvents()` roughly every 25 entries so
+the MISC tab's progress bar animates and the UI stays responsive, even
+though the whole pass typically completes in well under a second.
+
+### `SetupDialog.qml` — MISC tab UI
+
+A label ("Remove Abandoned Ratings") + a **REMOVE** button using this
+dialog's established action-button idiom (`Rectangle` + hover-driven color
++ centered `Text` + `MouseArea`, same as e.g. FILE MONITORING's ADD
+FOLDER button) — `onClicked: libraryModel.removeAbandonedRatings()`,
+hidden while the operation is already running. A small custom progress
+bar (`Rectangle` track + a filled child `Rectangle` whose `width` is bound
+to `abandonedRatingsProgress`) is the first progress-bar *visual* anywhere
+in the app — `LibraryScanner`'s own `scanProgress` percentage has existed
+in C++ since UC-05 but was never wired to a QML visual, so no existing
+pattern was available to copy; this one is themed directly with `Theme.*`
+tokens to match. On completion, a `MessageBox` (`title: "ABANDONED
+RATINGS"`, matching the "PLAYBACK ENGINE" title convention introduced for
+UC-15's Setup notices) reports the removed count, a second line for the
+corrected-genre count only when it's non-zero, and a third line always
+stating the final remaining-rating count ("The N existing ratings now
+match the tracks in the library.").
 

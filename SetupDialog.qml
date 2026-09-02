@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 
 // ── SetupDialog ──────────────────────────────────────────────────────────
-// Modal setup window with four tabs:
+// Modal setup window with seven tabs:
 //   • GENRES        — add/delete genre names (up to 40) and choose which of them
 //                     (up to 30) are enabled via a per-cell checkbox to appear as
 //                     GenreBar buttons
@@ -14,6 +14,10 @@ import QtQuick.Dialogs
 //   • AUTO PLAY     — settings for the still-unimplemented AUTO PLAY feature:
 //                     Queue Horizon lookahead, Consider Genre, and Consider
 //                     Rating + Minimum Rating (see UC-14)
+//   • AUDIO VISUALIZER — bar count, color, decay/sensitivity, opacity (see UC-19)
+//   • MILKDROP      — preset folders, shuffle/duration, beat sensitivity (see UC-20)
+//   • MISC          — one-off maintenance actions; currently just Remove
+//                     Abandoned Ratings (see UC-24)
 //
 // Usage in Main.qml:
 //   SetupDialog { id: setupDialog; appConfig: appConfig; playbackEngine: engine }
@@ -186,7 +190,7 @@ Popup {
                 spacing: 0
 
                 Repeater {
-                    model: ["GENRES", "FILE MONITORING", "PLAYBACK", "AUTO PLAY", "AUDIO VISUALIZER", "MILKDROP"]
+                    model: ["GENRES", "FILE MONITORING", "PLAYBACK", "AUTO PLAY", "AUDIO VISUALIZER", "MILKDROP", "MISC"]
 
                     delegate: Item {
                         width:  tabLabel.implicitWidth + 32
@@ -3092,6 +3096,115 @@ Popup {
                     Item { Layout.fillHeight: true }   // push content to top
                 }
             } // end MILKDROP panel
+
+            // ────────────────────────────────────────────────────────────
+            // PANEL 7 — MISC
+            // ────────────────────────────────────────────────────────────
+            Item {
+                anchors.fill: parent
+                visible: tabBar.currentTab === 6
+
+                MessageBox {
+                    id: abandonedRatingsResultBox
+                    title: "ABANDONED RATINGS"
+                }
+
+                Connections {
+                    target: root.libraryModel
+                    function onAbandonedRatingsRemovalFinished(removed, corrected, remaining) {
+                        let msg = "Removed " + removed + " abandoned rating"
+                                  + (removed === 1 ? "" : "s") + "."
+                        if (corrected > 0)
+                            msg += "<br><br>Corrected the genre for " + corrected
+                                   + " rating" + (corrected === 1 ? "" : "s") + "."
+                        msg += "<br><br>The " + remaining + " existing rating"
+                               + (remaining === 1 ? "" : "s")
+                               + " now match" + (remaining === 1 ? "es" : "")
+                               + " the tracks in the library."
+                        abandonedRatingsResultBox.message = msg
+                        abandonedRatingsResultBox.open()
+                    }
+                }
+
+                ColumnLayout {
+                    anchors { fill: parent; margins: 24 }
+                    spacing: 12
+
+                    // ── Remove Abandoned Ratings row ────────────────────
+                    // Removes every Topaz.rating.json entry whose track no
+                    // longer exists in the library, and corrects the stored
+                    // genre for any surviving entry whose track was
+                    // re-tagged to a different genre since being rated --
+                    // see UC-24.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Remove Abandoned Ratings"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Rectangle {
+                            visible: !root.libraryModel || !root.libraryModel.removingAbandonedRatings
+                            width: 110; height: 32
+                            radius: Theme.radiusSm
+                            color: removeRatingsHover.containsMouse
+                                   ? Theme.primaryContainer : Theme.surfaceContainerHigh
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "REMOVE"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelSm
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWide
+                                color: removeRatingsHover.containsMouse
+                                       ? Theme.fgPrimaryContainer : Theme.primary
+                            }
+                            MouseArea {
+                                id: removeRatingsHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.libraryModel)
+                                        root.libraryModel.removeAbandonedRatings()
+                                }
+                            }
+                        }
+                    }
+
+                    // Progress bar -- only shown while the operation runs;
+                    // no existing ProgressBar visual elsewhere in the app to
+                    // match, so themed directly with Theme.* tokens.
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        visible: root.libraryModel && root.libraryModel.removingAbandonedRatings
+                        height: 8
+                        radius: height / 2
+                        color: Theme.surfaceContainerHigh
+                        clip: true
+
+                        Rectangle {
+                            height: parent.height
+                            radius: parent.radius
+                            color: Theme.primary
+                            width: parent.width
+                                   * (root.libraryModel ? root.libraryModel.abandonedRatingsProgress : 0)
+                                   / 100
+                            Behavior on width { NumberAnimation { duration: 120 } }
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }   // push content to top
+                }
+            } // end MISC panel
 
         } // content Item
     } // contentItem ColumnLayout

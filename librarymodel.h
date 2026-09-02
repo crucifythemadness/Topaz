@@ -36,7 +36,10 @@ class LibraryModel : public QAbstractListModel
     Q_PROPERTY(int         scanProgress READ scanProgress NOTIFY scanProgressChanged)
     Q_PROPERTY(int         trackCount READ trackCount  NOTIFY trackCountChanged)
     Q_PROPERTY(int         albumCount READ albumCount  NOTIFY albumCountChanged)
+    Q_PROPERTY(int         ratingCount READ ratingCount NOTIFY ratingCountChanged)
     Q_PROPERTY(bool        ratingsReady READ ratingsReady NOTIFY ratingsReadyChanged)
+    Q_PROPERTY(bool        removingAbandonedRatings READ removingAbandonedRatings NOTIFY removingAbandonedRatingsChanged)
+    Q_PROPERTY(int         abandonedRatingsProgress READ abandonedRatingsProgress NOTIFY abandonedRatingsProgressChanged)
 
 public:
     // ── Roles exposed to QML delegates ───────────────────────────────────
@@ -73,9 +76,15 @@ public:
     int        scanProgress() const { return m_scanProgress; }
     int        trackCount()   const { return m_tracks.size(); }
     int        albumCount()   const { return m_albumCount; }
+    // Number of tracks in the current library with a rating (1-10) set --
+    // shown as the RATINGS chip in AboutDialog's TOPAZ tab. See UC-14 for
+    // rating persistence.
+    int        ratingCount()  const { return m_ratingCount; }
     // True once a scan (full or stat-check) has completed at least once in this
     // session with rating enrichment applied — gates the AUTO PLAY button.
     bool       ratingsReady() const { return m_ratingsReady; }
+    bool       removingAbandonedRatings() const { return m_removingAbandonedRatings; }
+    int        abandonedRatingsProgress() const { return m_abandonedRatingsProgress; }
     void       setAppConfig(AppConfig *cfg);
 
     // ── Invokable actions ─────────────────────────────────────────────────
@@ -169,13 +178,39 @@ public:
                                                     bool considerRating,
                                                     int  minimumRating) const;
 
+    // ── MISC tab: Remove Abandoned Ratings (see UC-24) ────────────────────
+    // Removes every Topaz.rating.json entry whose ratingId matches no track
+    // currently in the library (existence alone decides removal -- no
+    // genre-enabled dependency, since the scanner already indexes every
+    // configured genre's tracks regardless of GenreBar enabled state).
+    // Entries that DO still match a track have their stored genre corrected
+    // in place if it no longer matches the track's current genre tag
+    // (ratingId doesn't encode genre, so a re-tagged track would otherwise
+    // leave a stale genre in the ratings file). Runs synchronously (ratings
+    // files are small -- RatingCache reads/writes already happen
+    // synchronously on every track change/star click) but reports chunked
+    // progress via abandonedRatingsProgress so the MISC tab's progress bar
+    // has something real to show. No-op if already running.
+    Q_INVOKABLE void removeAbandonedRatings();
+
 signals:
     void appConfigChanged();
     void scanningChanged();
     void scanProgressChanged();
     void trackCountChanged();
     void albumCountChanged();
+    void ratingCountChanged();
     void ratingsReadyChanged();
+    void removingAbandonedRatingsChanged();
+    void abandonedRatingsProgressChanged();
+    // Emitted once removeAbandonedRatings() finishes. genreCorrectedCount
+    // counts entries that survived (a matching track exists) but had a
+    // stale genre field corrected -- see removeAbandonedRatings()' doc
+    // comment above. remainingCount is the total number of ratings left
+    // in Topaz.rating.json after the removal (all of which now match a
+    // track in the library).
+    void abandonedRatingsRemovalFinished(int removedCount, int genreCorrectedCount,
+                                          int remainingCount);
 
     // Emitted after the model is populated (cache load or scan complete).
     // LibraryData.qml connects to this to rebuild its tree.
@@ -205,9 +240,12 @@ private:
     AppConfig        *m_appConfig    = nullptr;
     QList<TrackInfo>  m_tracks;
     int               m_albumCount   = 0;
+    int               m_ratingCount  = 0;
     LibraryScanner   *m_scanWorker   = nullptr;
     QThread          *m_scanThread   = nullptr;
     bool              m_scanning     = false;
     int               m_scanProgress = 0;
     bool              m_ratingsReady = false;
+    bool              m_removingAbandonedRatings = false;
+    int               m_abandonedRatingsProgress = 0;
 };

@@ -282,6 +282,42 @@ Popup {
                                 }
                             }
                         }
+
+                    }
+
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: 12
+                        spacing: 12
+
+                        // Rating-count chip
+                        Rectangle {
+                            height: 32
+                            width:  ratingCountLabel.implicitWidth + 100
+                            radius: Theme.radiusFull
+                            color:  Theme.surfaceContainerHigh
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 10; height: 10
+                                    radius: 5
+                                    color: Theme.error
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    id: ratingCountLabel
+                                    text: (root.libraryModel ? root.libraryModel.ratingCount : 0) + " RATINGS"
+                                    font.family:        Theme.fontFamilyMono
+                                    font.pixelSize:     14
+                                    font.weight:        Font.Medium
+                                    font.letterSpacing: 0.8
+                                    color: Theme.fgSurface
+                                }
+                            }
+                        }
                     }
 
                     Text {

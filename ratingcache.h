@@ -41,7 +41,11 @@ public:
     // ratingId is null or rating is outside 1-10.
     static bool setRating(const QString &genre, const QUuid &ratingId, int rating);
 
-private:
+    // Full per-entry view (genre + ratingId + rating), unlike load()'s
+    // ratingId->rating hash which discards genre. Used by
+    // LibraryModel::removeAbandonedRatings() (see UC-24) to check track
+    // existence and correct genre drift; exposed publicly since nothing else
+    // needs to remove/rewrite arbitrary entries directly today.
     struct Entry { QString genre; QUuid ratingId; int rating; };
 
     static QList<Entry> loadEntries();
