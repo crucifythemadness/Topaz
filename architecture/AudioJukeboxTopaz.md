@@ -405,7 +405,7 @@ row.
 - If no folders are configured: scan returns 0 tracks; user must configure folders first.
 - `BottomBar` SCAN DIRECTORIES button is visually disabled (label changes to "SCANNING…") while a scan is in progress.
 
-### Genre Matching Rule (Version 1)
+### Genre Matching Rule (Version 2)
 
 The genre tag value read from the audio file (TCON for MP3, GENRE for FLAC/Opus) is
 compared **case-insensitively** against the configured genre names in `AppConfig`.
@@ -417,8 +417,30 @@ Result:      match → include
 ```
 
 Each audio file must have **exactly one genre** that matches a configured genre.
-Multi-genre tags (delimited strings) are not parsed in version 1; the entire tag
-value is compared as-is (after normalisation).
+
+**Multi-genre (delimited) tags — first genre wins.** `TagReader::firstGenre()`
+(`tagreader.h`/`.cpp`) splits the raw tag value on the *earliest* occurrence of any
+of four delimiters — `;`, `/`, `,`, or a raw NUL byte (`0x00`) — and keeps only the
+text before it, trimmed:
+```
+File tag:    "Rock/Pop;Jazz"  → split at '/' (earliest) → "Rock"
+Configured:  ["Rock", …]      → normalised: ["rock", …]
+Result:      match → include
+```
+Called once at each of `TagReader`'s three genre-assignment points (MP3's `TCON`,
+FLAC's and Opus's `GENRE` Vorbis comment) — no other file needed changes, since
+`TrackInfo::genre` is only ever *read* everywhere else. The NUL case is ID3v2.4's
+own spec-defined mechanism for a `TCON` frame containing multiple genre values —
+several tagger GUIs (e.g. Mp3tag) render this as a visual placeholder (often `\\`)
+rather than a literal null character, which is how such tracks tend to be
+noticed in the first place. `decodeTextFrame()`'s byte→`QString` conversion is
+length-based for all four ID3v2 text encodings (never relies on NUL-termination),
+so an embedded separator NUL survives decoding intact — `firstGenre()` is the
+single point that then strips it back out. Before this, a `TCON` value like
+`"Rock\0Pop"` didn't just look wrong in a tag editor — it silently matched no
+configured genre at all (a raw NUL can never appear in a user-typed genre name),
+making the track invisible to every genre-scoped view (`filteredAlbums`,
+`buildLibraryTree`, `autoPlayCandidatePool`, etc.) without any visible error.
 
 ---
 
@@ -709,6 +731,10 @@ level) from what was asked for here.
 | MP3 | ID3v2.2, ID3v2.3, ID3v2.4 | TIT2, TPE1, TPE2, TALB, TRCK, TCON, TLEN, TYER/TDRC, APIC |
 | FLAC | Vorbis Comment + STREAMINFO + PICTURE | TITLE, ARTIST, ALBUMARTIST, ALBUM, TRACKNUMBER, GENRE, DATE |
 | Opus | Ogg container; `OpusTags` packet (Vorbis-comment layout) | TITLE, ARTIST, ALBUMARTIST, ALBUM, TRACKNUMBER, GENRE, DATE |
+
+**GENRE/TCON values are run through `TagReader::firstGenre()`** for all three
+formats — a delimited or ID3v2.4 NUL-separated multi-genre tag keeps only its
+first genre. See "Genre Matching Rule (Version 2)" above (UC-01).
 
 **Bitrate and duration for MP3**: the first MPEG frame header (past the ID3v2 tag) is
 always scanned to determine bitrate, since ID3v2 has no dedicated bitrate frame. Duration

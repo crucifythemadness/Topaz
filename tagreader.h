@@ -92,6 +92,12 @@ private:
     // Parse TCON genre string: strip "(N)" numeric genre codes, return text form.
     static QString parseGenreTcon(const QString &raw);
 
+    // Genre tags sometimes contain a delimited list of multiple genres --
+    // taggers commonly use ';', '/', ',', or (ID3v2.4's real multi-value TCON
+    // mechanism) a raw NUL byte between values. Returns just the first genre,
+    // trimmed.
+    static QString firstGenre(const QString &raw);
+
     // Parse APIC frame payload; returns raw image bytes (empty on failure).
     static QByteArray parseApicFrame(const QByteArray &data, quint8 id3Version);
 

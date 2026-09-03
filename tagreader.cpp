@@ -93,6 +93,19 @@ QString TagReader::parseGenreTcon(const QString &raw)
     return s;
 }
 
+QString TagReader::firstGenre(const QString &raw)
+{
+    // Earliest occurrence of any delimiter wins -- not a fixed priority
+    // order -- so e.g. "Rock/Pop;Jazz" splits at '/', not ';'.
+    static const QChar delimiters[] = { QChar(';'), QChar('/'), QChar(','), QChar(u'\0') };
+    int cut = raw.size();
+    for (QChar d : delimiters) {
+        const int idx = raw.indexOf(d);
+        if (idx >= 0 && idx < cut) cut = idx;
+    }
+    return raw.left(cut).trimmed();
+}
+
 QByteArray TagReader::parseApicFrame(const QByteArray &data, quint8 /*id3Version*/)
 {
     if (data.size() < 4) return {};
@@ -209,7 +222,7 @@ bool TagReader::readId3v2(QFile &f, TrackInfo &info,
             info.track = decodeTextFrame(fd).split('/').constFirst().trimmed().toInt();
         }
         else if (fn == "TCON" || fn == "TCO") {
-            info.genre = parseGenreTcon(decodeTextFrame(fd));
+            info.genre = firstGenre(parseGenreTcon(decodeTextFrame(fd)));
         }
         else if (fn == "TLEN") {
             info.duration = decodeTextFrame(fd).trimmed().toLongLong();
@@ -381,7 +394,7 @@ bool TagReader::readFlac(QFile &f, TrackInfo &info, bool generateCoverThumb)
                 else if (key == "ALBUM")                              info.album       = value;
                 else if (key == "TRACKNUMBER" || key == "TRACK")
                     info.track = value.split('/').constFirst().trimmed().toInt();
-                else if (key == "GENRE")                              info.genre       = value.trimmed();
+                else if (key == "GENRE")                              info.genre       = firstGenre(value);
                 else if (key == "DATE"  || key == "YEAR")
                     info.year = value.trimmed().left(4).toInt();
             }
@@ -531,7 +544,7 @@ bool TagReader::readOpus(QFile &f, TrackInfo &info, bool generateCoverThumb)
         else if (key == "ALBUM")                               info.album       = value;
         else if (key == "TRACKNUMBER" || key == "TRACK")
             info.track = value.split('/').constFirst().trimmed().toInt();
-        else if (key == "GENRE")                               info.genre       = value.trimmed();
+        else if (key == "GENRE")                               info.genre       = firstGenre(value);
         else if (key == "DATE"  || key == "YEAR")
             info.year = value.trimmed().left(4).toInt();
         else if (key == "METADATA_BLOCK_PICTURE" && !hasCover && generateCoverThumb) {
