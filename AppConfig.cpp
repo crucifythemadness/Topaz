@@ -471,11 +471,14 @@ void AppConfig::addMilkdropPresetFolder(const QString &rawPath)
         return;
 
     for (const QVariant &v : std::as_const(m_milkdropPresetFolders)) {
-        if (v.toString() == path)
+        if (v.toMap().value(QStringLiteral("path")).toString() == path)
             return;
     }
 
-    m_milkdropPresetFolders.append(path);
+    QVariantMap entry;
+    entry[QStringLiteral("path")]   = path;
+    entry[QStringLiteral("active")] = true;
+    m_milkdropPresetFolders.append(entry);
     emit milkdropChanged();
     save();
 }
@@ -498,6 +501,17 @@ void AppConfig::clearMilkdropPresetFolders()
     save();
 }
 
+void AppConfig::setMilkdropPresetFolderActive(int index, bool active)
+{
+    if (index < 0 || index >= m_milkdropPresetFolders.size())
+        return;
+    QVariantMap entry = m_milkdropPresetFolders.at(index).toMap();
+    entry[QStringLiteral("active")] = active;
+    m_milkdropPresetFolders[index] = entry;
+    emit milkdropChanged();
+    save();
+}
+
 void AppConfig::setMilkdropShuffleEnabled(bool enabled)
 {
     if (m_milkdropShuffleEnabled == enabled) return;
@@ -508,7 +522,7 @@ void AppConfig::setMilkdropShuffleEnabled(bool enabled)
 
 void AppConfig::setMilkdropPresetDuration(double seconds)
 {
-    seconds = qBound(5.0, seconds, 120.0);
+    seconds = qBound(10.0, seconds, 150.0);
     if (qFuzzyCompare(m_milkdropPresetDuration, seconds)) return;
     m_milkdropPresetDuration = seconds;
     emit milkdropChanged();
@@ -692,8 +706,24 @@ void AppConfig::load()
 
     const QJsonObject milkdrop = root[QStringLiteral("milkdrop")].toObject();
     const QJsonArray milkdropFoldersArr = milkdrop[QStringLiteral("presetFolders")].toArray();
-    for (const QJsonValue &v : milkdropFoldersArr)
-        m_milkdropPresetFolders.append(v.toString());
+    for (const QJsonValue &v : milkdropFoldersArr) {
+        if (v.isString()) {
+            // Pre-existing config file, written before per-folder "active"
+            // existed -- migrate to the current object shape.
+            QVariantMap entry;
+            entry[QStringLiteral("path")]   = v.toString();
+            entry[QStringLiteral("active")] = true;
+            m_milkdropPresetFolders.append(entry);
+        } else if (v.isObject()) {
+            const QJsonObject fo = v.toObject();
+            QVariantMap entry;
+            entry[QStringLiteral("path")]   = fo[QStringLiteral("path")].toString();
+            entry[QStringLiteral("active")] = fo[QStringLiteral("active")].toBool(true);
+            m_milkdropPresetFolders.append(entry);
+        }
+        // Anything else (number, null, array) is malformed -- skip it rather
+        // than produce a garbage entry.
+    }
     m_milkdropShuffleEnabled = milkdrop[QStringLiteral("shuffleEnabled")].toBool(true);
     m_milkdropPresetDuration = milkdrop[QStringLiteral("presetDuration")].toDouble(20.0);
     m_milkdropBeatSensitivity = milkdrop[QStringLiteral("beatSensitivity")].toDouble(1.0);
@@ -799,7 +829,7 @@ void AppConfig::save()
     QJsonObject milkdrop;
     QJsonArray milkdropFoldersArr;
     for (const QVariant &v : std::as_const(m_milkdropPresetFolders))
-        milkdropFoldersArr.append(v.toString());
+        milkdropFoldersArr.append(QJsonObject::fromVariantMap(v.toMap()));
     milkdrop[QStringLiteral("presetFolders")]      = milkdropFoldersArr;
     milkdrop[QStringLiteral("shuffleEnabled")]     = m_milkdropShuffleEnabled;
     milkdrop[QStringLiteral("presetDuration")]     = m_milkdropPresetDuration;

@@ -36,6 +36,10 @@ Popup {
     // used only to read activeBackendName for the PLAYBACK tab's "Currently
     // active" indicator, see below.
     property PlaybackEngine playbackEngine: null
+    // Required: bind to the MilkdropCleanupController instance declared in
+    // Main.qml -- backs the MISC tab's "Cleanup Incompatible Milkdrop
+    // Presets" feature, see UC-25.
+    property var cleanupController: null
 
     // ── Internal selection state ─────────────────────────────────────────
     property int selectedGenreIndex:  -1
@@ -79,6 +83,10 @@ Popup {
         x = Overlay.overlay ? (Overlay.overlay.width  - width)  / 2 : 0
         y = Overlay.overlay ? (Overlay.overlay.height - height) / 2 : 0
         _foldersDirty = false
+        // Dialog is a persistent instance that remembers its last-selected
+        // tab across close/reopen -- if it reopens directly on MILKDROP,
+        // the tab-switch handler below never fires, so refresh here too.
+        if (tabBar.currentTab === 5) refreshMilkdropFolderRows()
     }
 
     // Auto-rescan if FILE MONITORING was touched this session -- see UC-04/
@@ -229,6 +237,7 @@ Popup {
                                 root.selectedGenreIndex  = -1
                                 root.selectedFolderIndex = -1
                                 root.selectedMilkdropFolderIndex = -1
+                                if (index === 5) root.refreshMilkdropFolderRows()
                             }
                         }
                     }
@@ -2475,12 +2484,52 @@ Popup {
                     spacing: 20
 
                     // ── Preset folder list ──────────────────────────────
-                    Text {
-                        text: "Preset Folders"
-                        font.family:    Theme.fontFamilyBody
-                        font.pixelSize: Theme.titleMd
-                        font.weight:    Font.Bold
-                        color: Theme.fgSurface
+                    // Cached rows -- see refreshMilkdropFolderRows() below for
+                    // why this isn't a live binding to appConfig.milkdropPresetFolders.
+                    ListModel { id: milkdropFolderListModel }
+
+                    // Column header
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 30
+                        color:  Theme.surfaceContainerHigh
+                        radius: Theme.radiusSm
+                        visible: milkdropFolderListModel.count > 0
+
+                        RowLayout {
+                            anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
+                            spacing: 8   // must match the folder-row delegate's RowLayout below,
+                                         // or PRESETS/ACTIVE drift out of column alignment
+                            Text {
+                                Layout.fillWidth: true
+                                text: "PRESET FOLDER"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelXs
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWidest
+                                color: Theme.fgSurfaceVariant
+                            }
+                            Text {
+                                Layout.preferredWidth: 90
+                                text: "PRESETS"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelXs
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWidest
+                                color: Theme.fgSurfaceVariant
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+                            Text {
+                                Layout.preferredWidth: 70
+                                text: "ACTIVE"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelXs
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWidest
+                                color: Theme.fgSurfaceVariant
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+                        }
                     }
 
                     Item {
@@ -2489,7 +2538,7 @@ Popup {
 
                         Text {
                             anchors.centerIn: parent
-                            visible: !root.appConfig || root.appConfig.milkdropPresetFolders.length === 0
+                            visible: milkdropFolderListModel.count === 0
                             text: "No preset folders configured.\nClick ADD FOLDER to point at a downloaded .milk preset pack."
                             horizontalAlignment: Text.AlignHCenter
                             font.family:    Theme.fontFamilyBody
@@ -2499,19 +2548,19 @@ Popup {
 
                         ScrollView {
                             anchors.fill: parent
-                            visible: root.appConfig !== null
-                                     && root.appConfig.milkdropPresetFolders.length > 0
+                            visible: milkdropFolderListModel.count > 0
                             clip: true
 
                             ListView {
                                 id: milkdropFolderList
-                                model: root.appConfig ? root.appConfig.milkdropPresetFolders : []
+                                model: milkdropFolderListModel
                                 spacing: 3
 
                                 delegate: Rectangle {
                                     width:  milkdropFolderList.width
                                     height: 38
                                     radius: Theme.radiusSm
+                                    opacity: (model.exists === false || model.active === false) ? 0.5 : 1.0
 
                                     readonly property bool isSelected:
                                         root.selectedMilkdropFolderIndex === index
@@ -2522,23 +2571,80 @@ Popup {
                                              ? Theme.surfaceContainerHigh
                                              : Theme.surfaceContainer
 
-                                    Text {
+                                    RowLayout {
                                         anchors {
                                             fill: parent
                                             leftMargin: 12; rightMargin: 12
                                         }
-                                        text: modelData
-                                        font.family:    Theme.fontFamilyMono
-                                        font.pixelSize: Theme.monoLg
-                                        color: Theme.fgSurface
-                                        elide: Text.ElideMiddle
-                                        verticalAlignment: Text.AlignVCenter
+                                        spacing: 8
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: model.path
+                                            font.family:    Theme.fontFamilyMono
+                                            font.pixelSize: Theme.monoLg
+                                            color: Theme.fgSurface
+                                            elide: Text.ElideMiddle
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+
+                                        Text {
+                                            Layout.preferredWidth: 90
+                                            text: model.exists ? model.presetCount : "not found"
+                                            font.family:    Theme.fontFamilyMono
+                                            font.pixelSize: Theme.monoLg
+                                            color: model.exists ? Theme.fgSurfaceVariant : Theme.error
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+
+                                        // Active checkbox cell
+                                        Item {
+                                            Layout.preferredWidth: 70
+                                            height: parent.height
+
+                                            Rectangle {
+                                                width: 18; height: 18
+                                                anchors.centerIn: parent
+                                                radius: 3
+                                                color: model.active
+                                                       ? Theme.secondaryContainer
+                                                       : "transparent"
+                                                border.width: model.active ? 0 : 1
+                                                border.color: Theme.outlineVariant
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    visible: model.active
+                                                    text: "✓"   // ✓
+                                                    font.pixelSize: 11
+                                                    font.weight:    Font.Bold
+                                                    color: Theme.fgSecondaryContainer
+                                                }
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape:  Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        const newActive = !model.active
+                                                        if (root.appConfig)
+                                                            root.appConfig.setMilkdropPresetFolderActive(index, newActive)
+                                                        // Patch in place rather than a full
+                                                        // refreshMilkdropFolderRows() -- avoids
+                                                        // re-scanning every folder's preset
+                                                        // count on a plain toggle click.
+                                                        milkdropFolderListModel.setProperty(index, "active", newActive)
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
 
+                                    // Row-level click (select / deselect)
                                     MouseArea {
                                         id: mdRowHover
                                         anchors.fill: parent
                                         hoverEnabled: true
+                                        z: -1   // checkbox MouseArea sits on top
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: root.selectedMilkdropFolderIndex =
                                             (root.selectedMilkdropFolderIndex === index) ? -1 : index
@@ -2608,6 +2714,7 @@ Popup {
                                     if (root.selectedMilkdropFolderIndex >= 0 && root.appConfig) {
                                         root.appConfig.removeMilkdropPresetFolderAt(root.selectedMilkdropFolderIndex)
                                         root.selectedMilkdropFolderIndex = -1
+                                        root.refreshMilkdropFolderRows()
                                     }
                                 }
                             }
@@ -2687,7 +2794,7 @@ Popup {
                             spacing: 8
 
                             Text {
-                                text: "5s"
+                                text: "10s"
                                 font.family:    Theme.fontFamilyMono
                                 font.pixelSize: Theme.labelSm
                                 color: Theme.fgSurfaceVariant
@@ -2696,8 +2803,8 @@ Popup {
                             Slider {
                                 id: presetDurationSlider
                                 Layout.fillWidth: true
-                                from: 5
-                                to:   120
+                                from: 10
+                                to:   150
                                 stepSize: 1
                                 snapMode: Slider.SnapAlways
                                 value: root.appConfig ? root.appConfig.milkdropPresetDuration : 20
@@ -2742,7 +2849,7 @@ Popup {
                             }
 
                             Text {
-                                text: "120s"
+                                text: "150s"
                                 font.family:    Theme.fontFamilyMono
                                 font.pixelSize: Theme.labelSm
                                 color: Theme.fgSurfaceVariant
@@ -3202,7 +3309,65 @@ Popup {
                         }
                     }
 
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        height: 1
+                        color: Theme.ov20
+                    }
+
+                    // ── Cleanup Incompatible Milkdrop Presets row ────────
+                    // Opens MilkdropCleanupDialog.qml, which scans configured
+                    // Milkdrop preset folders with MilkdropPresetChecker and
+                    // deletes whatever it flags -- see UC-25. Styled as a
+                    // destructive action (Theme.error) since, unlike REMOVE
+                    // above, this deletes real files from disk, permanently.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 16
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Cleanup Incompatible Milkdrop Presets"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Rectangle {
+                            width: 110; height: 32
+                            radius: Theme.radiusSm
+                            color: milkdropCleanupHover.containsMouse
+                                   ? Theme.errorContainer : Theme.surfaceContainerHigh
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "CLEANUP"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelSm
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWide
+                                color: Theme.error
+                            }
+                            MouseArea {
+                                id: milkdropCleanupHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: milkdropCleanupDialog.open()
+                            }
+                        }
+                    }
+
                     Item { Layout.fillHeight: true }   // push content to top
+                }
+
+                MilkdropCleanupDialog {
+                    id: milkdropCleanupDialog
+                    appConfig:         root.appConfig
+                    cleanupController: root.cleanupController
                 }
             } // end MISC panel
 
@@ -3225,6 +3390,7 @@ Popup {
         onAccepted: {
             if (root.appConfig)
                 root.appConfig.addMilkdropPresetFolder(selectedFolder.toString())
+            root.refreshMilkdropFolderRows()
         }
     }
 
@@ -3234,6 +3400,34 @@ Popup {
         if (name.length > 0 && root.appConfig) {
             root.appConfig.addGenre(name)
             genreInput.text = ""
+        }
+    }
+
+    // Rebuilds milkdropFolderListModel by zipping AppConfig's persisted
+    // path/active per folder with MilkdropCleanupController's on-demand
+    // preset counts (same underlying list, same order, no filtering in
+    // between -- index-aligned zip is safe). Deliberately NOT a live
+    // binding: presetFolders() does a synchronous recursive directory walk,
+    // and appConfig.milkdropChanged fires for unrelated milkdrop settings
+    // too (shuffle, duration, etc.), so binding directly would re-scan far
+    // more often than needed. Call after anything that changes the folder
+    // *set* (add/remove) or when the tab becomes visible; ACTIVE toggling
+    // patches the model in place instead (see the ACTIVE cell below) to
+    // avoid re-scanning on every click.
+    function refreshMilkdropFolderRows() {
+        milkdropFolderListModel.clear()
+        if (!root.appConfig) return
+        const folders = root.appConfig.milkdropPresetFolders
+        const counts  = root.cleanupController ? root.cleanupController.presetFolders() : []
+        for (let i = 0; i < folders.length; i++) {
+            const f = folders[i]
+            const c = counts[i] || {}
+            milkdropFolderListModel.append({
+                path:        f.path,
+                active:      f.active !== false,
+                presetCount: c.presetCount !== undefined ? c.presetCount : 0,
+                exists:      c.exists !== false
+            })
         }
     }
 }

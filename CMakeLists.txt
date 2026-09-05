@@ -95,6 +95,10 @@ qt_add_executable(topaz
     audiovisualizercontroller.cpp
     milkdropview.h
     milkdropview.cpp
+    milkdroppresetchecker.h
+    milkdroppresetchecker.cpp
+    milkdropcleanupcontroller.h
+    milkdropcleanupcontroller.cpp
     # Vendored third-party (BSD-3-Clause) — see third_party/kissfft/LICENSES/
     # BSD-3-Clause. Unmodified upstream sources; do not edit directly.
     third_party/kissfft/kiss_fft.h
@@ -142,6 +146,7 @@ qt_add_qml_module(topaz
         TagInfoWindow.qml
         AudioVisualizerWindow.qml
         MilkdropWindow.qml
+        MilkdropCleanupDialog.qml
     RESOURCES
         app.ico
         InfoAbout.png

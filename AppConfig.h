@@ -51,7 +51,15 @@
 //                           "paneOpacity": 1.0, "sensitivity": 0.5 },
 //     "audioVisualizerPane": { "x": 100, "y": 100, "width": 500, "height": 260,
 //                              "screenName": "DISPLAY1" },
-//     "milkdrop": { "presetFolders": ["C:/Presets"], "shuffleEnabled": true,
+//     "milkdrop": { "presetFolders": [ { "path": "C:/Presets", "active": true } ],
+//                   // "active" (default true when absent, for pre-existing
+//                   // configs) gates whether a folder's presets are loaded
+//                   // into the projectM playlist at all -- see UC-20/UC-25.
+//                   // Deliberately narrower than "folders" above: no
+//                   // VolumePath-style volume/relPath tracking, since preset
+//                   // packs aren't expected to need drive-letter-reassignment
+//                   // portability the way music library folders do.
+//                   "shuffleEnabled": true,
 //                   "presetDuration": 20.0, "beatSensitivity": 1.0,
 //                   "hardCutsEnabled": false, "hardCutSensitivity": 0.6,
 //                   "presetLocked": false, "showPresetName": true },
@@ -346,8 +354,11 @@ public:
     Q_INVOKABLE void addMilkdropPresetFolder(const QString &rawPath);
     Q_INVOKABLE void removeMilkdropPresetFolderAt(int index);
     Q_INVOKABLE void clearMilkdropPresetFolders();
+    // Gates whether this folder's presets are loaded into the projectM
+    // playlist at all -- same convention as setFolderActive() above.
+    Q_INVOKABLE void setMilkdropPresetFolderActive(int index, bool active);
     Q_INVOKABLE void setMilkdropShuffleEnabled(bool enabled);
-    // Seconds a preset is shown before an automatic soft cut. Clamped to [5, 120].
+    // Seconds a preset is shown before an automatic soft cut. Clamped to [10, 150].
     Q_INVOKABLE void setMilkdropPresetDuration(double seconds);
     // Clamped to [0.0, 4.0] — projectM's own beat-detection sensitivity scale.
     Q_INVOKABLE void setMilkdropBeatSensitivity(double sensitivity);
@@ -455,7 +466,10 @@ private:
     int     m_audioVisualizerPaneHeight     = 260;
     QString m_audioVisualizerPaneScreenName;
 
-    // Each entry is a plain path string (no per-folder options, unlike m_folders).
+    // Each entry is a QVariantMap { "path": QString, "active": bool } --
+    // narrower than m_folders (no volume/relPath/rawPath VolumePath
+    // tracking; preset packs aren't expected to need drive-letter-
+    // reassignment portability the way music library folders do).
     QVariantList m_milkdropPresetFolders;
     bool         m_milkdropShuffleEnabled     = true;
     double       m_milkdropPresetDuration     = 20.0;

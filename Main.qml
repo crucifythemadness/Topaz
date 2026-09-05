@@ -27,6 +27,18 @@ ApplicationWindow {
                      ? Window.Windowed : Window.FullScreen
     }
 
+    // Vetoes closing while MilkdropCleanupController is mid-scan (see UC-25) --
+    // the only long-running operation in this app that keeps pumping the
+    // event loop (via processEvents()) while it runs, unlike LibraryScanner's
+    // scan (which simply freezes the window solid, so a close event has no
+    // chance to land mid-loop there). Without this veto, a close delivered
+    // while startCleanup() is still on the call stack risks tearing down the
+    // QML engine (and this controller) out from under it mid-loop.
+    onClosing: (close) => {
+        if (milkdropCleanupController.cleaning)
+            close.accepted = false
+    }
+
     // Which of TopBar's three navigation tabs is active. Shell-level state
     // (not library- or search-specific), same precedent as the pane-open
     // properties below. Drives which components the SplitView's first two
@@ -293,6 +305,11 @@ ApplicationWindow {
     // Windows OS master volume control — see systemvolumecontroller.h.
     SystemVolumeController { id: systemVolume }
 
+    // MISC tab's "Cleanup Incompatible Milkdrop Presets" feature — see
+    // UC-25. Instantiated here (not locally inside MilkdropCleanupDialog)
+    // so the onClosing veto above has direct visibility into `cleaning`.
+    MilkdropCleanupController { id: milkdropCleanupController; appConfig: appConfig }
+
     // Audio visualizer analysis pipeline — see UC-19 in the architecture doc.
     // Passed as `visualizer` property to AudioVisualizerWindow.
     AudioVisualizerController {
@@ -313,10 +330,11 @@ ApplicationWindow {
 
     // Setup dialog — opened by TopBar's gear icon
     SetupDialog {
-        id:             setupDialog
-        appConfig:      appConfig
-        libraryModel:   libraryModel
-        playbackEngine: engine
+        id:                setupDialog
+        appConfig:         appConfig
+        libraryModel:      libraryModel
+        playbackEngine:    engine
+        cleanupController: milkdropCleanupController
     }
 
     // About Topaz dialog — opened by TopBar's rightmost (info) icon

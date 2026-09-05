@@ -195,9 +195,38 @@ void MilkdropView::ensureInitialized()
                                      .arg(index).arg(isHardCut));
 
             if (char *presetPath = projectm_playlist_item(self->m_playlist, index)) {
-                self->m_currentPresetName = QFileInfo(QString::fromUtf8(presetPath)).completeBaseName();
-                emit self->currentPresetNameChanged();
+                const QString name = QFileInfo(QString::fromUtf8(presetPath)).completeBaseName();
                 projectm_playlist_free_string(presetPath);
+
+                // This event fires the instant a switch is *requested*, not
+                // once the new preset actually fills the screen. A soft cut
+                // blends the old/new preset over projectm_get_soft_cut_duration()
+                // seconds, during which the screen still shows a mix of both --
+                // updating the name immediately made the toast visibly precede
+                // the preset it names. Delay by the same duration so the toast
+                // lands once the crossfade is done; a hard cut has no blend, so
+                // it updates right away.
+                //
+                // Switches aren't always this single, tidy sequence, though:
+                // with Hard Cuts enabled, projectM's own beat-driven hard-cut
+                // logic can fire a second, independent switch just 0-2s after
+                // a duration-triggered soft cut (confirmed in practice via
+                // milkdrop_debug.log -- e.g. a hardCut=0 switch immediately
+                // followed by a hardCut=1 switch to a different preset). Since
+                // the soft cut's toast is still pending its ~3s delay when
+                // that happens, it would otherwise land right after the hard
+                // cut's, naming a preset that never actually finished showing.
+                // The generation counter makes a deferred update a no-op once
+                // a newer switch has superseded it.
+                const int generation = ++self->m_presetSwitchGeneration;
+                const double delaySeconds =
+                    isHardCut ? 0.0 : projectm_get_soft_cut_duration(self->m_projectM);
+                QTimer::singleShot(qRound(delaySeconds * 1000), self, [self, name, generation]() {
+                    if (self->m_presetSwitchGeneration != generation)
+                        return;
+                    self->m_currentPresetName = name;
+                    emit self->currentPresetNameChanged();
+                });
             }
         },
         this);
@@ -258,8 +287,12 @@ void MilkdropView::rebuildPresetList()
         return;
 
     QStringList folders;
-    for (const QVariant &v : m_appConfig->milkdropPresetFolders())
-        folders.append(v.toString());
+    for (const QVariant &v : m_appConfig->milkdropPresetFolders()) {
+        const QVariantMap m = v.toMap();
+        if (!m.value(QStringLiteral("active"), true).toBool())
+            continue;
+        folders.append(m.value(QStringLiteral("path")).toString());
+    }
     if (folders == m_appliedPresetFolders)
         return;
 

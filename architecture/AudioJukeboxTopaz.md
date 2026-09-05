@@ -4084,10 +4084,86 @@ frontends' toast timing convention. Also gated on `mdWindow.isPlaying` so a
 toast mid-fade doesn't linger visibly over the "PAUSED" placeholder if
 playback pauses mid-fade.
 
+**The name update itself is deliberately delayed to match projectM's crossfade.**
+`preset_switched_event_callback` fires the instant a switch is *requested*,
+not once the new preset actually fills the screen — for anything other than
+a hard cut, projectM blends the outgoing and incoming preset together over
+`projectm_get_soft_cut_duration()` seconds (`ProjectM.hpp`'s
+`m_softCutDuration{3.0}`, never overridden by Topaz, so effectively always
+3s). Updating `m_currentPresetName`/emitting `currentPresetNameChanged()`
+synchronously in the callback therefore made the toast visibly name the
+*next* preset several seconds before it actually took over the screen. The
+callback now instead captures the resolved name and defers the actual
+property update via `QTimer::singleShot()`, delayed by
+`projectm_get_soft_cut_duration(m_projectM)` seconds for a soft cut, or `0`
+for a hard cut (`isHardCut`, the callback's own first parameter — a hard cut
+has no blend, so there's nothing to wait for). Safe to call directly (no
+cross-thread marshaling) since the callback already runs on the GUI thread.
+
+**A superseded switch's deferred toast is suppressed via a generation
+counter.** The delay above assumes each switch is a single, tidy event, but
+with Hard Cuts enabled (`AppConfig.milkdropHardCutsEnabled` +
+`milkdropHardCutSensitivity`) that isn't always true: projectM's own
+beat-driven hard-cut logic can fire a second, independent switch just 0-2s
+after a duration-triggered soft cut, confirmed in practice via
+`milkdrop_debug.log` (a `hardCut=0` switch immediately followed by a
+`hardCut=1` switch to an unrelated preset). Since the soft cut's toast is
+still waiting out its ~3s delay when that happens, it would otherwise land
+right after the hard cut's — naming a preset that never actually finished
+crossfading in, i.e. two different, both-wrong names popping up in quick
+succession. `MilkdropView::m_presetSwitchGeneration` is incremented on every
+switched-event callback; each deferred `QTimer::singleShot` update captures
+the value at scheduling time and is a no-op if the counter has since moved
+on, so only the most recent switch's name ever actually reaches the screen.
+
 ### Known limitations (not fixed, not requested)
 
 - No bundled presets — see above; the pane renders nothing until the user
   configures at least one preset folder.
+- **`.milk2` presets are not supported — a projectM limitation, not
+  Topaz's.** MilkDrop3 introduced `.milk2` as a distinct "double-preset"
+  format (two presets rendered simultaneously, composited together) —
+  genuinely different from classic `.milk`, not just a renamed variant.
+  Verified directly against projectM's source, both the pinned `v4.1.7`
+  vendored via `FetchContent` and the current upstream `master` branch:
+  `MilkdropPreset::Factory::supportedExtensions()` returns exactly `".milk
+  .prjm"`, and `Playlist::AddPath()` hardcodes `entry.path().extension() ==
+  ".milk"` for both recursive and non-recursive folder scans — no
+  `.milk2` parser or discovery path exists anywhere in libprojectM, at any
+  version, so `.milk2` files are silently skipped when scanning a preset
+  folder and would fail to load even if added individually. (Some
+  preset-pack forum posts claim `.milk2` "loads perfectly in projectM
+  v4.0+" — likely conflating projectM with NestDrop, a separate,
+  independently-developed VJ engine mentioned in the same sentence in those
+  posts, which may have implemented `.milk2` compositing itself; not
+  something confirmed in projectM's own source or documentation.) Adding
+  real support would mean implementing dual-preset compositing from
+  scratch — out of scope unless projectM itself adds it upstream.
+- **Some plain `.milk` presets from the same MilkDrop3-era packs also fail
+  — not a file-extension issue this time, a shader-function one.** Some
+  MilkDrop3-authored presets call custom shader functions
+  (`get_fft(pos)`/`get_fft_hz(freq)`, `get_bar_height(...)` — used by
+  presets that read live FFT/spectrum data directly inside a custom
+  warp/comp pixel shader, e.g. an equalizer-bar visualizer) that MilkDrop3
+  added to its own shader runtime but that don't exist anywhere in
+  projectM — confirmed by grepping projectM's entire source tree (zero
+  matches for either name) and reading its actual shader-header include
+  (`MilkdropPreset/Shaders/PresetShaderHeaderGlsl330.inc`, which lists
+  every built-in macro/function a preset's shader code can call —
+  `GetPixel`/`GetBlur1-3`/named samplers/etc., nothing FFT-related). A
+  preset calling an undefined shader function fails to compile, so it
+  can't render as intended — same underlying story as `.milk2` above
+  (MilkDrop3 extended the shader model beyond classic MilkDrop 2, which is
+  what projectM implements), just surfacing through an otherwise-ordinary
+  `.milk` file instead of the `.milk2` extension. Found by direct
+  inspection of one user-reported broken preset
+  (`MilkDrop3 - Equalizer1b.milk`, whose own header comment literally
+  named `get_fft(pos)`/`get_fft_hz(freq)` as "Functions used"); a
+  collection-wide grep found 9 of 311 `.milk` files in that pack affected
+  (all from the same "Equalizer" preset series) — deleted from disk at the
+  user's request rather than left as silently-broken entries in a preset
+  folder. Not fixable on Topaz's side; would require projectM itself to
+  add these functions to its shader environment.
 - Offscreen readback costs a GPU→CPU→GPU round-trip every render tick; kept
   to ~30fps to stay cheap, but this is a real, unmeasured performance cost
   worth revisiting if it turns out to matter on lower-end hardware.
@@ -4611,4 +4687,270 @@ UC-15's Setup notices) reports the removed count, a second line for the
 corrected-genre count only when it's non-zero, and a third line always
 stating the final remaining-rating count ("The N existing ratings now
 match the tracks in the library.").
+
+---
+
+## UC-25 Cleanup Incompatible Milkdrop Presets (MISC Tab)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Scan configured Milkdrop preset folders for presets known to be incompatible with Topaz's projectM integration and delete them, via an extensible, growable "checker engine" rather than a one-off hardcoded check. |
+| **Actor** | User |
+| **Precondition** | Topaz is running. |
+| **Trigger** | User clicks CLEANUP in Setup → MISC, then CLEANUP again in the resulting dialog. |
+
+Grew directly out of two real incompatibilities found in the same session:
+MilkDrop3's `.milk2` "dual-preset" format (invisible to projectM's playlist
+scanner and preset parser at any version — confirmed via source, both the
+pinned `v4.1.7` and current upstream `master`) and plain `.milk` files
+calling MilkDrop3-only shader functions (`get_fft`, `get_fft_hz`,
+`get_bar_height`) that don't exist anywhere in projectM (confirmed via a
+full source grep, including projectM's own shader-header include listing
+every built-in a preset's custom shader code can call). The user's explicit
+ask: encode this knowledge as a standalone, deliberately extensible engine
+— "we can then from now on always extend that engine when we find new use
+cases of Milkdrops that are not working properly" — not a hardcoded check
+bolted directly into the UI.
+
+**A third pattern, found the same session and initially left as inference-only,
+was later confirmed broadly enough to become Rule 3** (see below): a handful
+of `Equalizer`-series presets had an essentially empty placeholder shader
+(just "sample previous frame, decay it") combined with every visible
+overlay at zero alpha. A user-reported broken preset outside that series
+(`MilkDrop2077 - Dude the walls are moving1.milk`, no relation to
+"Equalizer" by name) turned out to share the *exact* same signature —
+including an unrecognized `MD31=`/`MD32=` marker field, present but inert
+in projectM — which is what moved this from "looks incomplete, might be
+deliberate" to "a real, reproducible technical pattern" worth encoding. A
+targeted scan of the whole collection for the combined signature (see Rule
+3) found 18 candidates; two were caught and correctly excluded during
+validation before implementation — one had enabled custom waveforms
+(`wavecode_0_enabled=1`/`wavecode_1_enabled=1`, a legitimate alternate
+content source untouched by the other two rules), the other superficially
+matched (short shader, zero overlay alpha) but its shader genuinely samples
+a noise texture and does real math. Both false-positive traps are why Rule
+3 checks three conditions together rather than any one alone.
+
+### `MilkdropPresetChecker` (`milkdroppresetchecker.h`/`.cpp`) — the engine
+
+Static-methods-only, no `QObject` — same convention as `TagReader`/
+`RatingCache`. One entry point, `checkFile(filePath) ->
+MilkdropCompatibilityResult { bool compatible; QString reason; }`:
+1. Suffix (case-insensitive) is `milk2` → incompatible, no file read needed.
+2. Otherwise, read the file as a raw `QByteArray` (not decoded to `QString`
+   first — every needle is pure ASCII, and raw-byte `contains()` sidesteps
+   any embedded-NUL/non-UTF-8 author-comment byte entirely) and check
+   against a small static table of `{ functionCall, description }` rows
+   (`get_fft(`, `get_fft_hz(`, `get_bar_height(`, `tanh(`, `sinh(`, `cosh(`,
+   `mul(cross(`, `double2`, `double3`, `double4` today) — first match wins.
+   Table rows fall into four categories, each equally fatal since matching
+   fails the whole warp/composite shader (a hard parse error in projectM's
+   vendored HLSL parser, silently swallowed the same way as any other shader
+   compile failure — see `MilkdropShader.cpp`/`PerPixelMesh.cpp`), but for
+   different underlying reasons — the struct field is named `needle`, not
+   `functionCall`, precisely because not every row is a function call:
+   MilkDrop3-only additions never in projectM at all (`get_fft`/etc.);
+   standard HLSL intrinsics real MilkDrop2/3 support that are simply missing
+   from this vendored parser's intrinsic table (`tanh`/`sinh`/`cosh` —
+   confirmed absent while `sin`/`cos`/`exp2`/etc. are all present); a
+   known-invalid *argument combination* for an otherwise-fully-implemented
+   intrinsic (`mul(cross(...), vector)` — projectM registers dozens of
+   `mul()` overloads, scalar/vector/matrix in every combination, but HLSL
+   itself has no `mul(vector, vector)` overload at all, so this fails in
+   real DirectX too, not just projectM); and a bare type keyword projectM's
+   parser never implements at all (`double2`/`double3`/`double4` — no
+   `double`-precision support anywhere in its type table, unlike real HLSL
+   since Shader Model 5; MilkDrop shaders never legitimately need double
+   precision, so any occurrence is an authoring typo, not a real feature
+   gap). `tanh()` in particular is a common Shadertoy-style tonemap idiom
+   (`o = tanh(o / N)`) in modern ported presets — found via `XorDev -
+   MilkDrop2077 - Flutter3.milk`, whose entire warp shader (a raymarched
+   fractal effect, otherwise fully compatible) is dropped over that one
+   call, leaving only the near-static default warp plus overlays that are
+   already invisible for unrelated reasons (`ob_size`/`ib_size` both 0,
+   `fWaveAlpha` 0.001). `mul(cross(` was found identically in both
+   `MilkDrop2077 - Lasers from the Sky1.milk` and `...Sky2.milk`'s composite
+   shader (`mul(cross(ts,-t),screen3)`, almost certainly meant to be
+   `dot(cross(ts,-t),screen3)` — a scalar depth value, which is what the
+   surrounding division expects) — a shared-template bug across the preset
+   family, not a one-off typo, but still narrow enough that a blanket
+   `"mul("` match was deliberately avoided: the vast majority of `mul()`
+   calls in presets are valid vector·matrix/matrix·matrix uses and would
+   false-positive constantly. `double3` was found via `martin - a milkdrop
+   edit of XorDevs starship MilkDrop2077 rmx007.milk`'s warp shader
+   (`double3 crisp = tex2D(...)`, almost certainly meant to be `float3`) —
+   a single-occurrence typo, unlike `mul(cross(`'s shared-template pattern,
+   but the compound token is specific enough to encode safely without
+   colliding with ordinary preset text the way bare `"double"` might.
+
+This table is the intended extension point: a newly-discovered
+substring-based incompatibility is one more row; a structurally different
+future rule (not "contains this substring") is a new branch in `checkFile()`
+itself. Deliberately returns `compatible = true` for anything unreadable or
+unrecognized — this engine only flags *known* incompatibilities, it isn't a
+general preset-health validator.
+
+**Rule 3 — no visible content is possible anywhere in the render pipeline.**
+A preset is flagged only if *all three* hold together (each one alone
+produced a real false positive during validation, see above):
+1. Every overlay that could draw new pixels each frame is off:
+   `mv_a` (motion vectors) and `fWaveAlpha` (the built-in waveform) are
+   both `≤ 0.01`, and each border (outer/inner) is invisible via *either*
+   its alpha (`ob_a`/`ib_a` `≤ 0.01`) *or* its size (`ob_size`/`ib_size`
+   `≤ 0.001`) — confirmed against projectM's actual `Border::Draw()`
+   (`Border.cpp`): a border's quad spans `1-size` to `1`, so a `size` of 0
+   collapses it to a zero-area strip and draws nothing *regardless of
+   alpha*. Missed originally — a checked-with-alpha-only version let
+   `XorDev - MilkDrop2077 - martin - Starship Red Lines.milk` through
+   (`ob_a=1.000` but `ob_size=0.000`, genuinely invisible; every other
+   overlay already zero, same MD3 marker + "this shader will work only
+   with md3" author comment as the rest of this rule's cases) until it was
+   reported not working and traced back to this gap. Values are pulled via
+   `keyValueOrDefault()`, a small manual line-scanner (matching a `key=` at
+   the start of a line, consistent with `TagReader`'s own preference for
+   manual byte parsing over `QRegularExpression` elsewhere in this
+   codebase) — a **missing** key defaults to `1.0` for both alpha and size
+   (assume visible), deliberately biased against false-flagging, since
+   Milkdrop's own built-in default for an omitted key isn't something this
+   engine tracks.
+2. No custom shape/waveform is enabled (`shapecode_N_enabled=1` /
+   `wavecode_N_enabled=1` for `N` in `0..3`, the exact key names confirmed
+   from projectM's own `CustomShape.cpp`/`CustomWaveform.cpp`) — a
+   legitimate, separate content source from the built-in overlay system
+   that condition 1 alone can't see.
+3. The warp+composite shader's own code (extracted by concatenating just
+   the `warp_N`/`comp_N` line values — mirroring `PresetFileParser::GetCode()`'s
+   own numbered-key extraction, and deliberately excluding
+   `per_frame_*`/`per_pixel_*` equation code, which legitimately uses many
+   of the same math functions checked next for entirely unrelated purposes
+   like driving motion vectors) contains none of a fixed list of HLSL
+   constructs a shader needs to generate any real content from scratch —
+   other named samplers, `sin(`/`cos(`/`pow(`/`sqrt(`/`saturate(`/etc.,
+   loops. A shader containing only a `sampler_main` feedback read plus a
+   flat scalar decay/flip trips none of these.
+
+Reason string returned when all three hold: the preset "likely relies on a
+proprietary MilkDrop3 rendering feature with no portable expression of its
+actual content" — several confirmed instances carry an `MD3<N>=<huge
+number>` field (e.g. `MD31=18385496672307631707`) that is not referenced
+anywhere in projectM's source at any version, consistent with this theory
+without being provable from outside MilkDrop3PRO's own (closed) internals.
+
+### `MilkdropCleanupController` (`milkdropcleanupcontroller.h`/`.cpp`) — `QObject`, `QML_ELEMENT`
+
+Instantiated once in `Main.qml` (`appConfig: appConfig`), same convention as
+every other stateful controller in this app (`LibraryModel`,
+`AutoPlayController`, etc.) — not instantiated locally inside the dialog
+that uses it, because `Main.qml`'s new `onClosing` veto (below) needs direct
+visibility into its `cleaning` property.
+
+- `presetFolders()` (`Q_INVOKABLE`): one `{ path, presetCount, exists }` map
+  per `AppConfig.milkdropPresetFolders` entry. `exists` (`QDir(path).exists()`)
+  is surfaced separately from a bare zero count, so a folder that's been
+  moved/deleted since being configured shows "(folder not found)" in the
+  dialog rather than a misleadingly-identical "0 presets" a genuinely-empty
+  folder would also show.
+- `startCleanup(folderPaths)` (`Q_INVOKABLE`): re-entrancy-guarded
+  (`if (m_cleaning) return;`, copied verbatim from
+  `LibraryModel::removeAbandonedRatings()`'s own guard). Builds one combined
+  flat work list across every requested folder up front (so overall
+  progress reflects the true combined total, not per-folder), then a single
+  pass: `MilkdropPresetChecker::checkFile()` per entry, `QFile::remove()` if
+  incompatible — **removed and failed counts tracked separately per
+  folder**, unlike this codebase's other two `QFile::remove()` call sites
+  (`librarycache.cpp`/`ratingcache.cpp`, both fire-and-forget), since this
+  feature's results screen promises an accurate count and a folder with
+  thousands of entries realistically hits the occasional permission/lock
+  failure. Emits `cleanupFinished({ path, removed, failed, total }[])` at the
+  end.
+- The recursive preset-file walk (shared by `presetFolders()` and
+  `startCleanup()` — written once, not duplicated) mirrors
+  `LibraryScanner::discoverAudioFiles()`'s exact shape (manual
+  `QDir::entryInfoList()` recursion, suffix allowlist) rather than
+  introducing `QDirIterator` as a second recursive-scan idiom into the
+  codebase — with one addition `discoverAudioFiles()` doesn't have,
+  `QDir::NoSymLinks`, cheap insurance against a Windows junction looping
+  back to an ancestor directory in a large third-party-curated preset pack
+  Topaz doesn't control the structure of.
+- No "is `MilkdropView` currently rendering one of these folders" guard:
+  `MilkdropView::rebuildPresetList()` only reacts to the *folder list*
+  changing (an `m_appliedPresetFolders` equality check), never re-validates
+  folder contents against disk, and projectM already has a
+  `preset_switch_failed` event callback for exactly this "a playlist entry
+  disappeared out from under it" case (already wired up in
+  `MilkdropView::ensureInitialized()`, already logged) — a live render
+  session is already stale-tolerant by construction.
+
+**Progress reporting at real scale.** One of the user's configured folders
+has ~9800 preset files — each needing an actual disk read + text scan, not
+an in-memory lookup like the near-instant ratings cleanup this pattern is
+otherwise modeled on. `cleanupProgress`/`currentFileName` are updated (cheap
+signal emissions) every single file, matching the user's explicit ask for
+per-file granularity, but `QCoreApplication::processEvents()` itself is only
+pumped when a `QElapsedTimer` shows ≥16ms since the last pump (~60fps cap)
+— avoiding per-call overhead at 10,000-file scale while keeping the UI
+visibly live. Runs synchronously on the main thread rather than a worker
+thread, matching this codebase's established "fine to do file-cache work
+synchronously" convention (UC-24) rather than introducing real threading for
+what's still fundamentally a one-off batch, just a longer one.
+
+### `Main.qml` — the first `onClosing` veto in this codebase
+
+`LibraryScanner`'s own long-running full-library scan never calls
+`processEvents()`, so the window simply freezes solid while it runs today —
+there's no delivery window for a close event to land mid-scan.
+`startCleanup()`'s throttled-but-real `processEvents()` pumping is
+different: for a multi-second-to-tens-of-seconds pass, the event loop
+*is* actively running and genuinely can deliver a window-close event while
+the controller is still on the call stack, risking a use-after-free on the
+next loop iteration if the QML engine (and the controller with it) got torn
+down mid-loop. `ApplicationWindow.onClosing` now vetoes the close while
+`milkdropCleanupController.cleaning` is `true`:
+```qml
+onClosing: (close) => {
+    if (milkdropCleanupController.cleaning)
+        close.accepted = false
+}
+```
+`MilkdropCleanupDialog.qml`'s own ✕ close button is hidden under the same
+condition, for the same reason at the dialog level.
+
+### `SetupDialog.qml` / `MilkdropCleanupDialog.qml` — UI
+
+MISC tab gains a second row below "Remove Abandoned Ratings": label
+"Cleanup Incompatible Milkdrop Presets" + a CLEANUP button. Unlike the
+plain `Theme.primary`-styled REMOVE button next to it, this one uses
+`Theme.error`/`Theme.errorContainer` — the same destructive-action styling
+the MILKDROP tab's own "DELETE SELECTED" (folder-entry removal) button
+already established in this file — since clicking through actually deletes
+real files from disk, permanently, unlike the ratings cleanup's
+cache-file-only edit. No extra "are you sure?" confirmation dialog: matches
+the user's own spec (none requested) and the Remove-Abandoned-Ratings
+precedent (single click, no confirm); the color change is the cheap
+mitigation for the higher stakes here.
+
+`MilkdropCleanupDialog.qml` (new, chrome modeled on `NewPlaylistDialog.qml`
+— header + ✕ close + fixed size, not `MissingTracksDialog.qml`'s
+resize-grip version, since nothing here needs resizing) shows three
+mutually-exclusive states in one `Popup` via plain `visible:` toggling (this
+codebase's established convention for state-dependent panels, e.g. the
+Setup tabs themselves) rather than a `StackLayout`:
+- **Idle**: a `ListView` of configured folders (row style — height, mono
+  font, `ElideMiddle` — matches the MILKDROP tab's own existing preset-folder
+  list) populated into a local `ListModel` when the dialog opens, each row
+  with a checkbox (visual copied from the GENRES tab's per-genre enable
+  checkbox) defaulting to checked, the path, and its preset count (or
+  "(folder not found)"); a CLEANUP button, disabled while nothing's checked.
+- **Running**: the same two-`Rectangle` progress-bar visual UC-24 introduced
+  (still the only progress-bar idiom in the app) + a "Checking: `<filename>`"
+  label bound to `currentFileName`.
+- **Done**: a per-folder "`X` of `Y` removed" list (plus a failed-count note
+  when non-zero), and a CLOSE button.
+
+Checkbox state is pure ephemeral UI state, tracked only in the dialog's
+local `ListModel` and a plain `checkedCount` integer maintained imperatively
+in each checkbox's click handler (not via a JS function re-evaluated inside
+a binding, out of the same caution documented for the GENRES tab's own
+checkbox binding — see the invokable-in-binding gotcha noted elsewhere in
+this doc) — never persisted anywhere.
 

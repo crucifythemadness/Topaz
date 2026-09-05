@@ -143,4 +143,10 @@ private:
     bool m_initFailed = false;
 
     QString m_currentPresetName;
+    // Incremented on every preset-switched callback; a deferred toast update
+    // (see ensureInitialized()) only applies if this still matches the value
+    // it captured when scheduled -- otherwise a newer switch (e.g. a
+    // beat-triggered hard cut landing shortly after a duration-triggered
+    // soft cut) has already superseded it. See UC-20.
+    int m_presetSwitchGeneration = 0;
 };
