@@ -20,6 +20,11 @@ Rectangle {
     // Emitted after LOAD when the just-loaded playlist had tracks whose file
     // couldn't be found -- Main.qml opens MissingTracksDialog. See UC-22.
     signal missingPlaylistTracks(var missingTracks)
+    // Emitted when the user clicks EXPORT with a playlist selected --
+    // Main.qml opens ExportPlaylistDialog with playlistsData.selectedRawTracks,
+    // NOT the current playback queue (the selected playlist and whatever is
+    // currently playing are routinely different playlists). See UC-26.
+    signal exportPlaylistRequested()
 
     readonly property var currentAlbums: playlistsData ? playlistsData.albums : []
 
@@ -44,7 +49,7 @@ Rectangle {
         Rectangle {
             id: loadBtn
             anchors { left: parent.left; leftMargin: 32; verticalCenter: parent.verticalCenter }
-            width:  140
+            width:  119   // 140 reduced by 15%
             height: 44
             radius: Theme.radiusSm
 
@@ -112,6 +117,99 @@ Rectangle {
             }
         }
 
+        // EXPORT the selected playlist -- reads straight from its XSPF file
+        // (playlistsData.selectedRawTracks), never touches the queue, so no
+        // autoPlay.queueClearAllowed gate is needed unlike LOAD. See UC-26.
+        Rectangle {
+            id: exportBtn
+            anchors { left: loadBtn.right; leftMargin: 12; verticalCenter: parent.verticalCenter }
+            width:  100
+            height: 44
+            radius: Theme.radiusSm
+
+            readonly property bool active: root.playlistsData
+                                            && root.playlistsData.selectedRawTracks.length > 0
+
+            color:  active && exportHover.containsMouse ? Theme.surfaceContainerHigh
+                                                         : Theme.surfaceContainer
+            border.color: Theme.ov20
+            border.width: 1
+            opacity: active ? 1.0 : 0.35
+
+            Row {
+                anchors.centerIn: parent
+                spacing: 6
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("EXPORT")
+                    font.family:        Theme.fontFamilyBody
+                    font.pixelSize:     Theme.labelLg
+                    font.weight:        Font.Medium
+                    font.letterSpacing: Theme.lsWide
+                    color: Theme.fgSurface
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "↗"
+                    font.pixelSize: Theme.titleMd
+                    color: Theme.fgSurfaceVariant
+                }
+            }
+
+            MouseArea {
+                id: exportHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: exportBtn.active ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: {
+                    if (!exportBtn.active) return
+                    root.exportPlaylistRequested()
+                }
+
+                ToolTip.visible: containsMouse && exportBtn.active
+                ToolTip.delay:   600
+                ToolTip.text:    qsTr("EXPORT PLAYLIST")
+            }
+        }
+
+        // Delete the selected playlist -- right after EXPORT, vertically
+        // centered with LOAD/EXPORT (same verticalCenter: parent.verticalCenter
+        // anchor, so its 32px height centers on their shared 44px middle).
+        // See UC-26.
+        Rectangle {
+            id: deletePlaylistBtn
+            anchors { left: exportBtn.right; leftMargin: 12; verticalCenter: parent.verticalCenter }
+            width: 32; height: 32
+            radius: Theme.radiusFull
+
+            readonly property bool active: root.playlistsData && root.playlistsData.selectedFileName !== ""
+
+            color: deleteHover.containsMouse ? Theme.surfaceContainerHighest : "transparent"
+            opacity: active ? 1.0 : 0.35
+
+            Image {
+                anchors.centerIn: parent
+                source: "qrc:/Topaz/TrashBin_Icon.svg"
+                sourceSize.width:  16
+                sourceSize.height: 16
+            }
+
+            MouseArea {
+                id: deleteHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: deletePlaylistBtn.active ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: {
+                    if (!deletePlaylistBtn.active) return
+                    deleteConfirmBox.open()
+                }
+
+                ToolTip.visible: containsMouse && deletePlaylistBtn.active
+                ToolTip.delay:   600
+                ToolTip.text:    qsTr("DELETE PLAYLIST")
+            }
+        }
+
         Row {
             anchors { right: parent.right; rightMargin: 32; bottom: parent.bottom; bottomMargin: 20 }
             spacing: 4
@@ -145,6 +243,26 @@ Rectangle {
                 font.letterSpacing: 1.5
                 color: Theme.error
             }
+        }
+    }
+
+    MessageBox {
+        id: deleteConfirmBox
+        title: qsTr("DELETE PLAYLIST")
+        message: qsTr("Would you like to delete the selected playlist?")
+        confirmMode: true
+        confirmButtonText: qsTr("DELETE")
+        onAccepted: {
+            if (!root.playlistsData || !root.playlistsData.playlistManager) return
+            const fileName = root.playlistsData.selectedFileName
+            if (fileName === "") return
+            root.playlistsData.playlistManager.deletePlaylist(fileName)
+            // Must run BEFORE refreshPlaylists() -- selectNeighborOf() looks
+            // up fileName's position in the *current* playlists array to
+            // pick an adjacent one; refreshing first would make it
+            // un-findable.
+            root.playlistsData.selectNeighborOf(fileName)
+            root.playlistsData.refreshPlaylists()
         }
     }
 

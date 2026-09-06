@@ -15,6 +15,9 @@ Rectangle {
     color: Theme.surfaceContainerLow
 
     signal newPlaylistRequested()
+    // Emitted when the user clicks EXPORT with a named playlist loaded --
+    // Main.qml opens ExportPlaylistDialog. See UC-26.
+    signal exportPlaylistRequested()
     // Emitted when the user left-clicks the album cover — opens the
     // detachable BigCoverWindow pane (see Main.qml's Loader wiring).
     signal bigCoverRequested()
@@ -534,13 +537,19 @@ Rectangle {
                     height: 52
 
                     Rectangle {
-                        // Permanently disabled — not yet implemented.
+                        id: exportPlaylistBtn
                         width:  parent.width / 2
                         height: parent.height
-                        color: Theme.surfaceContainer
+
+                        readonly property bool active:
+                            root.engine !== null && root.engine.activePlaylistName !== ""
+                            && root.engine.queueCount > 0
+
+                        color:  active && exportHover.containsMouse
+                                ? Theme.surfaceContainerHigh : Theme.surfaceContainer
                         border.color: Theme.ov20
                         border.width: 1
-                        opacity: 0.35
+                        opacity: active ? 1.0 : 0.35
 
                         Row {
                             anchors.centerIn: parent
@@ -563,7 +572,17 @@ Rectangle {
                         }
                         MouseArea {
                             id: exportHover; anchors.fill: parent
-                            hoverEnabled: true; cursorShape: Qt.ArrowCursor
+                            hoverEnabled: true
+                            cursorShape: exportPlaylistBtn.active
+                                         ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: {
+                                if (!exportPlaylistBtn.active) return
+                                root.exportPlaylistRequested()
+                            }
+
+                            ToolTip.visible: containsMouse && exportPlaylistBtn.active
+                            ToolTip.delay:   600
+                            ToolTip.text:    qsTr("EXPORT PLAYLIST")
                         }
                     }
 

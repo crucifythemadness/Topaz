@@ -354,6 +354,14 @@ ApplicationWindow {
         onPlaylistCreated: playlistsData.refreshPlaylists()
     }
 
+    // Export-playlist controller/dialog — opened by NowPlaying's EXPORT
+    // button. See UC-26 in the architecture doc.
+    PlaylistExportController { id: exportController }
+    ExportPlaylistDialog {
+        id:               exportPlaylistDialog
+        exportController: exportController
+    }
+
     // Missing-playlist-tracks notice — opened after a LOAD (NowPlaying or
     // PlaylistViewer) finds tracks whose file no longer exists. See UC-10/UC-22.
     MissingTracksDialog {
@@ -485,6 +493,10 @@ ApplicationWindow {
                             missingTracksDialog.missingTracks = missing
                             missingTracksDialog.open()
                         })
+                        item.exportPlaylistRequested.connect(function() {
+                            exportPlaylistDialog.tracks = playlistsData.selectedRawTracks
+                            exportPlaylistDialog.open()
+                        })
                     } else {
                         item.lib = lib
                     }
@@ -510,6 +522,10 @@ ApplicationWindow {
                 autoPlay:        autoPlay
                 onWidthChanged: saveLayoutTimer.restart()
                 onNewPlaylistRequested: newPlaylistDialog.open()
+                onExportPlaylistRequested: {
+                    exportPlaylistDialog.tracks = engine.trackList()
+                    exportPlaylistDialog.open()
+                }
                 onBigCoverRequested: root.bigCoverPaneOpen = true
                 onMissingPlaylistTracks: (missing) => {
                     missingTracksDialog.missingTracks = missing

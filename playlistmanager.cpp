@@ -414,3 +414,8 @@ QVariantMap PlaylistManager::loadPlaylist(const QString &filePath)
     result[QStringLiteral("missing")] = missing;
     return result;
 }
+
+bool PlaylistManager::deletePlaylist(const QString &nameWithExt)
+{
+    return QFile::remove(playlistDirectory() + QChar('/') + nameWithExt);
+}

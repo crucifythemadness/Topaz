@@ -78,6 +78,12 @@ QtObject {
     readonly property int monoMd:     11
     readonly property int monoSm:     10
     readonly property int monoLg:     12
+    readonly property int monoXl:     13
+    readonly property int monoXxl:    14
+    // Distinct "hero" size for large numeric readouts, above the mono
+    // ladder -- same role displayLg plays for the headline family. Reuses
+    // headlineSm's already-proven 18px rather than an arbitrary new value.
+    readonly property int monoDisplay: 18
 
     // в”Ђв”Ђ Letter Spacing (px) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     readonly property real lsWide:   1.5

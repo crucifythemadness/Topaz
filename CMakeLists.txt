@@ -99,6 +99,10 @@ qt_add_executable(topaz
     milkdroppresetchecker.cpp
     milkdropcleanupcontroller.h
     milkdropcleanupcontroller.cpp
+    playlistexportworker.h
+    playlistexportworker.cpp
+    playlistexportcontroller.h
+    playlistexportcontroller.cpp
     # Vendored third-party (BSD-3-Clause) — see third_party/kissfft/LICENSES/
     # BSD-3-Clause. Unmodified upstream sources; do not edit directly.
     third_party/kissfft/kiss_fft.h
@@ -147,6 +151,7 @@ qt_add_qml_module(topaz
         AudioVisualizerWindow.qml
         MilkdropWindow.qml
         MilkdropCleanupDialog.qml
+        ExportPlaylistDialog.qml
     RESOURCES
         app.ico
         InfoAbout.png
@@ -155,6 +160,9 @@ qt_add_qml_module(topaz
         Qt_Logo.png
         FFmpeg_Logo.png
         ProjectM_Logo.png
+        Harddisk_Icon.svg
+        UsbStick_Icon.svg
+        TrashBin_Icon.svg
 )
 
 set_target_properties(topaz PROPERTIES

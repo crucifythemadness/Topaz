@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <g stroke="#CBC3D7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Lid -->
+    <line x1="4" y1="6.5" x2="20" y2="6.5"/>
+    <!-- Handle -->
+    <path d="M9 6.5 V4.5 a1.5 1.5 0 0 1 1.5 -1.5 h3 a1.5 1.5 0 0 1 1.5 1.5 V6.5"/>
+    <!-- Body -->
+    <path d="M6 6.5 L6.8 19.5 a1.5 1.5 0 0 0 1.5 1.4 h7.4 a1.5 1.5 0 0 0 1.5 -1.4 L18 6.5"/>
+    <!-- Vertical ribs -->
+    <line x1="10" y1="10" x2="10.3" y2="17"/>
+    <line x1="14" y1="10" x2="13.7" y2="17"/>
+  </g>
+</svg>

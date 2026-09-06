@@ -4954,3 +4954,225 @@ a binding, out of the same caution documented for the GENRES tab's own
 checkbox binding — see the invokable-in-binding gotcha noted elsewhere in
 this doc) — never persisted anywhere.
 
+## UC-26 Export Playlist to External Destination
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Copy every audio file in a playlist (either the currently-loaded queue, or a playlist merely selected in the PLAYLISTS tab's list) to a chosen destination folder (typically a USB stick, for car use) under a generated `<prefix><index>_<title>.<ext>` filename, after confirming the destination has enough free space and is actually writable. |
+| **Actor** | User |
+| **Precondition** | Either a named playlist is loaded into the queue and non-empty (`PlaybackEngine.activePlaylistName`/`queueCount`), or a playlist with at least one resolvable track is selected in the PLAYLISTS tab (`PlaylistsData.selectedRawTracks`). |
+| **Trigger** | User clicks EXPORT in NowPlaying's playlist-management row, or EXPORT next to LOAD in the PLAYLISTS tab's `PlaylistViewer.qml`, then EXPORT again inside `ExportPlaylistDialog`. |
+
+EXPORT (`NowPlaying.qml`'s Row 2, next to REMOVE) was a permanently-disabled
+placeholder from the day that row was first laid out. It's gated the same
+way `removePlaylistBtn` is —
+`engine.activePlaylistName !== "" && engine.queueCount > 0` — but
+deliberately *not* also gated on `autoPlay.queueClearAllowed`: that guard
+protects against *clearing* the queue while AUTO PLAY manages it (see
+UC-16), and exporting never mutates the queue.
+
+**Open design question the user raised directly**: what happens if Topaz
+can't write to the chosen destination — should Topaz attempt Windows UAC
+elevation? Resolved explicitly against it: a `ShellExecute` `"runas"`
+relaunch (or a separate elevated helper process) would need an entirely
+different, not-yet-designed Linux equivalent (`pkexec`/`sudo`) for a
+scenario — writing to a USB stick or an ordinary user-owned folder — that
+essentially never actually requires admin rights in practice. Instead,
+non-writability is detected proactively (see `analyzeDestination()` below)
+and surfaced as a blocking dialog state with a specific, distinct message,
+the same way "not enough free space" is — no elevation prompt, ever.
+
+### `PlaylistExportController` (`playlistexportcontroller.h`/`.cpp`)
+
+`QObject`/`QML_ELEMENT`, instantiated once in `Main.qml` (same convention as
+every other stateful controller in this app).
+
+- `Q_INVOKABLE QVariantMap analyzeDestination(const QString &destPath)` —
+  fast, synchronous (a handful of `QFileInfo`/`QStorageInfo` calls, the same
+  scale of work `MilkdropCleanupController::presetFolders()` already does
+  synchronously). Returns `{ exists, writable, isRemovable, volumeLabel,
+  freeBytes, totalBytes }`:
+  - `freeBytes`/`totalBytes` via `QStorageInfo::bytesAvailable()`/
+    `bytesTotal()` — the same class `VolumePath` already uses elsewhere,
+    just a different accessor.
+  - `writable` is determined by actually creating and removing a hidden
+    probe file (`.topaz_write_test`) in the destination, not by trusting
+    `QFileInfo::isWritable()` alone (unreliable on some network/FAT
+    volumes) — this *is* the concrete answer to the UAC question above.
+  - `isRemovable` distinguishes a USB stick from a fixed HDD/SSD, purely to
+    pick which icon `ExportPlaylistDialog` shows. `QStorageInfo` has no
+    removable/fixed accessor, so this is new, Windows-only platform code:
+    `GetDriveTypeW()` on the volume's root path, compared against
+    `DRIVE_REMOVABLE`, called only from the `.cpp` (never the header) —
+    the same header/`.cpp` isolation discipline `SystemVolumeController`
+    already uses to keep `<windows.h>` macro clashes away from any header
+    that also pulls in Qt types. Always returns `false` (treated as a fixed
+    drive) on non-Windows builds until a real Linux port adds an actual
+    check (e.g. reading `/sys/block/<dev>/removable`) — tracked as a
+    Windows-only-for-now gap alongside `VolumePath`'s own platform notes.
+  - Accepts both plain paths and `file://` URLs, same convention as
+    `AppConfig::addFolder()`/`addMilkdropPresetFolder()`.
+- `Q_INVOKABLE qint64 computeRequiredBytes(const QVariantList &filePaths)` —
+  sums `QFileInfo(path).size()` per path, queried live rather than trusting
+  `TrackInfo::fileSize`, which the in-memory queue never actually populates
+  (`PlaybackEngine::trackFromMap()` doesn't set it, and `trackList()`
+  doesn't emit it) — making it unreliable as a source for this calculation.
+- `Q_INVOKABLE void startExport(tracks, destFolder, prefix)` /
+  `Q_INVOKABLE void cancelExport()` — delegate to the worker thread below.
+- `Q_PROPERTY`s `exporting`/`exportProgress`/`currentFileName` and signal
+  `exportFinished(QVariantList results)` mirror the exact shape
+  `MilkdropCleanupController` already established for its own
+  scan-with-progress flow.
+
+### `PlaylistExportWorker` (`playlistexportworker.h`/`.cpp`) — the actual copy
+
+Runs on a dedicated `QThread` owned by `PlaylistExportController`, built
+with the exact `moveToThread()` setup `LibraryModel`/`LibraryScanner`
+already established (worker constructed parentless, moved to the thread,
+`QThread::finished → QObject::deleteLater`, all cross-thread signals
+`Qt::QueuedConnection`) — **not** `MilkdropCleanupController`'s
+main-thread-with-throttled-`processEvents()`-pump approach. Copying
+multi-GB of audio is exactly the file I/O CLAUDE.md's "never do file I/O
+directly on the main thread" rule is for: a single large `QFile::copy()`
+call can't be chunked with periodic `processEvents()` calls the way
+per-file stat/delete checks could, so a big enough playlist would otherwise
+visibly freeze the whole window for the duration of that one file.
+
+`runExport(tracks, destFolder, prefix)`: for each `{filePath, title}` entry
+in queue order, builds the zero-padded index width as
+`qMax(2, digits in tracks.size())` (2 digits for ≤99 tracks, 3 for
+100-999 tracks, etc.), strips Windows-reserved characters
+(`\/:*?"<>|`) from the title, and copies to
+`prefix + paddedIndex + "_" + sanitizedTitle + "." + originalExtension`,
+removing any leftover file of the same name from a previous export attempt
+first (`QFile::copy()` refuses to overwrite). Emits `progress(done, total,
+currentFileName)` after every file and `finished(results)` at the end,
+where each result is `{sourcePath, destPath, success, errorString}`.
+Cancellation (`cancelExport()`) is the same cooperative
+`std::atomic<bool>`-checked-between-iterations shape as
+`LibraryScanner::cancelScan()` — the loop simply stops before its next
+file and emits `finished()` with whatever partial results it already has.
+
+### `ExportPlaylistDialog.qml` — UI
+
+Chrome modeled on `MilkdropCleanupDialog.qml`: header + ✕ close (hidden
+while exporting, same "no safe way to tear this down mid-copy" reasoning),
+three mutually-exclusive `visible:`-toggled body states (idle/config,
+running, done) in one `Popup`.
+
+**Idle/config state** — translates the user-supplied mockup's layout into
+this app's own `Theme.qml` tokens and dialog idioms rather than the
+mockup's literal styling:
+- Left panel: `Harddisk_Icon.svg` or `UsbStick_Icon.svg` (new assets,
+  registered as `qt_add_qml_module` `RESOURCES`, referenced the same way
+  the About dialog's logo PNGs are — `qrc:/Topaz/<name>`) chosen from
+  `analyzeDestination()`'s `isRemovable`, plus the volume label.
+  `UsbStick_Icon.svg` was authored fresh (same 120×120 circle-badge
+  construction and `#38BDF8` glow as the harddisk asset) rather than reusing
+  the mockup's own USB glyph, which was only available as an
+  externally-hosted image — never fetched or embedded, since Topaz makes no
+  runtime network calls for assets.
+- Destination folder row: read-only path field + BROWSE… button opening a
+  `FolderDialog`, same shape as `SetupDialog.qml`'s existing folder pickers.
+- Storage & capacity panel: "PLAYLIST REQUIRED SPACE" / "DESTINATION
+  AVAILABLE SPACE" readouts (GiB, `Theme.fontFamilyMono`) plus a small
+  status dot — green `"#00C853"` / red `"#FF1744"`, the exact literal hex
+  values `BottomBar.qml`'s AUTO PLAY button already uses for its on/off
+  state, reused here verbatim rather than inventing new `Theme.qml` tokens
+  for a one-off — green only when both writable AND enough free space;
+  otherwise red, with an inline message distinguishing which condition
+  failed ("DESTINATION NOT WRITABLE" vs "NOT ENOUGH FREE SPACE").
+- Track prefix input (optional — labeled "FILE NAMING / TRACK PREFIX
+  (OPTIONAL)") + a live filename preview recomputed on every keystroke from
+  the first track, always visible regardless of whether a prefix was
+  typed — an empty prefix simply falls back to `<index>_<title>.<ext>`.
+- EXPORT (inside the dialog) is enabled once destination chosen AND
+  writable AND enough free space AND not already exporting — no longer
+  requires a non-empty prefix.
+- The dialog is draggable by its header (`x`/`y` bindings instead of
+  `anchors.centerIn`, recomputed in `onOpened`, plus a header `MouseArea`),
+  same technique and same reason `SetupDialog.qml` already uses it (see
+  that dialog's own "Geometry" comment) — `Popup.anchors.centerIn` is
+  backed by `QQuickPopupAnchors`, which keeps reasserting `x`/`y` from C++
+  and fights a drag `MouseArea`'s direct assignment otherwise.
+
+**Running state**: current filename + the same thin recessed progress-bar
+visual UC-24/UC-25 already established (`Theme.surfaceContainerHigh` track,
+`Theme.primary` fill, `Behavior on width`).
+
+**Done state**: "Exported `X` of `Y` tracks" summary, with any per-file
+failures listed (source path + reason) below.
+
+### Two export entry points, one dialog: `tracks` instead of `engine`
+
+`ExportPlaylistDialog` originally read `engine.trackList()`/
+`engine.queueCount` directly, coupling it to "whatever is currently
+loaded/playing." Adding a second EXPORT button to the PLAYLISTS tab's
+`PlaylistViewer.qml` (next to its existing LOAD button) exposed why that
+coupling was wrong in general: LOAD there operates on whichever playlist
+row is *selected* in `PlaylistsPanel.qml`'s list
+(`PlaylistsData.selectedRawTracks`/`selectedFileName`), which is
+independent of and routinely different from `engine.activePlaylistName` —
+`PlaylistsPanel` explicitly disables selecting whatever IS the current
+queue's playlist, so a selected row is *never* what's currently playing.
+
+The dialog now takes an explicit `property var tracks: []` (the same
+`{filePath, title, ...}` map shape `PlaybackEngine.trackList()` and
+`PlaylistManager.loadPlaylist()`'s `tracks` result already share, since
+both already flow into `engine.loadPlaylistTracks()` elsewhere) instead of
+an `engine` reference. Each caller sets `tracks` immediately before
+`.open()`:
+- NowPlaying's EXPORT (`Main.qml`'s `NowPlaying.onExportPlaylistRequested`):
+  `exportPlaylistDialog.tracks = engine.trackList()`.
+- `PlaylistViewer`'s new EXPORT button (next to LOAD, narrower —
+  `width: 100` vs LOAD's `140` — so the header's "N TRACKS — NAME" text
+  anchored to its right edge still has room): emits its own
+  `exportPlaylistRequested()` signal, wired in the same `Loader.onLoaded`
+  block that already connects `missingPlaylistTracks`
+  (`Main.qml`'s PLAYLISTS-tab Loader), which sets
+  `exportPlaylistDialog.tracks = playlistsData.selectedRawTracks` before
+  opening. Unlike LOAD, this button has no `autoPlay.queueClearAllowed`
+  gate — exporting reads the XSPF file directly and never touches the
+  queue, so AutoPlay's queue-mutation guard doesn't apply.
+
+### Delete a playlist — the one deliberate exception to "no confirm dialogs"
+
+`PlaylistViewer.qml` also gained a small circular trash-bin icon button
+(top right of its header, above the "N TRACKS — NAME" text, sharing its
+`rightMargin: 32`) that deletes the selected playlist via a new
+`PlaylistManager::deletePlaylist(nameWithExt)` (`QFile::remove()` on
+`playlistDirectory() + "/" + nameWithExt`, following the exact naming
+convention `appendTrack`/`rewritePlaylist` already use). The icon is a new
+monochrome SVG asset (`TrashBin_Icon.svg`, stroke color baked in as
+`Theme.fgSurfaceVariant`'s literal hex `#CBC3D7` — the same "bake the theme
+color into the SVG" approach `Harddisk_Icon.svg`/`UsbStick_Icon.svg` use,
+since plain `Image` has no theme-reactive tinting in this app, and an emoji
+🗑 glyph would render in full color on most systems, clashing with every
+other monochrome icon button here).
+
+This is the one place in the whole app that shows an "are you sure?"
+confirmation before a destructive action — every other delete (SetupDialog's
+various "DELETE SELECTED"/"DELETE ALL" buttons, UC-24's abandoned-ratings
+cleanup, UC-25's Milkdrop preset cleanup) deliberately has none, per the
+documented convention in UC-25 above ("single click, no confirm" + an
+error-colored button as the only mitigation). The user explicitly asked for
+a confirmation dialog here, with a specific caption ("DELETE PLAYLIST") and
+wording — rather than build a one-off dialog for this single case,
+`MessageBox.qml` gained an opt-in `confirmMode` (default `false`, so every
+existing OK-only call site — e.g. `SetupDialog.qml`'s
+`abandonedRatingsResultBox` — is unaffected): when `true`, it shows CANCEL
++ a caller-supplied `confirmButtonText` (styled `Theme.error`/
+`Theme.errorContainer`, matching this app's existing destructive-button
+color convention) instead of a single OK, and emits a new `accepted()`
+signal only when the confirm button (not CANCEL) is clicked.
+
+On confirm, the handler calls `deletePlaylist()`, then
+`PlaylistsData.selectNeighborOf(fileName)` **before**
+`PlaylistsData.refreshPlaylists()` — `selectNeighborOf()` looks up
+`fileName`'s position in the *current* (not-yet-refreshed) `playlists`
+array to pick an adjacent entry, so refreshing first would make the just-
+deleted name un-findable. Both functions already existed for exactly this
+"the current selection just became invalid" scenario (LOAD's own flow uses
+`selectNeighborOf()` the same way after a playlist becomes the active
+queue and thus unselectable — see UC-22).
+

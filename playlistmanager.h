@@ -89,6 +89,11 @@ public:
     //                artist, album, title, location. See UC-10/UC-22.
     Q_INVOKABLE QVariantMap loadPlaylist(const QString &filePath);
 
+    // Deletes a playlist file from disk.
+    // nameWithExt – file name including .xml extension.
+    // Returns true on success.
+    Q_INVOKABLE bool deletePlaylist(const QString &nameWithExt);
+
 private:
     QByteArray buildXspf(const QString &title,
                           const QVariantList &tracks) const;
