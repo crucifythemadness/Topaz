@@ -13,12 +13,10 @@ ApplicationWindow {
     title: qsTr("Topaz")
     color: Theme.surface
 
-    // Auto-fullscreen when the monitor is exactly one of the supported resolutions.
-    visibility: ((Screen.width === 1920 && Screen.height === 1080) ||
-                 (Screen.width === 1920 && Screen.height === 1200) ||
-                 (Screen.width === 2560 && Screen.height === 1440) ||
-                 (Screen.width === 3840 && Screen.height === 2160))
-                ? Window.FullScreen : Window.Windowed
+    // Startup fullscreen/windowed is a user preference (Setup > MISC), not
+    // resolution-driven -- see AudioJukeboxTopaz.md's "Supported Resolutions"
+    // section.
+    visibility: appConfig.startFullscreen ? Window.FullScreen : Window.Windowed
 
     // F11 toggles between fullscreen and windowed.
     Shortcut {

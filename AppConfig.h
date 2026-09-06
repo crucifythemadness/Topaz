@@ -95,6 +95,10 @@ class AppConfig : public QObject
     Q_PROPERTY(int playbackQueueWidth READ playbackQueueWidth NOTIFY panelWidthsChanged)
     Q_PROPERTY(int nowPlayingWidth    READ nowPlayingWidth    NOTIFY panelWidthsChanged)
 
+    // Startup fullscreen/windowed preference (Setup > MISC). Default false
+    // (Windowed) -- see Main.qml's `visibility` binding.
+    Q_PROPERTY(bool startFullscreen READ startFullscreen NOTIFY startFullscreenChanged)
+
     // ── Crossfade settings (PLAYBACK tab) ────────────────────────────────
     Q_PROPERTY(bool   crossfadeEnabled READ crossfadeEnabled NOTIFY crossfadeChanged)
     Q_PROPERTY(double crossfadeSeconds READ crossfadeSeconds NOTIFY crossfadeChanged)
@@ -188,6 +192,7 @@ public:
     int libraryTreeWidth()     const { return m_libraryTreeWidth;   }
     int playbackQueueWidth()   const { return m_playbackQueueWidth; }
     int nowPlayingWidth()      const { return m_nowPlayingWidth;    }
+    bool startFullscreen()     const { return m_startFullscreen;   }
 
     bool    crossfadeEnabled() const { return m_crossfadeEnabled; }
     double  crossfadeSeconds() const { return m_crossfadeSeconds; }
@@ -280,6 +285,8 @@ public:
                                 int libraryTreeWidth,
                                 int playbackQueueWidth,
                                 int nowPlayingWidth);
+
+    Q_INVOKABLE void setStartFullscreen(bool enabled);
 
     // ── Crossfade operations ─────────────────────────────────────────────
     Q_INVOKABLE void setCrossfadeEnabled(bool enabled);
@@ -384,6 +391,7 @@ signals:
     void foldersChanged();
     void windowGeometryChanged();
     void panelWidthsChanged();
+    void startFullscreenChanged();
     void crossfadeChanged();
     void audioBackendChanged();
     void autoPlayQueueHorizonChanged();
@@ -422,6 +430,7 @@ private:
     int m_libraryTreeWidth   = 286;
     int m_playbackQueueWidth = 374;
     int m_nowPlayingWidth    = 359;
+    bool m_startFullscreen   = false;
 
     bool    m_crossfadeEnabled = false;
     double  m_crossfadeSeconds = 5.0;

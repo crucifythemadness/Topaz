@@ -3492,6 +3492,64 @@ Popup {
                         }
                     }
 
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        height: 1
+                        color: Theme.ov20
+                    }
+
+                    // ── Start Topaz in Full Screen row ───────────────────
+                    // Overrides the old resolution-sniffing auto-fullscreen
+                    // behavior with an explicit user preference -- see
+                    // Main.qml's `visibility` binding. Takes effect on next
+                    // launch (F11 still toggles the running window live).
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 16
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Start Topaz in Full Screen"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        // Same 48x24/18x18 pill toggle as the Crossfade
+                        // on/off row (PLAYBACK tab).
+                        Rectangle {
+                            id: startFullscreenTrack
+                            readonly property bool on:
+                                root.appConfig !== null && root.appConfig.startFullscreen
+
+                            width: 48; height: 24
+                            radius: 12
+                            color: on ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: startFullscreenTrack.on ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setStartFullscreen(
+                                            !root.appConfig.startFullscreen)
+                                }
+                            }
+                        }
+                    }
+
                     Item { Layout.fillHeight: true }   // push content to top
                 }
 

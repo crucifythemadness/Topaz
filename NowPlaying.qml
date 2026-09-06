@@ -25,6 +25,60 @@ Rectangle {
     // couldn't be found -- Main.qml opens MissingTracksDialog. See UC-10.
     signal missingPlaylistTracks(var missingTracks)
 
+    // ── Scrolling text for an overflowing Title/Artist ───────────────────
+    // Ping-pong marquee: sits still if `text` already fits `width`,
+    // otherwise pauses, scrolls left until fully revealed, pauses, scrolls
+    // back, repeats. `running` is deliberately never a declarative binding
+    // (e.g. `running: overflows`) -- Animation.start()/stop() internally
+    // assign to `running`, and an imperative write permanently severs a
+    // declarative binding on the same property (the same footgun documented
+    // for QML checkboxes elsewhere in this app). So start/stop is managed
+    // entirely through restart(), called on every text or width change.
+    component MarqueeText: Item {
+        id: marqueeRoot
+        property alias text:  label.text
+        property alias font:  label.font
+        property alias color: label.color
+        height: label.implicitHeight
+        clip:   true
+
+        readonly property real scrollDistance: Math.max(0, label.implicitWidth - marqueeRoot.width)
+
+        Text { id: label }
+
+        SequentialAnimation {
+            id: scrollAnim
+            loops: Animation.Infinite
+            PauseAnimation { duration: 1200 }
+            NumberAnimation {
+                target: label; property: "x"
+                to: -marqueeRoot.scrollDistance
+                duration: Math.max(300, marqueeRoot.scrollDistance * 18)   // ~55 px/s
+            }
+            PauseAnimation { duration: 1000 }
+            NumberAnimation {
+                target: label; property: "x"
+                to: 0
+                duration: Math.max(300, marqueeRoot.scrollDistance * 18)
+            }
+        }
+
+        function restart() {
+            scrollAnim.stop()
+            label.x = 0
+            if (label.implicitWidth > marqueeRoot.width) scrollAnim.start()
+        }
+        // Covers panel/window resize AND a sibling (e.g. the genre text
+        // next to the artist) changing width and thereby this item's own
+        // anchored width -- no need to distinguish which caused it.
+        onWidthChanged: restart()
+        Component.onCompleted: restart()
+        Connections {
+            target: label
+            function onTextChanged() { marqueeRoot.restart() }
+        }
+    }
+
     // ── Load playlist file dialog ───────────────────────────────────────
     FileDialog {
         id: loadPlaylistDialog
@@ -133,7 +187,7 @@ Rectangle {
                 leftPadding: 16
                 rightPadding: 16
 
-                Text {
+                MarqueeText {
                     width: parent.width - 32
                     text: root.engine && root.engine.currentTitle.length > 0
                           ? root.engine.currentTitle.toUpperCase()
@@ -143,20 +197,50 @@ Rectangle {
                     font.weight:        Font.Black
                     font.letterSpacing: Theme.lsTight
                     color: Theme.fgSurface
-                    elide: Text.ElideRight
-                    bottomPadding: 4
                 }
+                Item { width: 1; height: 4 }   // replaces the old Text's bottomPadding: 4
 
-                Text {
-                    width: parent.width - 32
-                    text: root.engine ? root.engine.currentArtist.toUpperCase() : ""
-                    font.family:        Theme.fontFamilyBody
-                    font.pixelSize:     Theme.labelLg
-                    font.weight:        Font.DemiBold
-                    font.letterSpacing: Theme.lsWide
-                    color: Theme.secondary
-                    bottomPadding: 12
+                // Artist (left, scrolling) + genre (right, static), same
+                // line -- same "one thing left, one thing right" idiom as
+                // the format-badge/rating-stars row below.
+                Item {
+                    id: artistRow
+                    width:  parent.width - 32
+                    // NOT artistMarquee.implicitHeight -- MarqueeText is a
+                    // plain Item, which (unlike Text) never computes
+                    // implicitHeight automatically; only its own `height`
+                    // is bound to the label's content. Reading
+                    // implicitHeight here silently read the Item default
+                    // of 0, collapsing this whole row and letting the next
+                    // Column sibling paint over the artist/genre text.
+                    height: artistMarquee.height
+
+                    MarqueeText {
+                        id: artistMarquee
+                        anchors {
+                            left: parent.left; right: genreText.left
+                            rightMargin: 12; verticalCenter: parent.verticalCenter
+                        }
+                        text: root.engine ? root.engine.currentArtist.toUpperCase() : ""
+                        font.family:        Theme.fontFamilyBody
+                        font.pixelSize:     Theme.labelLg
+                        font.weight:        Font.DemiBold
+                        font.letterSpacing: Theme.lsWide
+                        color: Theme.secondary
+                    }
+
+                    Text {
+                        id: genreText
+                        anchors { right: parent.right; verticalCenter: artistMarquee.verticalCenter }
+                        text: root.engine ? root.engine.currentGenre.toUpperCase() : ""
+                        font.family:        Theme.fontFamilyBody
+                        font.pixelSize:     Theme.labelSm
+                        font.weight:        Font.DemiBold
+                        font.letterSpacing: Theme.lsWide
+                        color: Theme.fgSurface
+                    }
                 }
+                Item { width: 1; height: 12 }   // replaces the row's old height-based +12 gap
 
                 // Format/bitrate badge (left) + rating stars (right) — same row
                 Item {

@@ -352,6 +352,14 @@ void AppConfig::setAutoPlayFlickerNewTracks(bool enabled)
     save();
 }
 
+void AppConfig::setStartFullscreen(bool enabled)
+{
+    if (m_startFullscreen == enabled) return;
+    m_startFullscreen = enabled;
+    emit startFullscreenChanged();
+    save();
+}
+
 // ── Big cover pane geometry ─────────────────────────────────────────────────
 
 void AppConfig::saveBigCoverPaneGeometry(int x, int y, int width, int height,
@@ -644,6 +652,7 @@ void AppConfig::load()
     m_libraryTreeWidth   = root[QStringLiteral("libraryTreeWidth")].toInt(286);
     m_playbackQueueWidth = root[QStringLiteral("playbackQueueWidth")].toInt(374);
     m_nowPlayingWidth    = root[QStringLiteral("nowPlayingWidth")].toInt(359);
+    m_startFullscreen    = root[QStringLiteral("startFullscreen")].toBool(false);
 
     const QJsonObject crossfade = root[QStringLiteral("crossfade")].toObject();
     m_crossfadeEnabled = crossfade[QStringLiteral("enabled")].toBool(false);
@@ -767,6 +776,7 @@ void AppConfig::save()
     root[QStringLiteral("libraryTreeWidth")]   = m_libraryTreeWidth;
     root[QStringLiteral("playbackQueueWidth")] = m_playbackQueueWidth;
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;
+    root[QStringLiteral("startFullscreen")]    = m_startFullscreen;
 
     QJsonObject crossfade;
     crossfade[QStringLiteral("enabled")]      = m_crossfadeEnabled;

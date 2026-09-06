@@ -1006,6 +1006,7 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     ],
     "windowWidth":        1920,
     "windowHeight":       1080,
+    "startFullscreen":    false,
     "libraryTreeWidth":   286,
     "playbackQueueWidth": 374,
     "nowPlayingWidth":    359,
@@ -1234,31 +1235,35 @@ on lib.activeGenreNames (one-way bound into SearchData by Main.qml).
 
 ## Supported Resolutions → Adaptive Layout Strategy
 
-| Resolution | Startup behaviour | ColumnLayout behaviour |
-|-----------|-------------------|------------------------|
-| 1280 × 720 (minimum) | Windowed | All four panels visible; minimum enforced |
-| 1920 × 1080 | **Auto-fullscreen** (`Window.FullScreen`) | Design baseline — all four panels fully visible |
-| 1920 × 1200 | **Auto-fullscreen** (`Window.FullScreen`) | Extra vertical space absorbed by AlbumBrowser |
-| 2560 × 1440 | **Auto-fullscreen** (`Window.FullScreen`) | Font scale and spacing scale up proportionally (future) |
-| 3840 × 2160 | **Auto-fullscreen** (`Window.FullScreen`) | Font scale and spacing scale up proportionally (future) |
-| 4096 × 2160 | Windowed 1920 × 1080 | AlbumBrowser gains a 2-column card grid (future) |
+| Resolution | ColumnLayout behaviour |
+|-----------|------------------------|
+| 1280 × 720 (minimum) | All four panels visible; minimum enforced |
+| 1920 × 1080 | Design baseline — all four panels fully visible |
+| 1920 × 1200 | Extra vertical space absorbed by AlbumBrowser |
+| 2560 × 1440 | Font scale and spacing scale up proportionally (future) |
+| 3840 × 2160 | Font scale and spacing scale up proportionally (future) |
+| 4096 × 2160 | AlbumBrowser gains a 2-column card grid (future) |
+
+**Startup fullscreen/windowed is a user preference, not resolution-driven.**
+Earlier versions auto-triggered `Window.FullScreen` whenever the monitor was
+exactly 1920×1080, 1920×1200, 2560×1440, or 3840×2160. That resolution
+sniffing has been replaced by an explicit `AppConfig.startFullscreen` bool
+(Setup → MISC → "Start Topaz in Full Screen", default **off**/Windowed — see
+UC-24's MISC tab and the Config file format section below).
 
 **Startup logic** (`Main.qml`):
 ```qml
-visibility: ((Screen.width === 1920 && Screen.height === 1080) ||
-             (Screen.width === 1920 && Screen.height === 1200) ||
-             (Screen.width === 2560 && Screen.height === 1440) ||
-             (Screen.width === 3840 && Screen.height === 2160))
-            ? Window.FullScreen : Window.Windowed
+visibility: appConfig.startFullscreen ? Window.FullScreen : Window.Windowed
 width:  1920
 height: 1080
 minimumWidth:  1280
 minimumHeight:  720
 ```
 
-> Topaz starts fullscreen when the monitor is exactly 1920×1080, 1920×1200, 2560×1440, or 3840×2160.
-> On all other resolutions (including 4096×2160) it starts windowed at 1920×1080.
-> AlbumBrowser absorbs surplus width as the user resizes.
+> Topaz starts Windowed at 1920×1080 by default, on every resolution. The
+> user opts into fullscreen startup via Setup → MISC; the toggle takes
+> effect on the next launch. AlbumBrowser absorbs surplus width as the user
+> resizes, regardless of startup mode.
 
 ### Panel layout — `SplitView`
 
@@ -5423,4 +5428,31 @@ mouse genuinely leaves and re-enters the button afterward, real
 `onEntered`/`onExited` events resume firing normally (the grab is long
 over by then), so hover tracking self-corrects for every subsequent hover
 with no further intervention needed.
+
+---
+
+## UC-28 Start Topaz in Full Screen (MISC Tab)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Let the user choose whether Topaz launches Windowed or Fullscreen, replacing the previous resolution-sniffing auto-fullscreen. |
+| **Actor** | User |
+| **Trigger** | User flips the "Start Topaz in Full Screen" toggle in Setup → MISC; takes effect on the next launch. |
+
+A new `AppConfig.startFullscreen` bool (`Q_PROPERTY` + `Q_INVOKABLE
+setStartFullscreen(bool)`, same READ/NOTIFY + invokable-setter shape as
+every other `AppConfig` bool, e.g. `autoPlayFlickerNewTracks`), persisted
+as `Topaz.config`'s top-level `startFullscreen` key, default `false`. MISC
+tab gains a third toggle row (after Backup/Restore): label "Start Topaz in
+Full Screen" + the same 48×24/18×18 pill switch already used for the
+PLAYBACK tab's Crossfade on/off row (`SetupDialog.qml`).
+
+`Main.qml`'s `visibility` binding on the root `ApplicationWindow` — formerly
+`Screen.width`/`Screen.height` checks against four fixed resolutions (see
+the "Supported Resolutions" section above) — is now simply
+`appConfig.startFullscreen ? Window.FullScreen : Window.Windowed`. The
+existing F11 `Shortcut` and the `saveLayoutTimer`'s fullscreen guard (skip
+persisting `windowWidth`/`windowHeight` while fullscreen) are both
+unchanged by this — F11 still imperatively reassigns `root.visibility` at
+runtime regardless of how the window started.
 
