@@ -5176,3 +5176,230 @@ deleted name un-findable. Both functions already existed for exactly this
 `selectNeighborOf()` the same way after a playlist becomes the active
 queue and thus unselectable — see UC-22).
 
+## UC-27 Backup and Restore Topaz Environment (MISC Tab)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Zip Topaz's own config/playlists/ratings into a single portable `*.zip` for safekeeping, and later restore playlists/ratings from such a zip, with per-conflict user choices rather than silent overwrite or silent skip. |
+| **Actor** | User |
+| **Precondition** | Topaz is running. |
+| **Trigger** | User clicks BACKUP or RESTORE in Setup → MISC, then the matching action button inside `BackupDialog.qml`/`RestoreDialog.qml`. |
+
+Topaz had zero ZIP/archive capability before this, and Qt's public API has
+none either (`QZipReader`/`QZipWriter` are private, undocumented Qt
+internals used by Qt Creator/the Installer Framework). Rather than depend
+on that private API, this vendors **miniz** (public-domain, single-file C
+library, `third_party/miniz/miniz.h`/`.c`, v3.1.2) following the exact
+precedent `third_party/kissfft/` already set for the audio visualizer:
+committed amalgamated source, no `FetchContent`/`find_package`, its own
+`LICENSE` file, compiled straight into the `topaz` target.
+
+**miniz never touches a filesystem path directly** — only its `_mem` APIs
+are used (`mz_zip_writer_init_heap`/`add_mem`/`finalize_heap_archive` for
+building; `mz_zip_reader_init_mem`/`extract_to_mem` for reading), fed
+buffers `QFile` already read from/will write to disk. The `_file`-suffixed
+miniz functions go through plain narrow-char `fopen()` internally, not
+guaranteed Unicode-safe on Windows the way `QFile` already is everywhere
+else in this codebase — since every file this feature touches is small,
+there's no performance reason to accept that risk.
+
+**Deliberately synchronous — no worker `QThread`**, unlike
+`PlaylistExportController` (built for potentially multi-GB audio copies).
+Backup/restore only ever touches small text files (one JSON config, XML
+playlists tens of KB each, one ratings JSON realistically under a few MB
+even for a huge library) — the same scale of work `MilkdropCleanupController`
+already does synchronously. `BackupRestoreController` therefore has no
+progress properties or `*Finished` signals; every `Q_INVOKABLE` call *is*
+the entire operation, answered synchronously in the same statement.
+
+### The zip contract
+
+```
+<zip root>
+├── config/Topaz.config
+├── playlists/<name>.xml     (one entry per playlist, same fileName
+│                              PlaylistManager::listPlaylists() returns)
+└── ratings/Topaz.rating.json
+```
+A category with nothing on disk is silently skipped, not an error; if
+*every* checked category produces nothing, `runBackup()` fails with a
+"nothing to back up" error rather than writing an empty zip.
+
+### `BackupRestoreController` (`backuprestorecontroller.h`/`.cpp`)
+
+`QObject`/`QML_ELEMENT`, instantiated once in `Main.qml`, bound to
+`PlaylistManager` (for `playlistDirectory()`/`listPlaylists()`) — config/
+ratings paths are computed independently via
+`QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)`, the
+same way `RatingCache`'s own private path helper already does.
+
+- `runBackup(categories, destFolder, zipFileName)` — builds the zip
+  entirely in heap memory, then writes the finished buffer to disk with
+  `QFile`. Returns `{success, error, zipPath, fileCount}`.
+- `backupTargetExists(destFolder, zipFileName)` — lets `BackupDialog.qml`
+  show `MessageBox`'s existing `confirmMode` overwrite prompt before
+  calling `runBackup()`; normalizes the path identically so the two never
+  disagree about the final destination.
+- `inspectZip(zipFilePath)` — read-only, extracts nothing. Returns which
+  categories are present and, for playlists, which entries would conflict
+  with a same-named local file (`{playlists: [{fileName, conflict}, ...],
+  ratingsConflict, hasConfig, ...}` — `hasConfig` is informational only,
+  since RESTORE never offers to restore config: overwriting live app
+  settings while Topaz is running is riskier than useful).
+- `restorePlaylistEntry(zipFilePath, entryFileName, action)` — one
+  playlist, one decision (`"overwrite"|"skip"|"rename"`). Stateless: reopens
+  the zip per call rather than holding a live archive handle between calls
+  (re-parsing a small zip's central directory is sub-millisecond, far
+  simpler than a stateful "session" object surviving a dialog's lifetime).
+- `restoreRatings(zipFilePath, mode)` — the whole ratings file, one
+  decision (`"overwrite"|"skip"|"mergeNew"|"mergeAll"`). Merge logic goes
+  through `RatingCache::loadEntries()`/`saveEntries()` (existing bulk
+  entry API, atomic `.tmp`+rename write) — `mergeNew` appends backup
+  entries whose `ratingId` isn't already local, never touching existing
+  entries; `mergeAll` does the same but also overwrites a local entry's
+  `genre`/`rating` when its `ratingId` already exists. `RatingCache`
+  gained one small addition to support this without duplicating its JSON
+  parser: `loadEntries()` now reads the file then delegates to a new
+  `static QList<Entry> parseEntries(const QByteArray&)`, so
+  `restoreRatings()` can feed it zip-extracted bytes directly.
+
+### RENAME retry algorithm
+
+`" - Copy 0N"` inserted before the extension, `N` zero-padded to 2 digits,
+1 through 9 (`"Foo.xml"` → `"Foo - Copy 01.xml"` → … → `"Foo - Copy 09.xml"`).
+First candidate not already present in `playlistDirectory()` wins. If all
+9 are taken, the restore for that file is reported as failed — no further
+fallback (no `- Copy 10`, no timestamp suffix).
+
+### `ChoiceDialog.qml` — new generic N-button dialog
+
+`MessageBox.qml`'s `confirmMode` (added alongside UC-26's delete-playlist
+feature) maxes out at exactly 2 buttons by construction. Rather than bolt
+on a second special-cased branch, `ChoiceDialog.qml` is a small reusable
+component (`title`/`message`/`choices: []` rendered via a `Repeater`,
+`signal choiceMade(string)`) serving both of RESTORE's multi-choice
+prompts: PLAYLIST EXISTS (YES/NO/RENAME) and RATINGS EXIST (YES/NO/MERGE
+NEW/MERGE ALL) — one component, two differently-configured instances.
+
+### `RestoreDialog.qml` — sequential conflict state machine
+
+`inspectZip()` runs once up front; non-conflicting playlists and a
+non-conflicting ratings file are restored immediately with no dialog.
+Actual conflicts are collected into a plain JS array
+(`pendingPlaylistConflicts`) plus an index cursor
+(`conflictCursor`) and a `ratingsConflictPending` flag; an `advance()`
+function shows the next pending `ChoiceDialog` (one `ChoiceDialog`
+instance reused across every playlist conflict, its `fileName` property
+mutated between opens; a second instance for the single possible ratings
+conflict) or, once nothing remains, reveals the results screen — so
+exactly one decision dialog is ever open at a time, regardless of how many
+playlists conflict. Each `onChoiceMade` handler calls the matching
+`BackupRestoreController` method, appends an entry to a `resultsLog`
+array, and calls `advance()` again.
+
+**Real bug fixed after initial ship**: `ChoiceDialog`'s choice button used
+to emit `choiceMade` *then* call `root.close()`. QML signal handlers run
+synchronously with the emit, so for the playlist case, `onChoiceMade`'s
+call to `advance()` could reopen the very same `playlistConflictDialog`
+instance for the *next* conflict before the click handler's own trailing
+`root.close()` had run — that `close()` then executed immediately after
+the reopen, silently closing the dialog the user was meant to see next.
+Symptoms: only the first of several conflicting playlists ever actually
+got restored, and the results screen never appeared at all whenever 2+
+playlists conflicted (the state machine hung waiting for a click on a
+dialog that had already silently closed itself). Fixed by reordering to
+close first, emit second — a reopen triggered by the handler now always
+sticks, since nothing runs after the emit in the click handler anymore.
+
+**Restore summary feedback**: beyond the per-file `resultsLog` breakdown,
+the Done screen also shows one or two plain-language summary sentences
+(`summaryLines`, built by `buildSummaryLines()` right before
+`showResult` flips true) — "`N` Playlist File(s) have been copied to the
+Topaz Playlist Folder." (only if Restore Playlists was checked; `N` counts
+every successful copy, immediate or conflict-resolved YES/RENAME alike,
+never NO/skip or a failed rename) and one ratings line depending on
+whichever mode actually ran (only if Restore Ratings was checked and a
+ratings file was actually present in the archive): "Topaz Rating File has
+been overwritten." (`overwrite` — covers both a YES conflict resolution
+and the silent no-conflict copy, since both call the same
+`restoreRatings(..., "overwrite")`), "No updates regarding Topaz Rating
+File." (`skip`/NO), or "`N` Ratings have been updated in the Topaz Rating
+File." (`mergeNew`/`mergeAll`, `N` = `addedCount + updatedCount` — for
+`mergeNew` this is just the added count since it never updates existing
+entries, for `mergeAll` it's the combined total of newly-added and
+overwritten-in-place entries).
+
+### `BackupDialog.qml`/`RestoreDialog.qml` — checkbox rows
+
+Both dialogs' fixed (2-3 item, not dynamically scanned) category checkbox
+lists use a local `component CheckboxRow: Item { ... }` (the same "define
+a local reusable piece with `component Name: BaseType`" idiom
+`TagInfoWindow.qml`'s `MetadataField`/`SpecField` already established) —
+deliberately an `Item`, not a `RowLayout`, so its click-handling
+`MouseArea` (a direct child, unlike `MilkdropCleanupDialog.qml`'s
+checkbox, which nests its `MouseArea` inside the checkbox `Rectangle`
+itself) isn't itself layout-managed — Qt Quick Layouts only tolerate
+`anchors` on children that aren't direct layout children, and an `Item`
+wrapping a plain `Row` sidesteps that restriction entirely.
+
+**Real bug fixed after initial ship**: both dialogs originally mirrored
+each `CheckboxRow.checked` into a same-named root property via a
+declarative binding plus an `onCheckedChanged` write-back (e.g.
+`checked: root.restorePlaylistsChecked` / `onCheckedChanged:
+root.restorePlaylistsChecked = checked`). `CheckboxRow` itself toggles on
+click via the imperative `checkboxRow.checked = !checkboxRow.checked` —
+and assigning to a property that already has a declarative binding
+permanently severs that binding, standard QML behavior. The very first
+click on any checkbox therefore broke its sync with the mirrored root
+property for good; `onOpened`'s reset of the root property (e.g.
+`restorePlaylistsChecked = true`) kept "working" from the logic's point of
+view while the checkbox's on-screen state silently stopped following it —
+so a user could uncheck "Restore Playlists," reopen the dialog, and get a
+PLAYLIST EXISTS prompt anyway, despite the checkbox visibly still showing
+unchecked. Fixed by deleting the mirrored root properties entirely and
+reading each `CheckboxRow`'s own `checked` directly by `id` everywhere
+(`onOpened` resets, `anyChecked`/`canBackup`/`canRestore`, and the
+category-list building in `performBackup()`/`startRestore()`) — one source
+of truth per checkbox, no binding left to break.
+
+### Font sizes
+
+Per explicit user instruction, every string in these three new dialogs
+uses `ExportPlaylistDialog.qml`'s current (already-enlarged) sizes as the
+floor — `Theme.labelMd` for section labels, `Theme.monoLg` for path/
+filename/results text, `Theme.headlineSm` Bold for dialog titles. Action-
+button labels are the one deliberate exception, staying at `Theme.labelSm`
+(10px) to match every other button in the app (`EXPORT`/`CANCEL`/`CLOSE`/
+`BROWSE…` in `ExportPlaylistDialog.qml` itself included) — bumping only
+this feature's buttons would make them visibly inconsistent with
+everything else, and the "too small" feedback was clearly about body/
+caption text, not this app-wide button chrome.
+
+### MISC-tab button row: stuck hover color after closing a dialog
+
+**Real bug fixed after initial ship.** The CLEANUP/BACKUP/RESTORE row
+buttons color themselves via a `MouseArea`'s hover state. A modal `Popup`
+grabs all mouse input while open, so the button's `MouseArea` underneath
+never receives a hover-leave event for the click that opened it —
+`containsMouse` freezes `true`, and Qt Quick does not re-evaluate it once
+the grab releases, since nothing generated a new mouse-move event. The
+button kept rendering its hover background indefinitely after the dialog
+closed, until the mouse physically left and re-entered it.
+
+**First fix attempt failed**: toggling `MouseArea.hoverEnabled` off and
+back on in the dialog's `onClosed`, on the assumption this would force a
+re-hit-test. It doesn't — `hoverEnabled` only governs whether *future*
+hover events are processed, it never retroactively re-queries the cursor's
+current position, so `containsMouse` stayed stuck exactly as before.
+
+**Working fix**: stop reading `containsMouse` directly. Each button's
+`MouseArea` now tracks its own `property bool hovered: false` via
+`onEntered`/`onExited`, and the button's `color:` binding reads `hovered`
+instead of `containsMouse`. The corresponding dialog's `onClosed` then
+does a plain, unconditional `xHover.hovered = false` — a direct assignment
+that doesn't depend on Qt generating any event at all. Once the user's
+mouse genuinely leaves and re-enters the button afterward, real
+`onEntered`/`onExited` events resume firing normally (the grab is long
+over by then), so hover tracking self-corrects for every subsequent hover
+with no further intervention needed.
+

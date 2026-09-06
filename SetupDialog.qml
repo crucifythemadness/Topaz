@@ -40,6 +40,9 @@ Popup {
     // Main.qml -- backs the MISC tab's "Cleanup Incompatible Milkdrop
     // Presets" feature, see UC-25.
     property var cleanupController: null
+    // Main.qml -- backs the MISC tab's "Backup/Restore Topaz Environment"
+    // feature, see UC-27.
+    property var backupRestoreController: null
 
     // ── Internal selection state ─────────────────────────────────────────
     property int selectedGenreIndex:  -1
@@ -3214,6 +3217,9 @@ Popup {
                 MessageBox {
                     id: abandonedRatingsResultBox
                     title: "ABANDONED RATINGS"
+                    // Same fix as CLEANUP/BACKUP/RESTORE -- see
+                    // removeRatingsHover's own comment.
+                    onClosed: removeRatingsHover.hovered = false
                 }
 
                 Connections {
@@ -3260,7 +3266,7 @@ Popup {
                             visible: !root.libraryModel || !root.libraryModel.removingAbandonedRatings
                             width: 110; height: 32
                             radius: Theme.radiusSm
-                            color: removeRatingsHover.containsMouse
+                            color: removeRatingsHover.hovered
                                    ? Theme.primaryContainer : Theme.surfaceContainerHigh
 
                             Text {
@@ -3270,7 +3276,7 @@ Popup {
                                 font.pixelSize:     Theme.labelSm
                                 font.weight:        Font.Bold
                                 font.letterSpacing: Theme.lsWide
-                                color: removeRatingsHover.containsMouse
+                                color: removeRatingsHover.hovered
                                        ? Theme.fgPrimaryContainer : Theme.primary
                             }
                             MouseArea {
@@ -3278,6 +3284,20 @@ Popup {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
+                                // Tracked manually rather than reading
+                                // containsMouse directly -- the result
+                                // MessageBox opened after removal finishes
+                                // is a modal Popup whose input grab
+                                // suppresses hover events for this button
+                                // while it's open, freezing containsMouse
+                                // true with no way for Qt to self-correct
+                                // once it closes. See
+                                // milkdropCleanupHover's own comment for
+                                // the full explanation (same fix as
+                                // CLEANUP/BACKUP/RESTORE).
+                                property bool hovered: false
+                                onEntered: hovered = true
+                                onExited:  hovered = false
                                 onClicked: {
                                     if (root.libraryModel)
                                         root.libraryModel.removeAbandonedRatings()
@@ -3339,7 +3359,7 @@ Popup {
                         Rectangle {
                             width: 110; height: 32
                             radius: Theme.radiusSm
-                            color: milkdropCleanupHover.containsMouse
+                            color: milkdropCleanupHover.hovered
                                    ? Theme.errorContainer : Theme.surfaceContainerHigh
 
                             Text {
@@ -3356,7 +3376,118 @@ Popup {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
+                                // Tracked manually rather than reading
+                                // containsMouse directly -- a modal Popup's
+                                // input grab suppresses hover events for
+                                // whatever's underneath while it's open, so
+                                // containsMouse freezes true and Qt never
+                                // re-evaluates it once the grab releases
+                                // (toggling hoverEnabled doesn't force a
+                                // re-hit-test either -- confirmed that
+                                // attempt didn't work). Forcing this false
+                                // directly in the dialog's onClosed below
+                                // sidesteps needing Qt to generate any event.
+                                property bool hovered: false
+                                onEntered: hovered = true
+                                onExited:  hovered = false
                                 onClicked: milkdropCleanupDialog.open()
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        height: 1
+                        color: Theme.ov20
+                    }
+
+                    // ── Backup/Restore Topaz Environment rows ────────────
+                    // Zips/unzips config, playlists, and ratings via
+                    // BackupRestoreController -- see UC-27. Non-destructive
+                    // coloring (unlike CLEANUP above) -- neither opens with
+                    // data loss; RestoreDialog's own per-conflict prompts
+                    // are where anything destructive can actually happen.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 16
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Backup Topaz Environment"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Rectangle {
+                            width: 110; height: 32
+                            radius: Theme.radiusSm
+                            color: backupHover.hovered
+                                   ? Theme.primaryContainer : Theme.surfaceContainerHigh
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "BACKUP"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelSm
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWide
+                                color: Theme.primary
+                            }
+                            MouseArea {
+                                id: backupHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                property bool hovered: false
+                                onEntered: hovered = true
+                                onExited:  hovered = false
+                                onClicked: backupDialog.open()
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 16
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Restore Topaz Environment"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Rectangle {
+                            width: 110; height: 32
+                            radius: Theme.radiusSm
+                            color: restoreHover.hovered
+                                   ? Theme.primaryContainer : Theme.surfaceContainerHigh
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "RESTORE"
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelSm
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWide
+                                color: Theme.primary
+                            }
+                            MouseArea {
+                                id: restoreHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                property bool hovered: false
+                                onEntered: hovered = true
+                                onExited:  hovered = false
+                                onClicked: restoreDialog.open()
                             }
                         }
                     }
@@ -3368,6 +3499,22 @@ Popup {
                     id: milkdropCleanupDialog
                     appConfig:         root.appConfig
                     cleanupController: root.cleanupController
+                    // Direct, unconditional reset -- see milkdropCleanupHover's
+                    // own comment for why toggling hoverEnabled (the first
+                    // attempt at this fix) didn't actually work.
+                    onClosed: milkdropCleanupHover.hovered = false
+                }
+
+                BackupDialog {
+                    id: backupDialog
+                    controller: root.backupRestoreController
+                    onClosed: backupHover.hovered = false
+                }
+
+                RestoreDialog {
+                    id: restoreDialog
+                    controller: root.backupRestoreController
+                    onClosed: restoreHover.hovered = false
                 }
             } // end MISC panel
 

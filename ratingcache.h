@@ -50,4 +50,10 @@ public:
 
     static QList<Entry> loadEntries();
     static bool saveEntries(const QList<Entry> &entries);
+
+    // Parses the same JSON schema loadEntries() reads from disk, but from
+    // raw bytes instead -- e.g. a ratings file extracted in-memory from a
+    // backup zip (see UC-27's BackupRestoreController::restoreRatings()).
+    // Empty list on any parse error, same as loadEntries().
+    static QList<Entry> parseEntries(const QByteArray &json);
 };

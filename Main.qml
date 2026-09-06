@@ -310,6 +310,11 @@ ApplicationWindow {
     // so the onClosing veto above has direct visibility into `cleaning`.
     MilkdropCleanupController { id: milkdropCleanupController; appConfig: appConfig }
 
+    // Backup/Restore Topaz Environment (MISC tab) — see UC-27. Purely
+    // synchronous (small config/playlist/rating files only) — no worker
+    // thread, unlike PlaylistExportController.
+    BackupRestoreController { id: backupRestoreController; playlistManager: playlistManager }
+
     // Audio visualizer analysis pipeline — see UC-19 in the architecture doc.
     // Passed as `visualizer` property to AudioVisualizerWindow.
     AudioVisualizerController {
@@ -335,6 +340,7 @@ ApplicationWindow {
         libraryModel:      libraryModel
         playbackEngine:    engine
         cleanupController: milkdropCleanupController
+        backupRestoreController: backupRestoreController
     }
 
     // About Topaz dialog — opened by TopBar's rightmost (info) icon

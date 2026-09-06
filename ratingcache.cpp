@@ -25,15 +25,19 @@ QString RatingCache::cacheFilePath()
 
 QList<RatingCache::Entry> RatingCache::loadEntries()
 {
+    QFile f(cacheFilePath());
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    const QByteArray json = f.readAll();
+    f.close();
+    return parseEntries(json);
+}
+
+QList<RatingCache::Entry> RatingCache::parseEntries(const QByteArray &json)
+{
     QList<Entry> entries;
 
-    QFile f(cacheFilePath());
-    if (!f.open(QIODevice::ReadOnly)) return entries;
-
     QJsonParseError err;
-    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
-    f.close();
-
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
     if (err.error != QJsonParseError::NoError || !doc.isObject()) return entries;
 
     const QJsonObject root = doc.object();

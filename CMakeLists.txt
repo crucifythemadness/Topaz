@@ -103,6 +103,8 @@ qt_add_executable(topaz
     playlistexportworker.cpp
     playlistexportcontroller.h
     playlistexportcontroller.cpp
+    backuprestorecontroller.h
+    backuprestorecontroller.cpp
     # Vendored third-party (BSD-3-Clause) — see third_party/kissfft/LICENSES/
     # BSD-3-Clause. Unmodified upstream sources; do not edit directly.
     third_party/kissfft/kiss_fft.h
@@ -111,6 +113,13 @@ qt_add_executable(topaz
     third_party/kissfft/_kiss_fft_guts.h
     third_party/kissfft/kiss_fftr.h
     third_party/kissfft/kiss_fftr.c
+    # Vendored third-party (Public Domain / MIT dual-license) — see
+    # third_party/miniz/LICENSE. Unmodified upstream sources; do not edit
+    # directly. Amalgamated single-file distribution (v3.1.2) from
+    # github.com/richgel999/miniz, used by BackupRestoreController (UC-27)
+    # for the BACKUP/RESTORE feature's *.zip files.
+    third_party/miniz/miniz.h
+    third_party/miniz/miniz.c
     app.rc
 )
 
@@ -152,6 +161,9 @@ qt_add_qml_module(topaz
         MilkdropWindow.qml
         MilkdropCleanupDialog.qml
         ExportPlaylistDialog.qml
+        ChoiceDialog.qml
+        BackupDialog.qml
+        RestoreDialog.qml
     RESOURCES
         app.ico
         InfoAbout.png
