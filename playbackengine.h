@@ -311,10 +311,14 @@ private:
     QString                   m_activePlaylistName;
     bool                      m_playlistLocked    = false;
     // True from the moment advanceToNext() finds no next track (natural
-    // end-of-queue) until the next loadTrack() call of any kind. Lets
-    // addTrack()/addTracks() tell "queue finished naturally" apart from
-    // "current track is merely paused" -- both otherwise look identical
-    // (m_currentIndex unchanged, isPlaying() false). See UC-16/UC-06.
+    // end-of-queue) until the next loadTrack() call of any kind, or a
+    // manual seek() -- scrubbing back into the finished track to
+    // re-listen to part of it is a deliberate re-listen, not "I'm done
+    // with this queue," so it must also clear this flag (see seek()'s own
+    // comment for the bug this fixed). Lets addTrack()/addTracks() tell
+    // "queue finished naturally" apart from "current track is merely
+    // paused" -- both otherwise look identical (m_currentIndex unchanged,
+    // isPlaying() false). See UC-16/UC-06.
     bool                      m_queueFinished      = false;
     // True only while the current track is paused via togglePlay()'s
     // explicit pause branch -- never for any other "not playing" state.

@@ -716,6 +716,13 @@ void PlaybackEngine::previous()
 void PlaybackEngine::seek(qint64 ms)
 {
     if (m_currentIndex < 0 || !m_deck) return;
+    // A manual seek -- typically scrubbing back into the last track to
+    // re-listen to part of it after it already played through -- is a
+    // deliberate re-listen, not "I'm done with this queue": clear
+    // m_queueFinished so a track added right after this behaves like any
+    // other paused-mid-track add (just appended), instead of auto-playing
+    // and hijacking what the user just seeked back to hear. See UC-16/UC-06.
+    m_queueFinished = false;
     // A manual seek abandons any automatic crossfade in progress — reconciling
     // a seek on the fading-out deck with the independently-playing standby
     // deck isn't worth the complexity for what is a rare, few-second window.

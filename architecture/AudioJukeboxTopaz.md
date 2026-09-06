@@ -2798,14 +2798,35 @@ point every track-loading path (`playAt`, `next`, `previous`,
 `togglePlay`'s from-empty branch, `advanceToNext`'s has-next-track branch,
 and `addTrack`/`addTracks`' own auto-play branches) already funnels
 through — so it's always accurate regardless of *how* a track next gets
-loaded. This applies uniformly to AUTO PLAY additions and manual ones
-(`AlbumCard`'s double-click, drag-and-drop into `PlaybackQueue`) alike,
-since both call through `addTrack()`/`addTracks()`. `PlaybackEngine` also
-exposes a plain public `queueFinished()` getter (not `Q_PROPERTY`/
-`Q_INVOKABLE` — C++-only) so `AutoPlayController::start()` can apply the
-exact same "empty or finished" test when deciding whether *starting* a
-session should also play immediately (Normal Flow step 4 above), not just
-`addTrack()`/`addTracks()` themselves.
+loaded — **or by `seek()`** (see below). This applies uniformly to AUTO
+PLAY additions and manual ones (`AlbumCard`'s double-click, drag-and-drop
+into `PlaybackQueue`) alike, since both call through `addTrack()`/
+`addTracks()`. `PlaybackEngine` also exposes a plain public
+`queueFinished()` getter (not `Q_PROPERTY`/`Q_INVOKABLE` — C++-only) so
+`AutoPlayController::start()` can apply the exact same "empty or finished"
+test when deciding whether *starting* a session should also play
+immediately (Normal Flow step 4 above), not just `addTrack()`/
+`addTracks()` themselves.
+
+**Real bug fixed after initial ship — a third state the original design
+missed**: a manual seek doesn't fit either "queue naturally finished" or
+"merely paused." A user who lets a track play to its natural end, then
+drags the NowPlaying position slider back ~30s to re-listen to the
+ending, is in a state `seek()` used to leave completely alone —
+`m_queueFinished` stayed `true` (only `loadTrack()`/`clearQueue()` cleared
+it), so adding a track right after that seek still satisfied
+`addTrack()`/`addTracks()`'s auto-play condition and immediately hijacked
+playback out from under the track the user was actively re-listening to.
+Fixed by having `seek()` also clear `m_queueFinished` — a manual seek is a
+deliberate re-listen, not "I'm done with this queue." This has a
+deliberate, consistent knock-on effect on `AutoPlayController::start()`
+(reading the same flag): pressing AUTO PLAY right after seeking back into
+a finished track no longer auto-plays immediately either, falling back to
+the normal poll-tick top-up like the "something's actually playing or
+paused" case already does — the same underlying signal ("is the user
+actively re-listening to something") applied consistently everywhere
+`m_queueFinished` gates a decision, not a one-off patched around the
+single reported call site.
 
 ### Alternate: starvation
 
