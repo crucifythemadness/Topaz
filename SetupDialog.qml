@@ -61,6 +61,44 @@ Popup {
         function onFoldersChanged() { root._foldersDirty = true }
     }
 
+    // Small "turning circle" busy indicator -- a dot orbiting a faint ring.
+    // Stands in for the MILKDROP tab's PRESETS count while
+    // scanPresetFolderCountsAsync() is still counting a folder in the
+    // background (see refreshMilkdropFolderRows() below). No existing
+    // spinner/BusyIndicator anywhere else in this codebase to reuse, and
+    // every other progress affordance here is hand-rolled with Theme.*
+    // rather than a default-styled QQC2 control.
+    component BusySpinner: Item {
+        implicitWidth: 16
+        implicitHeight: 16
+
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: "transparent"
+            border.width: 2
+            border.color: Theme.outlineVariant
+        }
+
+        Item {
+            anchors.fill: parent
+
+            RotationAnimation on rotation {
+                loops: Animation.Infinite
+                from: 0; to: 360
+                duration: 900
+            }
+
+            Rectangle {
+                width: 4; height: 4
+                radius: 2
+                color: Theme.secondary
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 0
+            }
+        }
+    }
+
     // ── Geometry ─────────────────────────────────────────────────────────
     // Deliberately NOT anchors.centerIn: Popup's anchors.centerIn is backed
     // by QQuickPopupAnchors, which keeps reasserting x/y from C++ (not a
@@ -2491,6 +2529,25 @@ Popup {
                     // why this isn't a live binding to appConfig.milkdropPresetFolders.
                     ListModel { id: milkdropFolderListModel }
 
+                    // Patches the matching row in place as each folder's
+                    // background scan finishes -- see refreshMilkdropFolderRows()
+                    // and MilkdropCleanupController::scanPresetFolderCountsAsync().
+                    // Matched by path rather than index so a result that
+                    // arrives after the folder list was rebuilt (ADD/DELETE
+                    // mid-scan) just no-ops instead of patching the wrong row.
+                    Connections {
+                        target: root.cleanupController
+                        function onPresetFolderCountReady(path, presetCount) {
+                            for (let i = 0; i < milkdropFolderListModel.count; i++) {
+                                if (milkdropFolderListModel.get(i).path === path) {
+                                    milkdropFolderListModel.setProperty(i, "presetCount", presetCount)
+                                    milkdropFolderListModel.setProperty(i, "scanning", false)
+                                    break
+                                }
+                            }
+                        }
+                    }
+
                     // Column header
                     Rectangle {
                         Layout.fillWidth: true
@@ -2591,13 +2648,24 @@ Popup {
                                             verticalAlignment: Text.AlignVCenter
                                         }
 
-                                        Text {
+                                        Item {
                                             Layout.preferredWidth: 90
-                                            text: model.exists ? model.presetCount : "not found"
-                                            font.family:    Theme.fontFamilyMono
-                                            font.pixelSize: Theme.monoLg
-                                            color: model.exists ? Theme.fgSurfaceVariant : Theme.error
-                                            horizontalAlignment: Text.AlignHCenter
+                                            height: parent.height
+
+                                            BusySpinner {
+                                                anchors.centerIn: parent
+                                                visible: model.scanning
+                                            }
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                visible: !model.scanning
+                                                text: model.exists ? model.presetCount : "not found"
+                                                font.family:    Theme.fontFamilyMono
+                                                font.pixelSize: Theme.monoLg
+                                                color: model.exists ? Theme.fgSurfaceVariant : Theme.error
+                                                horizontalAlignment: Text.AlignHCenter
+                                            }
                                         }
 
                                         // Active checkbox cell
@@ -3550,6 +3618,64 @@ Popup {
                         }
                     }
 
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        height: 1
+                        color: Theme.ov20
+                    }
+
+                    // ── Delete the Rating for the Track currently playing row
+                    // Opt-in for NowPlaying's delete-current-rating trash-bin
+                    // button (next to the rating stars) -- hidden entirely in
+                    // NowPlaying, not just disabled, while this is off. See
+                    // UC-29.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 16
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Delete the Rating for the Track currently playing"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        // Same 48x24/18x18 pill toggle as the other MISC/
+                        // PLAYBACK toggles.
+                        Rectangle {
+                            id: deleteRatingTrack
+                            readonly property bool on:
+                                root.appConfig !== null && root.appConfig.deleteCurrentRatingEnabled
+
+                            width: 48; height: 24
+                            radius: 12
+                            color: on ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: deleteRatingTrack.on ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setDeleteCurrentRatingEnabled(
+                                            !root.appConfig.deleteCurrentRatingEnabled)
+                                }
+                            }
+                        }
+                    }
+
                     Item { Layout.fillHeight: true }   // push content to top
                 }
 
@@ -3609,30 +3735,40 @@ Popup {
     }
 
     // Rebuilds milkdropFolderListModel by zipping AppConfig's persisted
-    // path/active per folder with MilkdropCleanupController's on-demand
-    // preset counts (same underlying list, same order, no filtering in
-    // between -- index-aligned zip is safe). Deliberately NOT a live
-    // binding: presetFolders() does a synchronous recursive directory walk,
-    // and appConfig.milkdropChanged fires for unrelated milkdrop settings
-    // too (shuffle, duration, etc.), so binding directly would re-scan far
-    // more often than needed. Call after anything that changes the folder
-    // *set* (add/remove) or when the tab becomes visible; ACTIVE toggling
-    // patches the model in place instead (see the ACTIVE cell below) to
-    // avoid re-scanning on every click.
+    // path/active per folder with MilkdropCleanupController's synchronous,
+    // stat-only existence check (same underlying list, same order,
+    // index-aligned zip is safe). Deliberately NOT a live binding:
+    // appConfig.milkdropChanged fires for unrelated milkdrop settings too
+    // (shuffle, duration, etc.), so binding directly would rebuild far more
+    // often than needed. Call after anything that changes the folder *set*
+    // (add/remove) or when the tab becomes visible; ACTIVE toggling patches
+    // the model in place instead (see the ACTIVE cell below) to avoid
+    // rebuilding on every click.
+    //
+    // Preset counts are NOT fetched here -- every existing folder starts at
+    // scanning:true (see the PRESETS cell's BusySpinner above) and
+    // scanPresetFolderCountsAsync() kicks off one background task per
+    // folder; onPresetFolderCountReady (Connections above) patches each
+    // row in place as its count arrives. This is what lets the tab render
+    // immediately instead of blocking on a synchronous recursive directory
+    // walk (formerly presetFolders()) for every configured folder.
     function refreshMilkdropFolderRows() {
         milkdropFolderListModel.clear()
         if (!root.appConfig) return
-        const folders = root.appConfig.milkdropPresetFolders
-        const counts  = root.cleanupController ? root.cleanupController.presetFolders() : []
+        const folders   = root.appConfig.milkdropPresetFolders
+        const existence = root.cleanupController
+                           ? root.cleanupController.presetFolderExistence() : []
         for (let i = 0; i < folders.length; i++) {
             const f = folders[i]
-            const c = counts[i] || {}
+            const exists = (existence[i] && existence[i].exists) !== false
             milkdropFolderListModel.append({
                 path:        f.path,
                 active:      f.active !== false,
-                presetCount: c.presetCount !== undefined ? c.presetCount : 0,
-                exists:      c.exists !== false
+                presetCount: 0,
+                exists:      exists,
+                scanning:    exists   // "not found" rows never spin
             })
         }
+        if (root.cleanupController) root.cleanupController.scanPresetFolderCountsAsync()
     }
 }

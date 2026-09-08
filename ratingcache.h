@@ -41,6 +41,12 @@ public:
     // ratingId is null or rating is outside 1-10.
     static bool setRating(const QString &genre, const QUuid &ratingId, int rating);
 
+    // Removes a single track's rating (if present) and persists immediately,
+    // preserving every other track's existing rating. Symmetric to
+    // setRating()'s upsert. Returns false if ratingId is null or no matching
+    // entry existed.
+    static bool removeRating(const QUuid &ratingId);
+
     // Full per-entry view (genre + ratingId + rating), unlike load()'s
     // ratingId->rating hash which discards genre. Used by
     // LibraryModel::removeAbandonedRatings() (see UC-24) to check track

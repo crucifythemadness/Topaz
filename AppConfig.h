@@ -99,6 +99,11 @@ class AppConfig : public QObject
     // (Windowed) -- see Main.qml's `visibility` binding.
     Q_PROPERTY(bool startFullscreen READ startFullscreen NOTIFY startFullscreenChanged)
 
+    // Opt-in for NowPlaying's delete-current-rating trash-bin button
+    // (Setup > MISC). Default false -- the button doesn't render in
+    // NowPlaying at all until this is turned on. See UC-29.
+    Q_PROPERTY(bool deleteCurrentRatingEnabled READ deleteCurrentRatingEnabled NOTIFY deleteCurrentRatingEnabledChanged)
+
     // ── Crossfade settings (PLAYBACK tab) ────────────────────────────────
     Q_PROPERTY(bool   crossfadeEnabled READ crossfadeEnabled NOTIFY crossfadeChanged)
     Q_PROPERTY(double crossfadeSeconds READ crossfadeSeconds NOTIFY crossfadeChanged)
@@ -193,6 +198,7 @@ public:
     int playbackQueueWidth()   const { return m_playbackQueueWidth; }
     int nowPlayingWidth()      const { return m_nowPlayingWidth;    }
     bool startFullscreen()     const { return m_startFullscreen;   }
+    bool deleteCurrentRatingEnabled() const { return m_deleteCurrentRatingEnabled; }
 
     bool    crossfadeEnabled() const { return m_crossfadeEnabled; }
     double  crossfadeSeconds() const { return m_crossfadeSeconds; }
@@ -287,6 +293,7 @@ public:
                                 int nowPlayingWidth);
 
     Q_INVOKABLE void setStartFullscreen(bool enabled);
+    Q_INVOKABLE void setDeleteCurrentRatingEnabled(bool enabled);
 
     // ── Crossfade operations ─────────────────────────────────────────────
     Q_INVOKABLE void setCrossfadeEnabled(bool enabled);
@@ -392,6 +399,7 @@ signals:
     void windowGeometryChanged();
     void panelWidthsChanged();
     void startFullscreenChanged();
+    void deleteCurrentRatingEnabledChanged();
     void crossfadeChanged();
     void audioBackendChanged();
     void autoPlayQueueHorizonChanged();
@@ -431,6 +439,7 @@ private:
     int m_playbackQueueWidth = 374;
     int m_nowPlayingWidth    = 359;
     bool m_startFullscreen   = false;
+    bool m_deleteCurrentRatingEnabled = false;
 
     bool    m_crossfadeEnabled = false;
     double  m_crossfadeSeconds = 5.0;

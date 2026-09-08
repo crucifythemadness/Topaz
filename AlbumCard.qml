@@ -13,6 +13,9 @@
 //                          filePath, artist, albumArtist, album, coverSource }>
 //   coverSource   - url    (empty = show placeholder)
 //   engine        - PlaybackEngine (optional; used for double-click add to queue)
+//   queueInteractionEnabled - bool (default true; false disables drag-to-queue
+//                             and double-click-to-queue, e.g. PlaylistViewer
+//                             previewing the playlist active in the queue)
 //
 // Interaction:
 //   Drag & drop  - press and drag a track row to PlaybackQueue
@@ -36,6 +39,11 @@ Rectangle {
     // Bound from AlbumBrowser; gates double-click add while an AUTO PLAY
     // session forbids manual modification.
     property var    autoPlay:    null
+    // Disables drag-to-queue and double-click-to-queue when false (e.g.
+    // PlaylistViewer previewing the playlist currently active in the queue --
+    // re-queuing from it while it's already the live queue doesn't make
+    // sense). Default true preserves every other call site's behavior.
+    property bool   queueInteractionEnabled: true
 
     implicitHeight: cardRow.implicitHeight + 40
     color: cardHoverHandler.hovered ? Theme.surfaceContainer : Theme.surfaceContainerLow
@@ -206,6 +214,7 @@ Rectangle {
                             id: trackMA
                             anchors.fill: parent
                             anchors.rightMargin: 8   // leave the scrollbar thumb's column free (see UC-12)
+                            enabled:      root.queueInteractionEnabled
                             hoverEnabled: true
                             cursorShape:  dragging ? Qt.DragCopyCursor
                                                    : Qt.PointingHandCursor

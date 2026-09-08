@@ -6,6 +6,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
+#include <QtConcurrent>
 
 MilkdropCleanupController::MilkdropCleanupController(QObject *parent)
     : QObject(parent)
@@ -55,6 +56,39 @@ QVariantList MilkdropCleanupController::presetFolders() const
         result.append(entry);
     }
     return result;
+}
+
+QVariantList MilkdropCleanupController::presetFolderExistence() const
+{
+    QVariantList result;
+    if (!m_appConfig) return result;
+
+    for (const QVariant &v : m_appConfig->milkdropPresetFolders()) {
+        const QString path = v.toMap().value(QStringLiteral("path")).toString();
+
+        QVariantMap entry;
+        entry[QStringLiteral("path")]   = path;
+        entry[QStringLiteral("exists")] = QDir(path).exists();
+        result.append(entry);
+    }
+    return result;
+}
+
+void MilkdropCleanupController::scanPresetFolderCountsAsync()
+{
+    if (!m_appConfig) return;
+
+    for (const QVariant &v : m_appConfig->milkdropPresetFolders()) {
+        const QString path = v.toMap().value(QStringLiteral("path")).toString();
+        if (!QDir(path).exists()) continue;   // "not found" rows need no count
+
+        QFuture<int> future = QtConcurrent::run([this, path] {
+            return static_cast<int>(discoverPresetFiles(path).size());
+        });
+        future.then(this, [this, path](int count) {
+            emit presetFolderCountReady(path, count);
+        });
+    }
 }
 
 void MilkdropCleanupController::startCleanup(const QStringList &folderPaths)

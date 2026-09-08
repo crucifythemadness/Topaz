@@ -174,6 +174,11 @@ public:
     // track is loaded or the value is out of range.
     Q_INVOKABLE void setCurrentRating(int rating);
 
+    // Permanently removes the currently playing track's rating (if any) and
+    // resets currentRating to 0. No-op if there's no current track or it has
+    // no rating to delete.
+    Q_INVOKABLE void deleteCurrentRating();
+
     // ── Queue management (callable from QML) ──────────────────────────────
     // autoPlayAdded is set only by AutoPlayController's 3 add call sites
     // (start()/maybeFillHorizon()/onQueueExhausted()) -- see UC-16. Default

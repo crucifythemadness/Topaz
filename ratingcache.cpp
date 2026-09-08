@@ -121,3 +121,15 @@ bool RatingCache::setRating(const QString &genre, const QUuid &ratingId, int rat
 
     return saveEntries(entries);
 }
+
+bool RatingCache::removeRating(const QUuid &ratingId)
+{
+    if (ratingId.isNull()) return false;
+
+    QList<Entry> entries = loadEntries();
+    const qsizetype before = entries.size();
+    entries.removeIf([&ratingId](const Entry &e) { return e.ratingId == ratingId; });
+    if (entries.size() == before) return false;   // nothing to remove
+
+    return saveEntries(entries);
+}

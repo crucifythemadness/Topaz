@@ -498,7 +498,11 @@ ApplicationWindow {
                             missingTracksDialog.open()
                         })
                         item.exportPlaylistRequested.connect(function() {
-                            exportPlaylistDialog.tracks = playlistsData.selectedRawTracks
+                            // item.currentRawTracks, not
+                            // playlistsData.selectedRawTracks -- the latter
+                            // is stale while previewing the playlist active
+                            // in the queue (see PlaylistViewer.qml).
+                            exportPlaylistDialog.tracks = item.currentRawTracks
                             exportPlaylistDialog.open()
                         })
                     } else {
@@ -524,6 +528,7 @@ ApplicationWindow {
                 engine:          engine
                 playlistManager: playlistManager
                 autoPlay:        autoPlay
+                appConfig:       appConfig
                 onWidthChanged: saveLayoutTimer.restart()
                 onNewPlaylistRequested: newPlaylistDialog.open()
                 onExportPlaylistRequested: {

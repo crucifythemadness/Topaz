@@ -360,6 +360,14 @@ void AppConfig::setStartFullscreen(bool enabled)
     save();
 }
 
+void AppConfig::setDeleteCurrentRatingEnabled(bool enabled)
+{
+    if (m_deleteCurrentRatingEnabled == enabled) return;
+    m_deleteCurrentRatingEnabled = enabled;
+    emit deleteCurrentRatingEnabledChanged();
+    save();
+}
+
 // ── Big cover pane geometry ─────────────────────────────────────────────────
 
 void AppConfig::saveBigCoverPaneGeometry(int x, int y, int width, int height,
@@ -653,6 +661,8 @@ void AppConfig::load()
     m_playbackQueueWidth = root[QStringLiteral("playbackQueueWidth")].toInt(374);
     m_nowPlayingWidth    = root[QStringLiteral("nowPlayingWidth")].toInt(359);
     m_startFullscreen    = root[QStringLiteral("startFullscreen")].toBool(false);
+    m_deleteCurrentRatingEnabled =
+        root[QStringLiteral("deleteCurrentRatingEnabled")].toBool(false);
 
     const QJsonObject crossfade = root[QStringLiteral("crossfade")].toObject();
     m_crossfadeEnabled = crossfade[QStringLiteral("enabled")].toBool(false);
@@ -777,6 +787,7 @@ void AppConfig::save()
     root[QStringLiteral("playbackQueueWidth")] = m_playbackQueueWidth;
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;
     root[QStringLiteral("startFullscreen")]    = m_startFullscreen;
+    root[QStringLiteral("deleteCurrentRatingEnabled")] = m_deleteCurrentRatingEnabled;
 
     QJsonObject crossfade;
     crossfade[QStringLiteral("enabled")]      = m_crossfadeEnabled;

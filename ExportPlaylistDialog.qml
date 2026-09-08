@@ -90,6 +90,25 @@ Popup {
     readonly property int storageCaptionRowHeight:
         Math.ceil(Math.max(tracksCaptionMetrics.height, storageWarningMetrics.height))
 
+    // ── Total playtime (for the "N tracks | <playtime>" caption) ──────────
+    readonly property int totalTracksDurationMs:
+        root.tracks.reduce(function (sum, t) { return sum + (t.durationMs || 0) }, 0)
+
+    // M:SS under 100 total minutes, H:MM:SS from 100 minutes up -- lets a
+    // playlist's fit against an 80-minute Minidisc (or anything under
+    // ~100 min) stay readable as plain minutes rather than always showing
+    // an hours digit.
+    function formatTotalDuration(ms) {
+        const totalSecs = Math.floor(ms / 1000)
+        const totalMins = Math.floor(totalSecs / 60)
+        const secs = totalSecs % 60
+        if (totalMins < 100)
+            return totalMins + ":" + String(secs).padStart(2, "0")
+        const hours = Math.floor(totalMins / 60)
+        const mins  = totalMins % 60
+        return hours + ":" + String(mins).padStart(2, "0") + ":" + String(secs).padStart(2, "0")
+    }
+
     // Deliberately NOT anchors.centerIn: Popup's anchors.centerIn is backed
     // by QQuickPopupAnchors, which keeps reasserting x/y from C++ (not a
     // plain QML binding) — it fights the header drag MouseArea below and
@@ -415,7 +434,8 @@ Popup {
                                     }
                                     Text {
                                         Layout.preferredHeight: root.storageCaptionRowHeight
-                                        text: root.tracks.length + qsTr(" tracks")
+                                        text: root.tracks.length + qsTr(" tracks | ")
+                                              + root.formatTotalDuration(root.totalTracksDurationMs)
                                         font.family:    Theme.fontFamilyMono
                                         font.pixelSize: Theme.monoLg
                                         color: Theme.fgSurfaceVariant

@@ -505,7 +505,14 @@ void PlaybackEngine::moveTrack(int from, int to)
 
 void PlaybackEngine::clearQueue()
 {
-    if (m_queue.isEmpty()) return;
+    // Not just m_queue.isEmpty(): removeAt() (per-track queue removal) can
+    // empty the queue one track at a time without ever touching
+    // m_activePlaylistName, leaving a playlist "active" with zero tracks.
+    // Bailing out on queue-emptiness alone would then make this a
+    // permanent no-op for that state -- REMOVE (NowPlaying) would never
+    // clear the stuck active playlist name.
+    if (m_queue.isEmpty() && m_activePlaylistName.isEmpty() && !m_playlistLocked)
+        return;
     cancelCrossfade();
     m_deck->stop();
     m_currentIndex = -1;
@@ -622,6 +629,18 @@ void PlaybackEngine::setCurrentRating(int rating)
     t.rating = rating;
 
     RatingCache::setRating(t.genre, t.ratingId, t.rating);
+    emit currentRatingChanged();
+}
+
+void PlaybackEngine::deleteCurrentRating()
+{
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return;
+
+    TrackInfo &t = m_queue[m_currentIndex];
+    if (t.rating <= 0) return;
+
+    RatingCache::removeRating(t.ratingId);
+    t.rating = 0;
     emit currentRatingChanged();
 }
 

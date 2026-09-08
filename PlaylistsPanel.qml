@@ -117,9 +117,11 @@ Rectangle {
 
             readonly property bool isSelected: root.playlistsData
                                                 && root.playlistsData.selectedFileName === modelData.fileName
-            // The playlist currently loaded into the queue can't be opened
-            // for viewing here -- reselecting it would just clear and
-            // reload the exact same queue. See UC-22.
+            // The playlist currently loaded into the queue can still be
+            // selected here for a read-only preview -- only LOAD, the
+            // trash-bin, and drag/double-click-to-queue are disabled for
+            // it (PlaylistViewer.isSelectedActiveInQueue), not selection
+            // itself. See UC-22.
             readonly property bool isActiveInQueue: root.playlistsData && root.playlistsData.engine
                                                       && root.playlistsData.engine.activePlaylistName === modelData.fileName
 
@@ -160,7 +162,6 @@ Rectangle {
 
             MouseArea {
                 anchors.fill: parent
-                enabled:      !rowItem.isActiveInQueue
                 hoverEnabled: true
                 cursorShape:  Qt.PointingHandCursor
                 onClicked: if (root.playlistsData) root.playlistsData.selectPlaylist(modelData.fileName)

@@ -46,6 +46,24 @@ public:
     // "(folder not found)" rather than a misleading empty-folder count.
     Q_INVOKABLE QVariantList presetFolders() const;
 
+    // Fast, synchronous per-folder existence check only (a single
+    // QDir::exists() stat call, no recursion) -- safe to call directly on
+    // the UI thread. Used by SetupDialog.qml's MILKDROP tab so "not found"
+    // folders render immediately, before scanPresetFolderCountsAsync()
+    // below has a chance to report anything.
+    Q_INVOKABLE QVariantList presetFolderExistence() const;
+
+    // Counts presets in every existing configured folder without blocking
+    // the UI thread -- one QtConcurrent task per folder, run concurrently
+    // on the global thread pool. Emits presetFolderCountReady() once per
+    // folder as each finishes, in no particular order. Used by
+    // SetupDialog.qml's MILKDROP tab in place of presetFolders() so the
+    // tab opens instantly even when a configured folder has thousands of
+    // presets; MilkdropCleanupDialog.qml (UC-25) still uses the
+    // synchronous presetFolders() since that dialog already opens behind
+    // its own deliberate user click, not eagerly on every tab switch.
+    Q_INVOKABLE void scanPresetFolderCountsAsync();
+
     // Scans and deletes incompatible presets in exactly the given folders
     // (paths must be a subset of presetFolders()'s own paths). No-op if a
     // cleanup is already running.
@@ -56,6 +74,10 @@ signals:
     void cleaningChanged();
     void cleanupProgressChanged();
     void currentFileNameChanged();
+
+    // Emitted once per folder by scanPresetFolderCountsAsync() as each
+    // background scan finishes.
+    void presetFolderCountReady(const QString &path, int presetCount);
 
     // Emitted once startCleanup() finishes (or immediately if there was
     // nothing to scan). perFolderResults: [{ path, removed, failed, total }, ...].

@@ -187,6 +187,18 @@ set_target_properties(topaz PROPERTIES
 # with the one place it's actually declared.
 target_compile_definitions(topaz PRIVATE TOPAZ_VERSION_STRING="${PROJECT_VERSION}")
 
+# MinGW/COFF objects cap out at ~32k sections. The QML AOT compiler generates
+# one function per binding/handler, and SetupDialog.qml (by far this repo's
+# largest QML file, seven Setup tabs' worth of UI) crossed that ceiling --
+# "too many sections" / "file too big" from `as` when building its generated
+# .rcc/qmlcache/topaz_SetupDialog_qml.cpp.obj. -Wa,-mbig-obj switches that
+# object to the bigobj COFF variant (a larger section-count field), which is
+# the standard fix for this MinGW-specific limit; it doesn't affect ELF/Mach-O
+# builds so it's MinGW-only rather than applied unconditionally.
+if (MINGW)
+    target_compile_options(topaz PRIVATE -Wa,-mbig-obj)
+endif()
+
 target_link_libraries(topaz
     PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Multimedia Qt6::Concurrent Qt6::Widgets Qt6::OpenGL
     PRIVATE ole32 dwmapi

@@ -12,6 +12,9 @@ Rectangle {
     // session forbids manual modification/clearing — see UC-16 in the
     // architecture doc.
     property var autoPlay: null
+    // Bound from Main.qml. Gates the delete-current-rating trash-bin
+    // button's visibility (Setup > MISC) -- see UC-29.
+    property var appConfig: null
     color: Theme.surfaceContainerLow
 
     signal newPlaylistRequested()
@@ -102,6 +105,19 @@ Rectangle {
             }
             if (result.missing && result.missing.length > 0)
                 root.missingPlaylistTracks(result.missing)
+        }
+    }
+
+    // ── Delete-current-rating confirmation ──────────────────────────────
+    // See UC-29 -- opened by deleteRatingBtn above.
+    MessageBox {
+        id: deleteRatingConfirmBox
+        title: qsTr("DELETE RATING")
+        message: qsTr("Would you like to delete the rating for the track currently playing?")
+        confirmMode: true
+        confirmButtonText: qsTr("DELETE")
+        onAccepted: {
+            if (root.engine) root.engine.deleteCurrentRating()
         }
     }
 
@@ -251,6 +267,7 @@ Rectangle {
                     // Persists immediately to Topaz.rating.json; refreshed whenever
                     // NowPlaying starts a new track (see PlaybackEngine.currentRating).
                     Row {
+                        id: ratingStarsRow
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         spacing: 3
                         // Only show a rating to give when a track is actually loaded.
@@ -282,6 +299,55 @@ Rectangle {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // Permanently deletes the currently playing track's
+                    // rating -- opt-in via Setup > MISC ("Delete the Rating
+                    // for the Track currently playing"), hidden entirely
+                    // when that setting is off. Same visual twin as
+                    // PlaylistViewer.qml's deletePlaylistBtn/DELETE
+                    // PLAYLIST flow, same 12px gap to its anchor sibling.
+                    Rectangle {
+                        id: deleteRatingBtn
+                        // Subset of ratingStarsRow's own visibility condition
+                        // -- never show this with no current track loaded
+                        // (app startup, empty queue), same moment the stars
+                        // themselves are hidden.
+                        visible: root.appConfig && root.appConfig.deleteCurrentRatingEnabled
+                                 && root.engine && root.engine.currentTitle.length > 0
+                        anchors {
+                            right: ratingStarsRow.left; rightMargin: 12
+                            verticalCenter: parent.verticalCenter
+                        }
+                        width: 32; height: 32
+                        radius: Theme.radiusFull
+
+                        readonly property bool active: root.engine && root.engine.currentRating > 0
+
+                        color: deleteRatingHover.containsMouse ? Theme.surfaceContainerHighest : "transparent"
+                        opacity: active ? 1.0 : 0.35
+
+                        Image {
+                            anchors.centerIn: parent
+                            source: "qrc:/Topaz/TrashBin_Icon.svg"
+                            sourceSize.width:  16
+                            sourceSize.height: 16
+                        }
+
+                        MouseArea {
+                            id: deleteRatingHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: deleteRatingBtn.active ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: {
+                                if (!deleteRatingBtn.active) return
+                                deleteRatingConfirmBox.open()
+                            }
+
+                            ToolTip.visible: containsMouse && deleteRatingBtn.active
+                            ToolTip.delay:   600
+                            ToolTip.text:    qsTr("DELETE RATING")
                         }
                     }
 

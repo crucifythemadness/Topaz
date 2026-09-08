@@ -1007,6 +1007,7 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     "windowWidth":        1920,
     "windowHeight":       1080,
     "startFullscreen":    false,
+    "deleteCurrentRatingEnabled": false,
     "libraryTreeWidth":   286,
     "playbackQueueWidth": 374,
     "nowPlayingWidth":    359,
@@ -1758,6 +1759,7 @@ is neither of those.
 | Artist | `engine.currentArtist` (artist with fallback to albumArtist) |
 | Format badge | `engine.currentFormat` + `engine.currentBitrate` KBPS |
 | Rating (stars) | `engine.currentRating` (0-10); set by clicking a star, calls `engine.setCurrentRating(n)`. Same row as the format badge — stars right-aligned, format badge left-aligned (see UC-14). Hidden entirely when no track is loaded (`NO TRACK` state). Filled stars use a hardcoded blue (`#00A6ED`) — a deliberate, one-off exception to the theme palette, not a `Theme.*` token. |
+| Delete rating (trash-bin) | Opt-in via Setup → MISC (`AppConfig.deleteCurrentRatingEnabled`, default off) — rendered immediately left of the star row when enabled, hidden entirely otherwise. Calls `engine.deleteCurrentRating()` after a "DELETE RATING" confirmation. See UC-29. |
 | Elapsed time | `engine.positionString` ("M:SS") |
 | Total time | `engine.durationString` ("M:SS") |
 | Progress ratio | `engine.position / engine.duration` |
@@ -1822,6 +1824,7 @@ abstraction that makes this backend-agnostic.
 | `setActivePlaylistName(name)` | invokable | Set the active playlist file name (e.g. `"GothicRock01.xml"`). Resets `playlistLocked` to `false`. Called from `NewPlaylistDialog` after successful creation, and from the load-playlist flow. |
 | `setPlaylistLocked(locked)` | invokable | Set the lock state. When unlocked (`false`), immediately calls `playlistManager.rewritePlaylist()` so the file reflects any changes made while locked. |
 | `setCurrentRating(rating)` | invokable | Set the current track's rating (1-10; no-op otherwise or if no track is loaded). Updates the queue entry and calls `RatingCache::setRating(genre, ratingId, rating)` to persist immediately. |
+| `deleteCurrentRating()` | invokable | Permanently remove the current track's rating (no-op if no track is loaded or it has no rating). Resets the queue entry's rating to 0 and calls `RatingCache::removeRating(ratingId)` to persist immediately. See UC-29. |
 | `trackList()` | invokable | Return all queued tracks as `QVariantList` of maps (`filePath`, `title`, `artist`, `albumArtist`, `album`, `trackNumber`, `durationMs`) — used by `PlaylistManager.createPlaylist()` |
 | `beginDragCursor()` | invokable | Pushes a system-wide `Qt::ForbiddenCursor` override via `QGuiApplication::setOverrideCursor()` — the default "not over a valid drop target" cursor for a drag gesture. Called by `AlbumCard` the moment a drag starts (> 8 px threshold). |
 | `setDragCursorAllowed(allowed)` | invokable | Changes the *shape* of the already-pushed override cursor between `Qt::DragCopyCursor` (`allowed=true`) and `Qt::ForbiddenCursor` (`allowed=false`) via `QGuiApplication::changeOverrideCursor()` — not a second push, so one `restoreOverrideCursor()` at drag end still correctly pops it. Called by `PlaybackQueue`'s `DropArea.onEntered`/`onExited`. |
@@ -2046,7 +2049,21 @@ This is valid XSPF and no special handling is required.
 ### Design decisions
 
 - **Non-destructive**: REMOVE only unloads the in-memory state; the file is preserved.
-- **Single action**: reuses `clearQueue()` which already handles the playlist name reset, keeping the engine's invariant that an empty queue has no associated playlist.
+- **Single action**: reuses `clearQueue()` which already handles the playlist name reset.
+- **Real bug fixed after initial ship**: `clearQueue()` originally bailed
+  out early whenever `m_queue.isEmpty()`, on the assumption that an empty
+  queue never has an associated playlist. That's false —
+  `PlaybackEngine::removeAt()` (per-track ✕ removal in `PlaybackQueue`)
+  can empty the queue one track at a time without ever touching
+  `m_activePlaylistName`, leaving a playlist "active" with zero tracks.
+  In that state the old guard made REMOVE a permanent no-op (it returned
+  before reaching the `m_activePlaylistName.clear()` line), and since
+  `PlaylistViewer.isSelectedActiveInQueue` stayed `true` for that
+  playlist, its DELETE button in the PLAYLISTS tab stayed disabled too —
+  the playlist could be neither unloaded nor deleted. Fixed by widening
+  the guard to `m_queue.isEmpty() && m_activePlaylistName.isEmpty() &&
+  !m_playlistLocked` — it now only skips work when there's genuinely
+  nothing to reset, not merely when the queue itself is empty.
 
 ---
 
@@ -2299,6 +2316,13 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
   is still atomic/non-corrupting; one write could just be overwritten by the other).
   Consistent with the rest of this codebase, which doesn't lock file I/O across threads
   elsewhere either (e.g. `LibraryCache::save()`); not engineered around here.
+- **`RatingCache::removeRating(ratingId)`** (added for UC-29) is a third,
+  symmetric persistence path — a single delete-by-`ratingId` through the
+  same `loadEntries()`/`saveEntries()` pair, used by
+  `PlaybackEngine::deleteCurrentRating()` for NowPlaying's opt-in
+  delete-rating trash-bin button. Returns `false` (no write) if the id is
+  null or no matching entry exists, same "no-op on nothing to do" shape as
+  `setRating()`'s own validation.
 - **Cancellation-safe**: if a scan is canceled mid-flight (see UC-13), the enrichment
   pass — like `LibraryCache::save()` and `scanCompleted` — is skipped entirely, so
   `ratingsReady` only ever becomes `true` after a scan that actually completed.
@@ -4406,43 +4430,136 @@ on, so only the most recent switch's name ever actually reaches the screen.
    rendering each entry as its own `AlbumCard` (each with its own cover,
    album title, artist, and single track row) — identical rendering path
    to `SearchResultBrowser` (including the `albumGenre` → "Genre | Year"
-   prop), so drag-to-queue and double-click-to-queue work unmodified (see
-   UC-06). The header shows the track count and playlist name on the
-   right; the left side (where `AlbumBrowser`/`SearchResultBrowser` show
+   prop), so drag-to-queue and double-click-to-queue work the same way
+   (see UC-06) — except when the previewed playlist is the one active in
+   the queue, see "Alternate: Playlist already active in the queue"
+   below. The header shows the track count, total playtime, and playlist
+   name on the right — `N TRACKS | <playtime>  —  NAME`, the playtime
+   summed from each track's `durationMs` and formatted `M:SS` under 100
+   total minutes or `H:MM:SS` from 100 minutes up, the identical rule
+   `ExportPlaylistDialog.qml` uses for its own playtime caption (UC-26);
+   the left side (where `AlbumBrowser`/`SearchResultBrowser` show
    "ALBUM BROWSER"/"SEARCH RESULT") instead shows a compact **LOAD**
    button (see step 6).
-6. User clicks **LOAD** — active whenever there's something loadable *or*
-   something to report (`selectedRawTracks.length > 0 ||
-   selectedMissingTracks.length > 0`), so a playlist whose tracks are all
-   missing still lets LOAD explain why rather than being permanently
-   disabled. Identical effect to UC-10's LOAD button, except no
-   `FileDialog` is shown (the file was already picked in step 4) and no
-   `PlaylistManager.loadPlaylist()` re-parse happens — the already-cached
-   `PlaylistsData.selectedRawTracks` is handed straight to
-   `PlaybackEngine.loadPlaylistTracks()`, which **always** replaces the
-   queue, crossfading into it if eligible (see UC-23), followed by
-   `engine.setActivePlaylistName(selectedFileName)` — exactly the same
-   step-6 flow UC-10 uses. `PlaylistsData.selectNeighborOf(selectedFileName)`
-   is then called instead of clearing the selection outright: it selects the
-   next playlist in the list, or the previous one if the just-loaded
-   playlist was last, so `PlaylistViewer` keeps showing a preview rather
-   than dropping to its empty state. Only falls back to the empty state
-   (`clearSelection()`) if no other playlist exists. If
-   `PlaylistsData.selectedMissingTracks` is non-empty (cached at selection
-   time, see UC-10's "All or some tracks missing"), `MissingTracksDialog`
-   opens listing them.
+6. User clicks **LOAD** — active for *any* selected playlist, empty or
+   not (as long as it isn't already the active one), rather than being
+   gated on track count. Three outcomes depending on what's selected:
+   - **Non-empty** (`selectedRawTracks.length > 0`): identical effect to
+     UC-10's LOAD button, except no `FileDialog` is shown (the file was
+     already picked in step 4) and no `PlaylistManager.loadPlaylist()`
+     re-parse happens — the already-cached `PlaylistsData.selectedRawTracks`
+     is handed straight to `PlaybackEngine.loadPlaylistTracks()`, which
+     **always** replaces the queue, crossfading into it if eligible (see
+     UC-23), followed by `engine.setActivePlaylistName(selectedFileName)`
+     — exactly the same step-6 flow UC-10 uses.
+   - **Genuinely empty** (0 tracks, 0 missing): still calls
+     `loadPlaylistTracks([])` + `setActivePlaylistName(selectedFileName)`
+     — the playlist becomes active with an empty queue, so
+     LIBRARY/SEARCH additions start syncing to it (`PlaybackEngine`'s
+     per-mutation XSPF sync), which is otherwise the *only* way a track
+     can ever be added to a playlist file. A plain "EMPTY PLAYLIST" /
+     "The playlist is still empty." `MessageBox` (`emptyPlaylistBox`,
+     `PlaylistViewer.qml`) explains why nothing started playing. From
+     here the user can add tracks (now that it's active), click REMOVE in
+     `NowPlaying` to unload it — correctly clears `activePlaylistName`
+     even at 0 tracks, see UC-09's `clearQueue()` fix — or, after REMOVE,
+     DELETE it from PLAYLISTS (still disabled while active, by the
+     unchanged "can't delete what's active" rule below).
+   - **All tracks missing** (0 resolved, ≥1 missing): unchanged from
+     before — no queue/active-playlist change, just opens
+     `MissingTracksDialog` listing them (see UC-10's "All or some tracks
+     missing").
+
+   In every case the selection deliberately stays on the just-loaded
+   playlist — it isn't moved to a neighbor — so an activated one now
+   simply renders as "(IN QUEUE)" in `PlaylistsPanel` on the next redraw
+   (see "Alternate: Playlist already active in the queue" below).
+   `PlaylistsData.selectNeighborOf()` still exists and is used by the
+   trash-bin DELETE flow, whose target really does stop existing.
 
 ### Alternate: Playlist already active in the queue
 
 A playlist row whose `fileName` matches `engine.activePlaylistName` (the
 playlist currently loaded into the queue) is rendered dimmed with an
-"(IN QUEUE)" label, and its `MouseArea` is `enabled: false` — it cannot be
-selected for preview. Reselecting it would only clear and reload the exact
-same queue, so the row is excluded entirely rather than allowing a no-op
-LOAD. This is a plain reactive binding on `engine.activePlaylistName`
-(`NOTIFY`-backed `Q_PROPERTY`), so the row's state updates immediately if
+"(IN QUEUE)" label in `PlaylistsPanel`, but remains fully selectable —
+clicking it previews its tracks like any other playlist. What's disabled
+instead lives in `PlaylistViewer`, gated by a single readonly property,
+`isSelectedActiveInQueue` (true when the *selected* playlist's `fileName`
+equals `engine.activePlaylistName`):
+- **LOAD** (`loadBtn.active`) and the **trash-bin** (`deletePlaylistBtn.active`)
+  both gain `&& !isSelectedActiveInQueue` — re-loading or deleting the
+  playlist file backing the live queue while it's active doesn't make
+  sense.
+- Each track card's drag-to-queue and double-click-to-queue are disabled
+  via a new `AlbumCard.queueInteractionEnabled` property (default `true`
+  everywhere else), bound to `!isSelectedActiveInQueue` here — the
+  per-track `MouseArea` that owns both interactions is simply `enabled:
+  queueInteractionEnabled`, so neither can fire while the previewed
+  playlist is the active one.
+
+This is a plain reactive binding on `engine.activePlaylistName`
+(`NOTIFY`-backed `Q_PROPERTY`), so all of the above updates immediately if
 the active playlist changes elsewhere (e.g. REMOVE/LOAD in `NowPlaying`)
-while PLAYLISTS is the active tab.
+while PLAYLISTS is the active tab — including while the active-in-queue
+playlist is the one currently selected/previewed.
+
+**Live mirror of the queue, not the XSPF file.** While
+`isSelectedActiveInQueue` is true, `currentAlbums` and the new
+`currentRawTracks` are sourced from `_liveQueueAlbums`/
+`_liveQueueRawTracks` instead of `PlaylistsData.albums`/
+`selectedRawTracks` (the last disk read). The XSPF file isn't a reliable
+live source for the active playlist specifically — `PlaybackEngine` skips
+`rewritePlaylist()` while `playlistLocked` is `true`, flushing only once
+unlocked — so both mirror arrays are rebuilt in one pass straight from
+`engine.trackList()` (`_liveQueueAlbums` via
+`LibraryModel.buildStandaloneTrackCards()`, the same conversion
+`PlaylistsData.selectPlaylist()` uses) by `refreshLiveQueue()`. That
+function is called imperatively, never bound declaratively —
+`trackList()` is `Q_INVOKABLE`, not a `NOTIFY`-backed `Q_PROPERTY`, and a
+binding on it would freeze at first paint. It's triggered from a
+`Connections` block on `engine`'s own `rowsInserted`/`rowsRemoved`/
+`rowsMoved`/`modelReset` signals (`PlaybackEngine` is itself the queue's
+`QAbstractListModel`), so the preview stays live while AUTO PLAY appends
+tracks or the user reorders the queue via `PlaybackQueue` — always
+visible in its own `SplitView` slot regardless of which TopBar tab is
+active — all without leaving PLAYLISTS. `currentRawTracks` is what
+`exportBtn.active`, `totalPlaylistDurationMs`, and `Main.qml`'s
+`exportPlaylistRequested` handler (`exportPlaylistDialog.tracks =
+item.currentRawTracks`) all read — reading `PlaylistsData.selectedRawTracks`
+directly for the active playlist would show EXPORT permanently disabled
+and the playtime caption stuck at 0:00, since that property is never
+refreshed while the live mirror is in use (a real regression hit once,
+fixed by routing all three through `currentRawTracks`).
+
+**Auto-scroll to now-playing.** Also while `isSelectedActiveInQueue`,
+`scrollToNowPlaying()` calls `resultList.positionViewAtIndex(engine.currentIndex,
+ListView.Beginning)` — `buildStandaloneTrackCards()` preserves input
+order 1:1, so `engine.currentIndex` (`NOTIFY`-backed) indexes directly
+into `_liveQueueAlbums` with no separate id-matching needed. Every
+`refreshLiveQueue()` call re-settles it too (deferred via `Qt.callLater`,
+since `resultList`'s `contentHeight` needs a tick to catch up with the
+new model array first) — without this, an AUTO PLAY addition mid-session
+would reset `resultList` to the top (a wholesale model-array replacement
+resets scroll position) with nothing to re-correct it until the next
+track advance, since adding a track doesn't itself change
+`engine.currentIndex`. Between `refreshLiveQueue()`'s own call, the
+`Connections` block's `onCurrentIndexChanged` (track advances),
+`onIsSelectedActiveInQueueChanged` (manually clicking the (IN QUEUE) row
+while already on PLAYLISTS), and `onPlaylistsDataChanged` (switching into
+PLAYLISTS while it's already selected), the scroll position holds correct
+regardless of *what* changed or *how* the active playlist became the
+previewed one.
+
+**Re-sync on every PLAYLISTS entry.** `PlaylistViewer`'s
+`onPlaylistsDataChanged` — which, since `Main.qml`'s `Loader` destroys and
+recreates this component on every PLAYLISTS↔LIBRARY/SEARCH switch, fires
+once per *entry into* PLAYLISTS, not just once ever — now always
+re-syncs the current selection: `refreshLiveQueue()` if it's the active
+playlist, otherwise a fresh `PlaylistsData.selectPlaylist()` disk re-read
+(covering the case where the selected-but-inactive playlist's file
+changed via some other means while the user was away). Previously this
+handler only restored the saved scroll position and left whatever was
+cached in `PlaylistsData` untouched.
 
 ### Alternate: Track missing a cover in the scanned library
 
@@ -4875,7 +4992,26 @@ visibility into its `cleaning` property.
   is surfaced separately from a bare zero count, so a folder that's been
   moved/deleted since being configured shows "(folder not found)" in the
   dialog rather than a misleadingly-identical "0 presets" a genuinely-empty
-  folder would also show.
+  folder would also show. Synchronous, recursive — fine for
+  `MilkdropCleanupDialog.qml` (UC-25), which only calls it once, behind the
+  user's own deliberate CLEANUP click.
+- `presetFolderExistence()` (`Q_INVOKABLE`) / `scanPresetFolderCountsAsync()`
+  (`Q_INVOKABLE`) / `presetFolderCountReady(path, presetCount)` (signal) —
+  the async counterpart used by `SetupDialog.qml`'s MILKDROP tab instead of
+  `presetFolders()`, added because that tab used to call `presetFolders()`
+  synchronously on every open/tab-switch, visibly blocking the UI for
+  folders with thousands of presets. `presetFolderExistence()` stays
+  synchronous (a single `QDir::exists()` stat per folder, no recursion) so
+  "not found" rows still render immediately; `scanPresetFolderCountsAsync()`
+  then fires one `QtConcurrent::run()` task per *existing* folder on the
+  global thread pool, each calling the same `discoverPresetFiles()` used by
+  `presetFolders()`/`startCleanup()` (side-effect-free `const`, safe to call
+  concurrently), and reports back via `future.then(this, ...)` — the
+  continuation runs on the controller's own thread, so
+  `presetFolderCountReady` is emitted from the main thread with no manual
+  `QFutureWatcher` bookkeeping. Results arrive in no particular order;
+  `SetupDialog.qml` matches each one to its row by path (not index) and
+  shows a small rotating-dot `BusySpinner` in the PRESETS column until then.
 - `startCleanup(folderPaths)` (`Q_INVOKABLE`): re-entrancy-guarded
   (`if (m_cleaning) return;`, copied verbatim from
   `LibraryModel::removeAbandonedRatings()`'s own guard). Builds one combined
@@ -5107,7 +5243,13 @@ mockup's literal styling:
   state, reused here verbatim rather than inventing new `Theme.qml` tokens
   for a one-off — green only when both writable AND enough free space;
   otherwise red, with an inline message distinguishing which condition
-  failed ("DESTINATION NOT WRITABLE" vs "NOT ENOUGH FREE SPACE").
+  failed ("DESTINATION NOT WRITABLE" vs "NOT ENOUGH FREE SPACE"). The
+  "PLAYLIST REQUIRED SPACE" caption reads "N tracks | \<playtime\>" —
+  total duration summed from every track's `durationMs`, shown as `M:SS`
+  under 100 total minutes or `H:MM:SS` from 100 minutes up (e.g.
+  `8 tracks | 43:33` vs `23 tracks | 1:52:39`) — added so playlists built
+  for Minidisc recording (80-minute capacity) can be eyeballed against
+  that limit without opening the destination and counting.
 - Track prefix input (optional — labeled "FILE NAMING / TRACK PREFIX
   (OPTIONAL)") + a live filename preview recomputed on every keystroke from
   the first track, always visible regardless of whether a prefix was
@@ -5455,4 +5597,57 @@ existing F11 `Shortcut` and the `saveLayoutTimer`'s fullscreen guard (skip
 persisting `windowWidth`/`windowHeight` while fullscreen) are both
 unchanged by this — F11 still imperatively reassigns `root.visibility` at
 runtime regardless of how the window started.
+
+## UC-29 Delete Rating for the Currently Playing Track (NowPlaying + MISC Tab)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Let the user permanently clear a track's rating, closing a real gap: `setCurrentRating()` only accepts 1-10, so before this there was no way to un-rate a track once given. |
+| **Actor** | User |
+| **Trigger** | User clicks the trash-bin button next to NowPlaying's rating stars, then DELETE in the "DELETE RATING" confirmation. |
+| **Precondition** | Setup → MISC → "Delete the Rating for the Track currently playing" is enabled (default off), a track is loaded, and it currently has a rating. |
+
+A new `AppConfig.deleteCurrentRatingEnabled` bool — identical shape to
+UC-28's `startFullscreen` (`Q_PROPERTY` + `Q_INVOKABLE
+setDeleteCurrentRatingEnabled(bool)`), persisted as `Topaz.config`'s
+top-level `deleteCurrentRatingEnabled` key, default `false`. MISC tab
+gains a fourth toggle row (after Start Topaz in Full Screen), same
+48×24/18×18 pill switch.
+
+Unlike UC-28's setting (a startup preference, takes effect next launch),
+this one gates a live UI element: `NowPlaying.qml` takes a new `appConfig`
+property (wired from `Main.qml`, previously not forwarded to this panel)
+and binds a trash-bin button's `visible` directly to
+`appConfig.deleteCurrentRatingEnabled` — flipping the toggle in Setup
+shows/hides the button in NowPlaying immediately, no restart or dialog
+close needed. The button is the visual twin of `PlaylistViewer.qml`'s
+`deletePlaylistBtn` (32×32, `Theme.radiusFull`, `TrashBin_Icon.svg`),
+anchored `right: ratingStarsRow.left; rightMargin: 12` — the identical
+12px gap `PlaylistViewer.qml`'s EXPORT→trash-bin buttons use
+(`leftMargin: 12`) — and `verticalCenter: parent.verticalCenter`, so it's
+always vertically centered on the star row regardless of which anchors on
+which side. Its own `active` state (full opacity + clickable vs. 0.35
+dimmed) is separate from `visible` — dimmed whenever `currentRating` is 0
+(nothing to delete), exactly mirroring `deletePlaylistBtn`'s/`exportBtn`'s
+own active/dimmed convention in `PlaylistViewer.qml`.
+
+Clicking it (while active) opens a `MessageBox` styled like
+`PlaylistViewer.qml`'s "DELETE PLAYLIST" confirmation (`confirmMode: true`,
+title "DELETE RATING", message "Would you like to delete the rating for
+the track currently playing?", confirm button "DELETE"). Accepting calls
+the new `PlaybackEngine::deleteCurrentRating()` (`playbackengine.cpp`),
+which resets the current queue entry's `rating` to 0 and calls the new
+`RatingCache::removeRating(ratingId)` to delete the entry from
+`Topaz.rating.json`, then emits the existing `currentRatingChanged()` —
+the star row (and the trash-bin button's own `active` binding) update
+immediately, same signal `setCurrentRating()` already relies on.
+
+**Build note**: this change (plus UC-28's earlier MISC addition) pushed
+`SetupDialog.qml` — already this codebase's largest QML file — past
+MinGW's ~32k-COFF-section-per-object ceiling, failing the build with
+"too many sections" / "file too big" from `as` on the generated
+`.rcc/qmlcache/topaz_SetupDialog_qml.cpp.obj`. Fixed by adding
+`-Wa,-mbig-obj` to the `topaz` target's compile options for MinGW builds
+(`CMakeLists.txt`) — the standard fix for this MinGW/COFF limit, inert on
+non-Windows toolchains.
 
