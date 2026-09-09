@@ -6,10 +6,11 @@ import QtQuick.Dialogs
 // ── RestoreDialog ─────────────────────────────────────────────────────────
 // Setup → MISC "Restore Topaz Environment" / RESTORE button. Reads a backup
 // *.zip via BackupRestoreController -- see UC-27 -- and restores playlists/
-// ratings, one conflict decision at a time (a plain JS array + index-cursor
-// state machine driving a single reused ChoiceDialog instance per category).
-// No config restore -- deliberately excluded (overwriting live app settings
-// while Topaz is running is riskier than useful).
+// ratings/config. Playlists/ratings go through one conflict decision at a
+// time (a plain JS array + index-cursor state machine driving a single
+// reused ChoiceDialog instance per category). Config has no conflict
+// concept -- a single restoreConfig() call applies it live, preserving the
+// currently running audioBackend (see AppConfig::restoreFromJson()).
 //
 // Usage in SetupDialog.qml:
 //   RestoreDialog { id: restoreDialog; controller: root.backupRestoreController }
@@ -37,6 +38,8 @@ Popup {
     property string ratingsOutcomeMode:  ""      // "overwrite" | "skip" | "mergeNew" | "mergeAll"
     property int    ratingsAddedCount:   0
     property int    ratingsUpdatedCount: 0
+    property bool   configHandled: false
+    property bool   configSuccess: false
     property var    summaryLines: []
 
     readonly property bool hasZip:      zipPath.length > 0
@@ -49,6 +52,7 @@ Popup {
     // out of sync with the on-screen checkbox after that -- see UC-27's
     // architecture-doc note for the bug this caused.
     readonly property bool anyChecked:  restorePlaylistsCheckbox.checked || restoreRatingsCheckbox.checked
+                                         || restoreConfigCheckbox.checked
     readonly property bool canRestore:  hasZip && anyChecked && !restoring
 
     anchors.centerIn: Overlay.overlay
@@ -61,6 +65,7 @@ Popup {
     onOpened: {
         restorePlaylistsCheckbox.checked = true
         restoreRatingsCheckbox.checked   = true
+        restoreConfigCheckbox.checked    = true
         zipPath                 = ""
         pendingPlaylistConflicts = []
         conflictCursor          = 0
@@ -73,6 +78,8 @@ Popup {
         ratingsOutcomeMode      = ""
         ratingsAddedCount       = 0
         ratingsUpdatedCount     = 0
+        configHandled           = false
+        configSuccess           = false
         summaryLines            = []
     }
 
@@ -265,6 +272,11 @@ Popup {
                         font.weight:        Font.Bold
                         font.letterSpacing: Theme.lsWidest
                         color: Theme.fgSurfaceVariant
+                    }
+                    CheckboxRow {
+                        id: restoreConfigCheckbox
+                        label: qsTr("Restore Topaz Config")
+                        checked: true
                     }
                     CheckboxRow {
                         id: restorePlaylistsCheckbox
@@ -494,6 +506,8 @@ Popup {
         root.ratingsOutcomeMode   = ""
         root.ratingsAddedCount    = 0
         root.ratingsUpdatedCount  = 0
+        root.configHandled        = false
+        root.configSuccess        = false
         root.summaryLines         = []
 
         root.pendingPlaylistConflicts = []
@@ -510,6 +524,19 @@ Popup {
                     })
                 }
             }
+        }
+
+        // Config has no conflict concept -- one call, no per-item dialog,
+        // preserving the currently running audioBackend (see
+        // AppConfig::restoreFromJson()).
+        if (restoreConfigCheckbox.checked && info.hasConfig) {
+            const rc = root.controller.restoreConfig(root.zipPath)
+            root.configHandled = true
+            root.configSuccess = rc.success
+            root.resultsLog.push({
+                category: qsTr("Config"), fileName: "",
+                outcome: rc.success ? qsTr("copied") : qsTr("failed")
+            })
         }
 
         root.ratingsConflictPending =
@@ -562,6 +589,11 @@ Popup {
             else
                 lines.push(qsTr("%1 Ratings have been updated in the Topaz Rating File.")
                            .arg(root.ratingsAddedCount + root.ratingsUpdatedCount))
+        }
+        if (restoreConfigCheckbox.checked && root.configHandled) {
+            lines.push(root.configSuccess
+                ? qsTr("Topaz Config has been restored (Audio Playback Option kept as-is).")
+                : qsTr("Topaz Config could not be restored."))
         }
         root.summaryLines = lines
     }

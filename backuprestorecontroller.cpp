@@ -54,6 +54,13 @@ void BackupRestoreController::setPlaylistManager(PlaylistManager *pm)
     emit playlistManagerChanged();
 }
 
+void BackupRestoreController::setAppConfig(AppConfig *cfg)
+{
+    if (m_appConfig == cfg) return;
+    m_appConfig = cfg;
+    emit appConfigChanged();
+}
+
 QString BackupRestoreController::finalZipPath(const QString &destFolder,
                                                const QString &zipFileName) const
 {
@@ -422,4 +429,63 @@ QVariantMap BackupRestoreController::restoreRatings(const QString &zipFilePath,
     result[QStringLiteral("addedCount")]   = addedCount;
     result[QStringLiteral("updatedCount")] = updatedCount;
     return result;
+}
+
+// ── RESTORE: config ──────────────────────────────────────────────────────
+
+QVariantMap BackupRestoreController::restoreConfig(const QString &zipFilePath) const
+{
+    QVariantMap result;
+
+    if (!m_appConfig) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = QStringLiteral("No app config available.");
+        return result;
+    }
+
+    QFile f(normalizePath(zipFilePath));
+    if (!f.open(QIODevice::ReadOnly)) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = QStringLiteral("Could not open the file.");
+        return result;
+    }
+    const QByteArray zipBytes = f.readAll();
+    f.close();
+
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+    if (!mz_zip_reader_init_mem(&zip, zipBytes.constData(), size_t(zipBytes.size()), 0)) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = QStringLiteral("Not a valid zip archive.");
+        return result;
+    }
+
+    const int index = mz_zip_reader_locate_file(&zip, "config/Topaz.config", nullptr, 0);
+    if (index < 0) {
+        mz_zip_reader_end(&zip);
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = QStringLiteral("No config file in the archive.");
+        return result;
+    }
+
+    mz_zip_archive_file_stat stat;
+    if (!mz_zip_reader_file_stat(&zip, mz_uint(index), &stat)) {
+        mz_zip_reader_end(&zip);
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = QStringLiteral("Could not read entry metadata.");
+        return result;
+    }
+
+    QByteArray extracted(qsizetype(stat.m_uncomp_size), Qt::Uninitialized);
+    const bool extractedOk = mz_zip_reader_extract_to_mem(
+        &zip, mz_uint(index), extracted.data(), size_t(extracted.size()), 0);
+    mz_zip_reader_end(&zip);
+
+    if (!extractedOk) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = QStringLiteral("Could not extract entry.");
+        return result;
+    }
+
+    return m_appConfig->restoreFromJson(extracted);
 }

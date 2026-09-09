@@ -132,6 +132,7 @@ Rectangle {
             }
 
             Row {
+                id: nameRow
                 spacing: 8
                 anchors { left: parent.left; leftMargin: 24; verticalCenter: parent.verticalCenter }
                 opacity: rowItem.isActiveInQueue ? 0.4 : 1.0
@@ -150,13 +151,32 @@ Rectangle {
                     font.letterSpacing: Theme.lsWidest
                     color: rowItem.isSelected ? Theme.secondary : Theme.primary
                 }
+            }
+
+            // Solid pill badge -- same literal red BottomBar.qml's AUTO
+            // PLAY button uses for its active state, a deliberate one-off
+            // outside Theme.qml's token palette. Deliberately NOT a child
+            // of nameRow above: nameRow dims to 0.4 opacity for this row
+            // (it can't be reselected the normal way), but the badge
+            // needs to stay fully vivid to actually grab the user's
+            // attention -- a dimmed red-on-dark label was barely legible.
+            Rectangle {
+                visible: rowItem.isActiveInQueue
+                anchors { left: nameRow.right; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                height: 20
+                width:  inQueueLabel.implicitWidth + 16
+                radius: Theme.radiusFull
+                color:  Qt.rgba(1, 0.0902, 0.2667, 0.35)   // #FF1744 @ ~35% opacity
+
                 Text {
-                    visible: rowItem.isActiveInQueue
-                    text: qsTr("(IN QUEUE)")
-                    font.family:    Theme.fontFamilyBody
-                    font.pixelSize: Theme.labelSm
-                    color: Theme.fgSurfaceVariant
-                    anchors.verticalCenter: parent.verticalCenter
+                    id: inQueueLabel
+                    anchors.centerIn: parent
+                    text: qsTr("IN QUEUE")
+                    font.family:        Theme.fontFamilyBody
+                    font.pixelSize:     Theme.labelXs
+                    font.weight:        Font.Bold
+                    font.letterSpacing: Theme.lsWide
+                    color: Theme.fgSurface
                 }
             }
 

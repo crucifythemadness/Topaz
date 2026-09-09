@@ -59,22 +59,46 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
             }
 
-            Text {
-                id: playlistNameLabel
+            Item {
+                width: 6; height: 1
                 visible: root.engine && root.engine.activePlaylistName.length > 0
-                text: root.engine ? "(" + root.engine.activePlaylistName + ")" : ""
-                font.family:        Theme.fontFamilyMono
-                font.pixelSize:     Theme.monoLg
-                font.weight:        Font.Normal
-                color: Theme.fgSurfaceVariant
+            }
+
+            // Solid pill badge -- same style as PlaylistsPanel.qml's "IN
+            // QUEUE" badge (deliberate one-off literal red outside
+            // Theme.qml's token palette), tying the two "this
+            // queue/row is playlist X" indicators together visually.
+            Rectangle {
+                id: playlistNameBadge
+                visible: root.engine && root.engine.activePlaylistName.length > 0
                 anchors.verticalCenter: parent.verticalCenter
+                height: 20
+                width:  playlistNameLabel.implicitWidth + 16
+                radius: Theme.radiusFull
+                color:  Qt.rgba(1, 0.0902, 0.2667, 0.35)   // #FF1744 @ ~35% opacity
+
+                Text {
+                    id: playlistNameLabel
+                    anchors.centerIn: parent
+                    text: root.engine ? root.engine.activePlaylistName.replace(/\.xml$/i, "") : ""
+                    font.family:        Theme.fontFamilyBody
+                    font.pixelSize:     Theme.labelSm
+                    font.weight:        Font.Bold
+                    font.letterSpacing: Theme.lsWide
+                    color: Theme.fgSurface
+                }
 
                 HoverHandler { id: playlistNameHover }
-                ToolTip.visible: playlistNameHover.hovered && playlistNameLabel.visible
+                ToolTip.visible: playlistNameHover.hovered && playlistNameBadge.visible
                 ToolTip.delay:   600
                 ToolTip.text:    root.engine
                                  ? qsTr("PLAYLIST ") + root.engine.activePlaylistName
                                  : ""
+            }
+
+            Item {
+                width: 6; height: 1
+                visible: root.engine && root.engine.activePlaylistName.length > 0
             }
 
             // Lock label — visible only when a playlist is active

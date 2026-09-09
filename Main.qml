@@ -311,7 +311,9 @@ ApplicationWindow {
     // Backup/Restore Topaz Environment (MISC tab) — see UC-27. Purely
     // synchronous (small config/playlist/rating files only) — no worker
     // thread, unlike PlaylistExportController.
-    BackupRestoreController { id: backupRestoreController; playlistManager: playlistManager }
+    BackupRestoreController { id: backupRestoreController
+                               playlistManager: playlistManager
+                               appConfig: appConfig }
 
     // Audio visualizer analysis pipeline — see UC-19 in the architecture doc.
     // Passed as `visualizer` property to AudioVisualizerWindow.

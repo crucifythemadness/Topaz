@@ -599,13 +599,22 @@ Popup {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape:  Qt.PointingHandCursor
-                                onClicked: {
-                                    if (root.appConfig) {
-                                        root.appConfig.clearGenres()
-                                        root.selectedGenreIndex = -1
-                                    }
-                                }
+                                onClicked: deleteAllGenresConfirmBox.open()
                             }
+                        }
+                    }
+                }
+
+                MessageBox {
+                    id: deleteAllGenresConfirmBox
+                    title: qsTr("DELETE ALL")
+                    message: qsTr("Are you sure you want to delete them all?")
+                    confirmMode: true
+                    confirmButtonText: qsTr("OK")
+                    onAccepted: {
+                        if (root.appConfig) {
+                            root.appConfig.clearGenres()
+                            root.selectedGenreIndex = -1
                         }
                     }
                 }
@@ -912,13 +921,22 @@ Popup {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape:  Qt.PointingHandCursor
-                                onClicked: {
-                                    if (root.appConfig) {
-                                        root.appConfig.clearFolders()
-                                        root.selectedFolderIndex = -1
-                                    }
-                                }
+                                onClicked: deleteAllFoldersConfirmBox.open()
                             }
+                        }
+                    }
+                }
+
+                MessageBox {
+                    id: deleteAllFoldersConfirmBox
+                    title: qsTr("DELETE ALL")
+                    message: qsTr("Are you sure you want to delete them all?")
+                    confirmMode: true
+                    confirmButtonText: qsTr("OK")
+                    onAccepted: {
+                        if (root.appConfig) {
+                            root.appConfig.clearFolders()
+                            root.selectedFolderIndex = -1
                         }
                     }
                 }

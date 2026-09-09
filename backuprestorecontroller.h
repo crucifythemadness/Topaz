@@ -6,6 +6,7 @@
 // definition otherwise -- see AutoPlayController's/MilkdropCleanupController's
 // own headers for this exact note.
 #include "playlistmanager.h"
+#include "appconfig.h"
 
 #include <QObject>
 #include <QQmlEngine>
@@ -46,12 +47,17 @@ class BackupRestoreController : public QObject
 
     Q_PROPERTY(PlaylistManager* playlistManager READ playlistManager
                WRITE setPlaylistManager NOTIFY playlistManagerChanged)
+    Q_PROPERTY(AppConfig* appConfig READ appConfig
+               WRITE setAppConfig NOTIFY appConfigChanged)
 
 public:
     explicit BackupRestoreController(QObject *parent = nullptr);
 
     PlaylistManager* playlistManager() const { return m_playlistManager; }
     void setPlaylistManager(PlaylistManager *pm);
+
+    AppConfig* appConfig() const { return m_appConfig; }
+    void setAppConfig(AppConfig *cfg);
 
     // ── BACKUP ────────────────────────────────────────────────────────────
     // categories: subset of {"config", "playlists", "ratings"}. ".zip" is
@@ -77,9 +83,8 @@ public:
     // valid zip. Otherwise:
     //   { hasPlaylists: bool, hasRatings: bool, hasConfig: bool,
     //     playlists: [ { fileName, conflict }, ... ], ratingsConflict: bool }
-    // hasConfig is informational only -- RESTORE never offers to restore
-    // config (restoring live app settings while Topaz is running is
-    // riskier than useful).
+    // hasConfig tells RestoreDialog.qml whether "Restore Config" has
+    // anything to do -- see restoreConfig() below.
     Q_INVOKABLE QVariantMap inspectZip(const QString &zipFilePath) const;
 
     // ── RESTORE: one playlist entry, one decision ────────────────────────
@@ -102,8 +107,17 @@ public:
     Q_INVOKABLE QVariantMap restoreRatings(const QString &zipFilePath,
                                             const QString &mode) const;
 
+    // ── RESTORE: config, one call, no conflict dialog ────────────────────
+    // Extracts config/Topaz.config from the zip and applies it live via
+    // AppConfig::restoreFromJson() (which preserves the currently running
+    // audioBackend and emits every other NOTIFY signal, so the rest of
+    // the running app picks up the change immediately -- see UC-27).
+    // Returns { success: bool, error: string }.
+    Q_INVOKABLE QVariantMap restoreConfig(const QString &zipFilePath) const;
+
 signals:
     void playlistManagerChanged();
+    void appConfigChanged();
 
 private:
     // <destFolder>/<zipFileName>, with ".zip" appended if missing --
@@ -111,4 +125,5 @@ private:
     QString finalZipPath(const QString &destFolder, const QString &zipFileName) const;
 
     PlaylistManager *m_playlistManager = nullptr;
+    AppConfig       *m_appConfig       = nullptr;
 };

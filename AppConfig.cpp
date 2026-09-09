@@ -617,8 +617,11 @@ void AppConfig::load()
     if (err.error != QJsonParseError::NoError || !doc.isObject())
         return;
 
-    const QJsonObject root = doc.object();
+    applyJson(doc.object());
+}
 
+void AppConfig::applyJson(const QJsonObject &root)
+{
     m_genres.clear();
     const QJsonArray genresArr = root[QStringLiteral("genres")].toArray();
     for (const QJsonValue &v : genresArr)
@@ -723,6 +726,7 @@ void AppConfig::load()
     m_audioVisualizerPaneHeight     = audioVisualizerPane[QStringLiteral("height")].toInt(260);
     m_audioVisualizerPaneScreenName = audioVisualizerPane[QStringLiteral("screenName")].toString();
 
+    m_milkdropPresetFolders.clear();
     const QJsonObject milkdrop = root[QStringLiteral("milkdrop")].toObject();
     const QJsonArray milkdropFoldersArr = milkdrop[QStringLiteral("presetFolders")].toArray();
     for (const QJsonValue &v : milkdropFoldersArr) {
@@ -758,6 +762,58 @@ void AppConfig::load()
     m_milkdropPaneWidth      = milkdropPane[QStringLiteral("width")].toInt(560);
     m_milkdropPaneHeight     = milkdropPane[QStringLiteral("height")].toInt(360);
     m_milkdropPaneScreenName = milkdropPane[QStringLiteral("screenName")].toString();
+}
+
+QVariantMap AppConfig::restoreFromJson(const QByteArray &json)
+{
+    QVariantMap result;
+
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = QStringLiteral("Not a valid config file.");
+        return result;
+    }
+
+    // audioBackend is deliberately preserved from the currently running
+    // config, not the backup's -- switching audio backend requires
+    // re-initializing the playback deck, which isn't safe to do live from
+    // here. See Setup > PLAYBACK to change it afterward if desired.
+    const QString keepAudioBackend = m_audioBackend;
+    applyJson(doc.object());
+    m_audioBackend = keepAudioBackend;
+
+    save();
+
+    emit genresChanged();
+    emit enabledGenresChanged();
+    emit foldersChanged();
+    emit windowGeometryChanged();
+    emit panelWidthsChanged();
+    emit startFullscreenChanged();
+    emit deleteCurrentRatingEnabledChanged();
+    emit crossfadeChanged();
+    // audioBackendChanged deliberately NOT emitted -- value is unchanged.
+    emit autoPlayQueueHorizonChanged();
+    emit autoPlayTitleAddingIntervalSecondsChanged();
+    emit autoPlayConsiderGenreChanged();
+    emit autoPlayConsiderRatingChanged();
+    emit autoPlayMinimumRatingChanged();
+    emit autoPlayAllowManualModificationChanged();
+    emit autoPlaySongRepeatChanged();
+    emit autoPlayTransportAccessChanged();
+    emit autoPlayFlickerNewTracksChanged();
+    emit bigCoverPaneChanged();
+    emit tagInfoPaneChanged();
+    emit audioVisualizerChanged();
+    emit audioVisualizerPaneChanged();
+    emit milkdropChanged();
+    emit milkdropPaneChanged();
+
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("error")]   = QString();
+    return result;
 }
 
 void AppConfig::save()

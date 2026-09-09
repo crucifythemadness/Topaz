@@ -5395,9 +5395,10 @@ A category with nothing on disk is silently skipped, not an error; if
 
 ### `BackupRestoreController` (`backuprestorecontroller.h`/`.cpp`)
 
-`QObject`/`QML_ELEMENT`, instantiated once in `Main.qml`, bound to
-`PlaylistManager` (for `playlistDirectory()`/`listPlaylists()`) — config/
-ratings paths are computed independently via
+`QObject`/`QML_ELEMENT`, instantiated once in `Main.qml`, bound to both
+`PlaylistManager` (for `playlistDirectory()`/`listPlaylists()`) and
+`AppConfig` (for `restoreConfig()` below) — config/ratings paths are
+computed independently via
 `QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)`, the
 same way `RatingCache`'s own private path helper already does.
 
@@ -5411,9 +5412,8 @@ same way `RatingCache`'s own private path helper already does.
 - `inspectZip(zipFilePath)` — read-only, extracts nothing. Returns which
   categories are present and, for playlists, which entries would conflict
   with a same-named local file (`{playlists: [{fileName, conflict}, ...],
-  ratingsConflict, hasConfig, ...}` — `hasConfig` is informational only,
-  since RESTORE never offers to restore config: overwriting live app
-  settings while Topaz is running is riskier than useful).
+  ratingsConflict, hasConfig, ...}` — `hasConfig` tells `RestoreDialog.qml`
+  whether "Restore Config" has anything to do).
 - `restorePlaylistEntry(zipFilePath, entryFileName, action)` — one
   playlist, one decision (`"overwrite"|"skip"|"rename"`). Stateless: reopens
   the zip per call rather than holding a live archive handle between calls
@@ -5430,6 +5430,46 @@ same way `RatingCache`'s own private path helper already does.
   parser: `loadEntries()` now reads the file then delegates to a new
   `static QList<Entry> parseEntries(const QByteArray&)`, so
   `restoreRatings()` can feed it zip-extracted bytes directly.
+- `restoreConfig(zipFilePath)` — extracts `config/Topaz.config` the same
+  way `restoreRatings()` extracts the ratings file (`mz_zip_reader_locate_file`
+  → `mz_zip_reader_file_stat` → `mz_zip_reader_extract_to_mem`), then hands
+  the raw bytes straight to `AppConfig::restoreFromJson()`. No conflict
+  dialog — config restore is a single always-apply operation, unlike
+  playlists/ratings. Originally RESTORE refused to touch config at all
+  ("overwriting live app settings while Topaz is running is riskier than
+  useful"); that changed once a safe exception was identified: preserve
+  the *currently running* `audioBackend` instead of the backup's, since
+  switching FFmpeg/BASS requires re-initializing the playback deck — not
+  safe mid-session — while every other setting can simply be swapped in
+  live.
+
+  `AppConfig` itself gained the actual apply logic. `load()`
+  (file-read/parse, then populate every member from the parsed
+  `QJsonObject`) was split: the populate-every-member half moved into a
+  new private `applyJson(const QJsonObject&)`, shared by `load()` and the
+  new `Q_INVOKABLE QVariantMap restoreFromJson(const QByteArray &json)`.
+  `restoreFromJson()` saves `m_audioBackend` before calling `applyJson()`,
+  restores it immediately after (undoing whatever the backup's JSON just
+  set), calls `save()` to persist the merged result, then emits every
+  `NOTIFY` signal the class has **except** `audioBackendChanged`.
+
+  This is what makes the restore live for nearly everything, with no new
+  reactivity plumbing: every `AppConfig` consumer in this app (GenreBar,
+  AUTO PLAY, crossfade, the audio visualizer, Milkdrop, the delete-rating
+  button, etc.) already reads its settings through these same `NOTIFY`-backed
+  `Q_PROPERTY`s, specifically so an ordinary Setup Dialog edit takes effect
+  immediately — a config restore is just many such edits landing at once.
+  One existing mechanism is worth calling out specifically: `SetupDialog.qml`
+  already has a `Connections` on `appConfig.foldersChanged` that sets
+  `_foldersDirty = true`, triggering `libraryModel.startFullScan()` when
+  the dialog closes (see UC-04/UC-05) — since RESTORE lives in this same
+  dialog's MISC tab, `foldersChanged()` firing during a config restore is
+  picked up by that *existing* auto-rescan flow for free. The values that
+  *don't* take effect immediately (window/panel widths, the three
+  detachable panes' geometry, `startFullscreen`) were never live for any
+  write path, restore included — they're read once at window/pane
+  creation and simply persisted for next time, exactly like a manual
+  drag/resize already behaves today.
 
 ### RENAME retry algorithm
 

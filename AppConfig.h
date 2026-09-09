@@ -6,6 +6,9 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
+#include <QVariantMap>
+
+class QJsonObject;
 
 // AppConfig — persistent application configuration.
 //
@@ -392,6 +395,19 @@ public:
     // ── Persistence ──────────────────────────────────────────────────────
     Q_INVOKABLE void save();
 
+    // Applies a full Topaz.config JSON blob (e.g. extracted from a backup
+    // zip by BackupRestoreController::restoreConfig()) to this AppConfig
+    // live, except audioBackend -- preserved from the currently running
+    // value, since switching FFmpeg/BASS requires re-initializing the
+    // playback deck, not safe to do mid-session (see Setup > PLAYBACK to
+    // change it manually afterward). Persists the result via save() and
+    // emits every NOTIFY signal except audioBackendChanged, so every
+    // existing live-reactive consumer (GenreBar, AUTO PLAY, crossfade,
+    // audio visualizer, Milkdrop, folders' auto-rescan via SetupDialog,
+    // etc.) picks it up immediately, same as an ordinary Setup Dialog
+    // edit would. Returns {success, error}.
+    Q_INVOKABLE QVariantMap restoreFromJson(const QByteArray &json);
+
 signals:
     void genresChanged();
     void enabledGenresChanged();
@@ -420,6 +436,11 @@ signals:
 
 private:
     void    load();
+    // Populates every member from a parsed Topaz.config JSON object --
+    // shared by load() (reads the file from disk) and restoreFromJson()
+    // (reads a backup zip's extracted bytes instead). Does not save() or
+    // emit any signals itself; callers own that.
+    void    applyJson(const QJsonObject &root);
     QString configFilePath() const;
 
     static constexpr int kMaxGenres        = 40;
