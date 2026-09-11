@@ -19,18 +19,44 @@ Rectangle {
     // null at that point -- the same ordering pitfall AlbumBrowser/
     // SearchResultBrowser already solve via onLibChanged/onSearchDataChanged.
     //
-    // Also auto-selects the first playlist not already active in the queue,
-    // but only if nothing is currently selected -- PlaylistsData lives
-    // outside the Loader specifically so its selection survives switching
-    // away and back (same as LibraryData/SearchData), so this must not
-    // clobber an existing selection on re-entry.
+    // Also auto-selects the active-in-queue playlist if one exists in the
+    // listing, otherwise the first playlist -- but only if nothing is
+    // currently selected -- PlaylistsData lives outside the Loader
+    // specifically so its selection survives switching away and back
+    // (same as LibraryData/SearchData), so this must not clobber an
+    // existing selection on re-entry.
     onPlaylistsDataChanged: {
         if (!playlistsData) return
         playlistsData.refreshPlaylists()
         if (playlistsData.selectedFileName !== "") return
         const activeInQueue = playlistsData.engine ? playlistsData.engine.activePlaylistName : ""
-        const first = playlistsData.playlists.find(p => p.fileName !== activeInQueue)
-        if (first) playlistsData.selectPlaylist(first.fileName)
+        const activeEntry = playlistsData.playlists.find(p => p.fileName === activeInQueue)
+        if (activeEntry) {
+            playlistsData.selectPlaylist(activeEntry.fileName)
+        } else {
+            const first = playlistsData.playlists[0]
+            if (first) playlistsData.selectPlaylist(first.fileName)
+        }
+    }
+
+    // Keeps the selection following the active playlist while this panel
+    // stays mounted -- e.g. loading a different playlist via NowPlaying's
+    // LOAD (including a fresh import, UC-30) while already viewing
+    // PLAYLISTS. Skipped for REMOVE, which clears activePlaylistName back
+    // to "". The playlists.some() check is defensive -- every successful
+    // LOAD-via-NowPlaying (direct, imported, or a de-conflicted "- Copy
+    // 0N" import) ends up as a real listed file, so this should always
+    // find a match in practice.
+    Connections {
+        target: root.playlistsData ? root.playlistsData.engine : null
+        function onActivePlaylistNameChanged() {
+            if (!root.playlistsData) return
+            const name = root.playlistsData.engine.activePlaylistName
+            if (name === "") return
+            root.playlistsData.refreshPlaylists()
+            if (root.playlistsData.playlists.some(p => p.fileName === name))
+                root.playlistsData.selectPlaylist(name)
+        }
     }
 
     // Ghost right border -- same chrome as LibraryTree/SearchPanel

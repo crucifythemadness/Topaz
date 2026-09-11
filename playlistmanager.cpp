@@ -419,3 +419,50 @@ bool PlaylistManager::deletePlaylist(const QString &nameWithExt)
 {
     return QFile::remove(playlistDirectory() + QChar('/') + nameWithExt);
 }
+
+// ── Import (see UC-30) ───────────────────────────────────────────────────
+
+QVariantMap PlaylistManager::classifyPlaylistSource(const QString &pathOrUrl) const
+{
+    const QUrl url(pathOrUrl);
+    const QString localPath = url.isLocalFile() ? url.toLocalFile() : pathOrUrl;
+    const QString fileName  = QFileInfo(localPath).fileName();
+
+    const QString sourceDir = QFileInfo(localPath).absolutePath();
+    const QString targetDir = QDir(playlistDirectory()).absolutePath();
+    const bool inFolder = sourceDir.compare(targetDir, Qt::CaseInsensitive) == 0;
+
+    QVariantMap result;
+    result[QStringLiteral("fileName")] = fileName;
+    result[QStringLiteral("alreadyInPlaylistDirectory")] = inFolder;
+    result[QStringLiteral("collidesWithExisting")] =
+        !inFolder && QFile::exists(playlistDirectory() + QChar('/') + fileName);
+    return result;
+}
+
+bool PlaylistManager::importPlaylistFile(const QString &sourcePathOrUrl,
+                                          const QString &fileName) const
+{
+    const QUrl url(sourcePathOrUrl);
+    const QString sourcePath = url.isLocalFile() ? url.toLocalFile() : sourcePathOrUrl;
+    const QString destPath   = playlistDirectory() + QChar('/') + fileName;
+
+    if (QFile::exists(destPath))
+        QFile::remove(destPath);
+    return QFile::copy(sourcePath, destPath);
+}
+
+QString PlaylistManager::findAvailableCopyName(const QString &nameWithExt) const
+{
+    const int dot = nameWithExt.lastIndexOf(QChar('.'));
+    const QString base = dot >= 0 ? nameWithExt.left(dot) : nameWithExt;
+    const QString ext  = dot >= 0 ? nameWithExt.mid(dot)  : QString();
+    const QString dir  = playlistDirectory();
+
+    for (int n = 1; n <= 9; ++n) {
+        const QString candidate = QStringLiteral("%1-%2%3").arg(base, QString::number(n), ext);
+        if (!QFile::exists(dir + QChar('/') + candidate))
+            return candidate;
+    }
+    return QString();
+}

@@ -17,6 +17,10 @@ Rectangle {
     property var appConfig: null
     color: Theme.surfaceContainerLow
 
+    // Bridges loadPlaylistDialog.onAccepted -> importConflictDialog's
+    // async onChoiceMade -- see UC-30.
+    property string _pendingImportSourcePath: ""
+
     signal newPlaylistRequested()
     // Emitted when the user clicks EXPORT with a named playlist loaded --
     // Main.qml opens ExportPlaylistDialog. See UC-26.
@@ -91,21 +95,100 @@ Rectangle {
         onAccepted: {
             if (!root.playlistManager || !root.engine) return
             if (root.autoPlay && !root.autoPlay.manualQueueEditingAllowed) return
-            const result = root.playlistManager.loadPlaylist(
-                               loadPlaylistDialog.selectedFile.toString())
-            const tracks = result.tracks
-            if (tracks && tracks.length > 0) {
-                // loadPlaylistTracks() always replaces the queue -- it
-                // crossfades into the new playlist when CROSSFADE is on and
-                // something is currently playing, otherwise it's an instant
-                // replace (see UC-23).
-                if (root.autoPlay) root.autoPlay.clearHistory()
-                root.engine.loadPlaylistTracks(tracks)
-                root.engine.setActivePlaylistName(result.fileName)
+
+            // A file picked from outside the playlist folder is imported
+            // in first (copied into it) so PlaylistsPanel/PlaylistViewer's
+            // convenience works for it going forward, and future queue-sync
+            // writes land on the real file instead of a same-named
+            // stranger in the playlist folder. See UC-30.
+            const sourcePath = loadPlaylistDialog.selectedFile.toString()
+            const info = root.playlistManager.classifyPlaylistSource(sourcePath)
+
+            if (info.alreadyInPlaylistDirectory) {
+                root._finishLoad(root.playlistManager.loadPlaylist(sourcePath))
+            } else if (info.collidesWithExisting) {
+                root._pendingImportSourcePath = sourcePath
+                importConflictDialog.fileName = info.fileName
+                importConflictDialog.open()
+            } else {
+                importPlaylistDialog.startImport(sourcePath, info.fileName)
             }
-            if (result.missing && result.missing.length > 0)
-                root.missingPlaylistTracks(result.missing)
         }
+    }
+
+    // Shared by every LOAD outcome above (in-folder, post-import, and
+    // "loaded directly from origin" when the user declines to overwrite).
+    function _finishLoad(result) {
+        const tracks  = result.tracks
+        const missing = result.missing
+        if (root.engine && tracks && tracks.length > 0) {
+            // loadPlaylistTracks() always replaces the queue -- it
+            // crossfades into the new playlist when CROSSFADE is on and
+            // something is currently playing, otherwise it's an instant
+            // replace (see UC-23).
+            if (root.autoPlay) root.autoPlay.clearHistory()
+            root.engine.loadPlaylistTracks(tracks)
+            root.engine.setActivePlaylistName(result.fileName)
+        }
+        if (missing && missing.length > 0) root.missingPlaylistTracks(missing)
+    }
+
+    // ── Import: name-collision confirmation ─────────────────────────────
+    // See UC-30 -- opened by loadPlaylistDialog above.
+    ChoiceDialog {
+        id: importConflictDialog
+        property string fileName: ""
+        title:   qsTr("PLAYLIST EXISTS")
+        message: qsTr("Would you like to import the Playlist and overwrite the Playlist that exists in the Playlist Folder?\nIf 'NO' then the Playlist will be imported as a new Playlist with a Postfix like '-1'")
+        choices: ["YES", "NO"]
+        onChoiceMade: (choice) => {
+            if (choice === "YES") {
+                importPlaylistDialog.startImport(root._pendingImportSourcePath, fileName)
+            } else {
+                // Don't overwrite -- import as a de-conflicted copy
+                // instead ("<name> - Copy 0N"), so the imported playlist
+                // still ends up as a real, correctly-badged file in the
+                // playlist folder rather than merely playing from its
+                // original location under a name that collides with an
+                // unrelated existing playlist.
+                const copyName = root.playlistManager.findAvailableCopyName(fileName)
+                if (copyName === "") {
+                    ambiguousPlaylistBox.open()
+                } else {
+                    importPlaylistDialog.startImport(root._pendingImportSourcePath, copyName)
+                }
+            }
+        }
+    }
+
+    // ── Import: too many "- Copy 0N" collisions already ──────────────────
+    // See UC-30 -- opened by importConflictDialog's NO branch above.
+    MessageBox {
+        id: ambiguousPlaylistBox
+        title:   qsTr("AMBIGUOUS PLAYLIST")
+        message: qsTr("Too many ambiguous Playlists are in the Playlist Folder.\nThe Playlist could not be imported.")
+    }
+
+    // ── Import: copy progress + result ───────────────────────────────────
+    // See UC-30 -- opened by loadPlaylistDialog/importConflictDialog above.
+    ImportPlaylistDialog {
+        id: importPlaylistDialog
+        playlistManager: root.playlistManager
+        onImportFinished: (success, fileName) => {
+            if (success) {
+                const path = root.playlistManager.playlistDirectory() + "/" + fileName
+                root._finishLoad(root.playlistManager.loadPlaylist(path))
+            } else {
+                importErrorBox.message =
+                    qsTr("Could not import \"%1\" into the Playlist Folder.").arg(fileName)
+                importErrorBox.open()
+            }
+        }
+    }
+
+    MessageBox {
+        id: importErrorBox
+        title: qsTr("IMPORT FAILED")
     }
 
     // ── Delete-current-rating confirmation ──────────────────────────────

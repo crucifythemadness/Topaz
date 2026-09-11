@@ -2076,6 +2076,10 @@ This is valid XSPF and no special handling is required.
 | **Precondition** | Application is running. |
 | **Trigger** | User clicks **LOAD** in the `NowPlaying` panel. |
 
+> A file picked from outside `PlaylistManager::playlistDirectory()` is
+> imported into that folder first — see UC-30 — before continuing with
+> the flow below.
+
 ### Normal Flow
 
 1. User clicks **LOAD**. `loadPlaylistDialog.currentFolder` is set to
@@ -5690,4 +5694,122 @@ MinGW's ~32k-COFF-section-per-object ceiling, failing the build with
 `-Wa,-mbig-obj` to the `topaz` target's compile options for MinGW builds
 (`CMakeLists.txt`) — the standard fix for this MinGW/COFF limit, inert on
 non-Windows toolchains.
+
+---
+
+## UC-30 Import an Externally-Located Playlist (NowPlaying LOAD)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Close a real gap in UC-10's LOAD flow: a playlist picked from outside Topaz's own playlist folder played correctly, but `PlaylistsPanel`/`PlaylistViewer` never saw it (both only ever list `PlaylistManager::playlistDirectory()`), and every subsequent queue-sync write (`appendTrack()`/`removeTrackByPath()`/`rewritePlaylist()`, which all build their target path as `playlistDirectory() + "/" + activePlaylistName`) silently wrote into the playlist folder under the same bare file name — never touching the original file, and silently overwriting any unrelated same-named playlist already there if one happened to exist. |
+| **Actor** | User |
+| **Trigger** | User clicks **LOAD** in `NowPlaying`, then picks an `.xml` file outside `PlaylistManager::playlistDirectory()` via the native file picker. |
+
+### Normal Flow
+
+1. `loadPlaylistDialog.onAccepted` (`NowPlaying.qml`) calls the new
+   `PlaylistManager::classifyPlaylistSource(pathOrUrl)` *before* touching
+   the queue at all. It resolves the picked path (accepting both a plain
+   path and a `file://` URL, same convention as `loadPlaylist()`) and
+   returns `{ fileName, alreadyInPlaylistDirectory, collidesWithExisting }`
+   — `alreadyInPlaylistDirectory` is a case-insensitive directory compare
+   (Windows), `collidesWithExisting` is only meaningful when that's
+   `false` (a same-named file already sitting in the playlist folder).
+2. **Already in the playlist folder** (the common case — picking a file
+   that happens to already live there, or re-loading one already active):
+   behaves exactly as before UC-30 existed — straight to `loadPlaylist()`
+   → the queue.
+3. **Outside the folder, no name collision**: silently imported — no
+   prompt. `PlaylistManager::importPlaylistFile(sourcePathOrUrl, fileName)`
+   copies the source into `playlistDirectory()/fileName` while
+   `ImportPlaylistDialog.qml` is open (see "Import dialog" below), then
+   loads the in-folder copy.
+4. **Outside the folder, name collision**: a `ChoiceDialog` — title
+   "PLAYLIST EXISTS", message "Would you like to import the Playlist and
+   overwrite the Playlist that exists in the Playlist Folder?\nIf 'NO'
+   then the Playlist will be imported as a new Playlist with a Postfix
+   like '-1'", `choices: ["YES", "NO"]` (the same reusable N-button
+   component `RestoreDialog.qml` already uses for its own
+   playlist-conflict prompt, just two choices instead of three) —
+   - **YES**: same as step 3, overwriting the existing in-folder file
+     (`importPlaylistFile()` removes the destination first — `QFile::copy()`
+     itself refuses to overwrite — mirroring
+     `BackupRestoreController::restorePlaylistEntry()`'s own "overwrite"
+     action).
+   - **NO**: still imported, just not under the colliding name — a real
+     bug in the first shipped version of UC-30 loaded directly from the
+     original external location instead, leaving `activePlaylistName` set
+     to a bare file name that collided with the *unrelated* existing
+     in-folder playlist; since `PlaylistsPanel`'s "(IN QUEUE)" badge is a
+     plain `activePlaylistName === fileName` string match, that unrelated
+     playlist got badged "(IN QUEUE)" even though it wasn't what was
+     playing. Fixed by generating a de-conflicted name instead:
+     `PlaylistManager::findAvailableCopyName(nameWithExt)` tries
+     `"<base>-1<ext>"` through `"<base>-9<ext>"` and imports under the
+     first free one (a 9-slot cap, but a plain `"-N"` suffix rather than
+     `BackupRestoreController::restorePlaylistEntry()`'s own zero-padded
+     `"- Copy 0N"` scheme for RESTORE's equivalent playlist-name
+     collision, UC-27 — the two are independent methods on different
+     classes, deliberately not sharing an implementation). If all 9 are
+     taken, the import is aborted outright — no fallback — with an
+     "AMBIGUOUS PLAYLIST" / "Too many ambiguous Playlists are in the
+     Playlist Folder.\nThe Playlist could not be imported." `MessageBox`;
+     the queue and active playlist are left exactly as they were.
+5. Every successful branch funnels through one shared `NowPlaying.qml`
+   function, `_finishLoad(result)` — the exact body
+   `loadPlaylistDialog.onAccepted` had before UC-30 (crossfade-eligible
+   `loadPlaylistTracks()` + `setActivePlaylistName()` +
+   `missingPlaylistTracks()` for any unresolvable entries) — so every
+   outcome (in-folder, imported under its own name, or imported under a
+   de-conflicted copy name) finishes identically once a `loadPlaylist()`
+   result is in hand. As a result every successful LOAD-via-NowPlaying now
+   ends up as some real, listed file in the playlist folder — the
+   "(IN QUEUE)" badge can no longer point at the wrong entry.
+
+### Import dialog (`ImportPlaylistDialog.qml`)
+
+Chrome matches `ChoiceDialog.qml`/`RestoreDialog.qml`'s header bar; the
+body matches `ExportPlaylistDialog.qml`'s running-state view exactly — a
+centered mono "Importing: `<name>`" label (elide middle) above an 8px
+rounded `Theme.primary` progress `Rectangle` with a
+`Behavior on width { NumberAnimation { duration: 400 } }`. Opened via
+`startImport(sourcePath, fileName)`; `closePolicy: Popup.NoAutoClose` and
+no manual close button — it only ever closes itself.
+
+The copy itself is synchronous on the main thread (`QFile::copy()`
+inside `importPlaylistFile()`) — a single small XSPF file is the same
+"small file, no worker thread" scale of work `MilkdropCleanupController`/
+`BackupRestoreController` already do synchronously; `PlaylistExportWorker`'s
+dedicated `QThread` exists specifically because multi-GB *audio* copies
+would visibly freeze the UI, which a playlist XML file doesn't come
+close to. Since one synchronous `QFile::copy()` call has no meaningful
+mid-copy progress to sample, the bar is a short, fixed-duration *cosmetic*
+sweep to 100% — visually consistent with `ExportPlaylistDialog`'s real
+byte-progress bar, but not itself a byte count. `Qt.callLater()` defers
+the actual `importPlaylistFile()` call by one event-loop tick so the
+popup visibly paints at 0% before the sweep starts, rather than opening
+already full; a 400 ms `Timer` (matching the width `Behavior`'s duration)
+then closes the popup and emits `importFinished(success, fileName)`.
+`NowPlaying.qml` reacts by loading the in-folder copy on success, or
+showing a plain "IMPORT FAILED" `MessageBox` on failure (e.g. the
+destination was locked/read-only) — the queue is left untouched either
+way.
+
+### Design decisions
+
+- **Detection is directory-based, not folder-membership-based**: a file
+  is only ever "already in the playlist folder" if its *containing
+  directory* matches `playlistDirectory()` — a same-named file living
+  anywhere else is always treated as external, even if byte-identical.
+- **`PlaylistManager` owns import, not a new controller**: it already
+  owns every other piece of playlist file I/O (`createPlaylist`/
+  `loadPlaylist`/`deletePlaylist`/`appendTrack`/`removeTrackByPath`/
+  `rewritePlaylist`); two more small file-I/O methods fit the existing
+  class rather than justifying a new one.
+- **No change to UC-10's other LOAD entry points**: `PlaylistViewer.qml`'s
+  own LOAD button only ever operates on `PlaylistsData.selectedRawTracks`
+  — playlists already selected from `PlaylistsPanel`'s listing of
+  `playlistDirectory()` — so it can never pick a file from outside the
+  folder in the first place; UC-30 is specific to `NowPlaying`'s native
+  file-picker LOAD.
 

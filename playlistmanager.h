@@ -94,6 +94,34 @@ public:
     // Returns true on success.
     Q_INVOKABLE bool deletePlaylist(const QString &nameWithExt);
 
+    // Classifies a file picked via NowPlaying's LOAD FileDialog before
+    // it's actually loaded -- see UC-30. pathOrUrl accepts both a local
+    // path and a file:// URL, same convention as loadPlaylist(). Returns:
+    //   fileName                   - bare file name (e.g. "Foo.xml")
+    //   alreadyInPlaylistDirectory - true if pathOrUrl already resolves
+    //                                to a file directly inside
+    //                                playlistDirectory() (case-insensitive
+    //                                path compare -- Windows)
+    //   collidesWithExisting       - true if a *different* file with this
+    //                                name already exists in the playlist
+    //                                folder (only meaningful when
+    //                                alreadyInPlaylistDirectory is false)
+    Q_INVOKABLE QVariantMap classifyPlaylistSource(const QString &pathOrUrl) const;
+
+    // Copies an external XSPF file into the playlist folder under
+    // fileName, overwriting any existing file there (QFile::copy()
+    // refuses to overwrite, so the destination is removed first if
+    // present -- mirrors BackupRestoreController::restorePlaylistEntry()'s
+    // "overwrite" action). Returns true on success. See UC-30.
+    Q_INVOKABLE bool importPlaylistFile(const QString &sourcePathOrUrl,
+                                         const QString &fileName) const;
+
+    // Finds a free "<base>-N<ext>" name (N = 1..9) in the playlist folder
+    // for a colliding nameWithExt. Returns the first candidate that
+    // doesn't already exist, or an empty string if all 9 are taken. See
+    // UC-30.
+    Q_INVOKABLE QString findAvailableCopyName(const QString &nameWithExt) const;
+
 private:
     QByteArray buildXspf(const QString &title,
                           const QVariantList &tracks) const;
