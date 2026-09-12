@@ -1,12 +1,12 @@
 ﻿import QtQuick
 
-// Bottom toolbar: Auto Play | Audio Visualizer | Milkdrop | Tag Information | Scan Directories
+// Bottom toolbar: Auto Play | Audio Visualizer | Milkdrop | Tag Information | Scan Folders
 Rectangle {
     id: root
     height: 56
     color: Theme.surfaceContainerLow
 
-    // Emitted when the user clicks the SCAN DIRECTORIES button.
+    // Emitted when the user clicks the SCAN FOLDERS button.
     signal scanRequested()
 
     // Emitted when the user clicks the TAG INFORMATION button — Main.qml owns
@@ -61,14 +61,14 @@ Rectangle {
                 { label: "AUDIO VISUALIZER", icon: "\u2261", active: false },
                 { label: "MILKDROP",        icon: "\u2733", active: false },
                 { label: "TAG INFORMATION", icon: "\u24D8", active: false },
-                { label: "SCAN DIRECTORIES",icon: "\u29C9", active: false }
+                { label: "SCAN FOLDERS",    icon: "\u29C9", active: false }
             ]
 
             delegate: Item {
                 width:  root.width / 5
                 height: root.height
 
-                readonly property bool isScanBtn:     modelData.label === "SCAN DIRECTORIES"
+                readonly property bool isScanBtn:     modelData.label === "SCAN FOLDERS"
                 readonly property bool isAutoPlayBtn: modelData.label === "AUTO PLAY"
                 readonly property bool isTagInfoBtn:  modelData.label === "TAG INFORMATION"
                 readonly property bool isAudioVisualizerBtn: modelData.label === "AUDIO VISUALIZER"

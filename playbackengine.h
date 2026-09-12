@@ -266,6 +266,15 @@ signals:
     // has no next track to load) — nothing else notifies of this state, since
     // neither queueCountChanged nor currentIndexChanged fires in that branch.
     void queueExhausted();
+    // Emitted the moment a queued track's file no longer exists right when
+    // Topaz was about to hand it to a deck -- see handleMissingTrack() and
+    // UC-31. Playback is already paused by the time this fires; QML reacts
+    // by showing the MISSING TRACK dialog and kicking off a targeted rescan
+    // of the FILE MONITORING folder the file belonged to (Main.qml owns both
+    // of those, keeping PlaybackEngine decoupled from LibraryModel/AppConfig
+    // folder concerns, same split as missingPlaylistTracks/UC-10).
+    void trackMissing(const QString &artist, const QString &album,
+                       const QString &title, const QString &filePath);
 
     // Decoded PCM audio for whichever deck is currently active (m_activeDeck),
     // for AudioVisualizerController to consume — see UC-19. Not QML-facing (no
@@ -284,9 +293,20 @@ private:
     // once per app launch, not hot-swapped -- see UC-15 "Step 2".
     void createDecksIfNeeded();
 
-    void loadTrack(int index);
+    // Returns false (and calls handleMissingTrack() instead of loading
+    // anything) when m_queue.at(index)'s file no longer exists on disk --
+    // the single choke point every hard-cut/manual transition funnels
+    // through, see UC-31. Callers must not call play() when this returns
+    // false: m_deck has no valid source and m_currentIndex is left
+    // untouched (the missing track never becomes "current").
+    bool loadTrack(int index);
     void advanceToNext();
     void clearCoverSource();
+    // Pauses whatever's still audible and emits trackMissing() -- shared by
+    // loadTrack(), startCrossfade(), and loadPlaylistTracks()'s
+    // queue-replacing crossfade, the three places a file's existence is
+    // checked right before it would be handed to a deck. See UC-31.
+    void handleMissingTrack(const TrackInfo &t);
 
     // Metadata-only bookkeeping for "index becomes current": updates
     // m_currentIndex, resolves rating/ratingId, kicks off the cover fetch,

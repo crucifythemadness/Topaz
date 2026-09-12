@@ -128,6 +128,14 @@ signals:
 private slots:
     void onTrackPlayedToCompletion(const QString &filePath);
     void onQueueExhausted();
+    // Forces AUTO PLAY off the moment PlaybackEngine discovers a queued
+    // track's file is missing (see UC-31) -- a deliberate stop, not a
+    // starvation stop, so it reuses stop(false) exactly like the manual
+    // toggle() path. Track details aren't needed here; MissingTrackDialog
+    // (wired directly to PlaybackEngine::trackMissing in Main.qml) handles
+    // presenting them.
+    void onTrackMissing(const QString &artist, const QString &album,
+                         const QString &title, const QString &filePath);
     void onPollTick();
 
 private:

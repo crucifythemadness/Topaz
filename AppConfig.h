@@ -284,6 +284,15 @@ public:
     // other folder-list mutation here; no change is applied immediately.
     Q_INVOKABLE void setFolderActive(int index, bool active);
 
+    // Forces every `folders` binding to re-evaluate (re-resolving each
+    // entry's live path/available via VolumePath) with no underlying
+    // m_folders data having changed. Called by LibraryModel after a scan
+    // completes so a folder that disappeared/reappeared while Topaz was
+    // running is reflected immediately in Setup Dialog's FILE MONITORING
+    // list, not only after the next restart. Deliberately NOT something
+    // SetupDialog's _foldersDirty tracking reacts to -- see UC-04/UC-07.
+    Q_INVOKABLE void refreshFolderAvailability() { emit foldersChanged(); }
+
     // ── Layout persistence ────────────────────────────────────────────────
     // Saves window size and all resizable panel widths in one atomic write.
     // Call from QML via a debounce timer on resize events.

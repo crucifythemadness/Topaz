@@ -286,6 +286,24 @@ ApplicationWindow {
         function onBassUnavailableFallback() { bassFallbackNoticeBox.open() }
     }
 
+    // "MISSING TRACK" alert -- see UC-31. Genuine always-on-top top-level
+    // Window (not a Popup), so it renders above Milkdrop/AudioVisualizer/
+    // BigCover/TagInfo even if one of those is floating full-screen on
+    // another monitor when this fires. Kicks off the targeted single-folder
+    // rescan here too, keeping PlaybackEngine decoupled from LibraryModel/
+    // AppConfig folder concerns -- same split as missingPlaylistTracks/UC-10.
+    MissingTrackDialog { id: missingTrackDialog }
+    Connections {
+        target: engine
+        function onTrackMissing(artist, album, title, filePath) {
+            missingTrackDialog.artistText = artist
+            missingTrackDialog.albumText  = album
+            missingTrackDialog.titleText  = title
+            missingTrackDialog.openCentered(root)
+            libraryModel.rescanFolderContaining(filePath)
+        }
+    }
+
     // Playlist manager — handles XSPF file creation.
     PlaylistManager { id: playlistManager }
 

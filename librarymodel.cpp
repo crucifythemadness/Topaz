@@ -4,6 +4,8 @@
 #include "ratingcache.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QThread>
 #include <algorithm>
 #include <numeric>
@@ -178,6 +180,9 @@ void LibraryModel::startWorkerThread()
             m_scanWorker,  &QObject::deleteLater);
 
     // Scan results → main thread
+    connect(m_scanWorker, &LibraryScanner::scanStarted,
+            this, &LibraryModel::onScanStarted,
+            Qt::QueuedConnection);
     connect(m_scanWorker, &LibraryScanner::scanProgress,
             this, &LibraryModel::onScanProgress,
             Qt::QueuedConnection);
@@ -191,6 +196,9 @@ void LibraryModel::startWorkerThread()
             Qt::QueuedConnection);
     connect(this, &LibraryModel::_requestStatCheck,
             m_scanWorker, &LibraryScanner::statCheck,
+            Qt::QueuedConnection);
+    connect(this, &LibraryModel::_requestFolderScan,
+            m_scanWorker, &LibraryScanner::scanFolder,
             Qt::QueuedConnection);
 
     m_scanThread->start();
@@ -297,6 +305,43 @@ void LibraryModel::startFullScan()
                           m_tracks);
 }
 
+void LibraryModel::rescanFolderContaining(const QString &filePath)
+{
+    if (!m_appConfig) return;
+    if (m_scanning) return; // don't stack scans -- same guard as startFullScan()
+
+    const QVariantList folders = activeFolders();
+    QString target;
+    for (const QVariant &v : folders) {
+        const QVariantMap m    = v.toMap();
+        const QString     path = m.value(QStringLiteral("path")).toString();
+        if (path.isEmpty()) continue;
+
+        QString prefix = path;
+        if (!prefix.endsWith(QChar('/')))
+            prefix += QChar('/');
+        if (!filePath.startsWith(prefix, Qt::CaseInsensitive)) continue;
+
+        if (!m.value(QStringLiteral("includeSubfolders")).toBool()) {
+            // Non-recursive folder: filePath must be a direct child, not a
+            // deeper subfolder.
+            if (QFileInfo(filePath).absolutePath().compare(
+                    QDir(path).absolutePath(), Qt::CaseInsensitive) != 0)
+                continue;
+        }
+        target = path;
+        break;
+    }
+    if (target.isEmpty()) return; // no configured folder matches -- nothing to rescan
+
+    m_scanning     = true;
+    m_scanProgress = 0;
+    emit scanningChanged();
+    emit scanProgressChanged();
+
+    emit _requestFolderScan(m_appConfig->genres(), folders, m_tracks, target);
+}
+
 QVariantList LibraryModel::activeFolders() const
 {
     QVariantList result;
@@ -312,6 +357,22 @@ QVariantList LibraryModel::activeFolders() const
 
 // ── Scan result slots ─────────────────────────────────────────────────────
 
+void LibraryModel::onScanStarted()
+{
+    // Already optimistically set by startFullScan()/rescanFolderContaining()/
+    // loadCacheAndStartStatCheck() -- avoid a redundant, no-op
+    // scanningChanged() emission for those. This is the ONLY path that
+    // ever sets scanning=true for a scan LibraryModel didn't itself
+    // request -- the file-system-watcher's debounced auto-rescan (see
+    // UC-07), which runs entirely inside LibraryScanner and would
+    // otherwise never surface as "scanning" to BottomBar's button.
+    if (m_scanning) return;
+    m_scanning     = true;
+    m_scanProgress = 0;
+    emit scanningChanged();
+    emit scanProgressChanged();
+}
+
 void LibraryModel::onScanProgress(int done, int total)
 {
     m_scanProgress = (total > 0) ? (done * 100 / total) : 0;
@@ -325,6 +386,13 @@ void LibraryModel::onScanCompleted(QList<TrackInfo> tracks)
     emit scanningChanged();
     emit scanProgressChanged();
     applyTracks(std::move(tracks));
+
+    // A scan may have detected a configured folder disappearing/
+    // reappearing while Topaz was running (see UC-07's parent-directory
+    // watch) -- refresh Setup Dialog's live FILE MONITORING display to
+    // match, without implying a user edit happened (see AppConfig::
+    // refreshFolderAvailability()'s own doc comment).
+    if (m_appConfig) m_appConfig->refreshFolderAvailability();
 
     // Every completed scan now applies rating enrichment (see LibraryScanner),
     // so the first one to arrive in this session is when ratings become trustworthy.

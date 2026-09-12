@@ -77,6 +77,8 @@ void AutoPlayController::setEngine(PlaybackEngine *engine)
                 this, &AutoPlayController::onTrackPlayedToCompletion);
         connect(m_engine, &PlaybackEngine::queueExhausted,
                 this, &AutoPlayController::onQueueExhausted);
+        connect(m_engine, &PlaybackEngine::trackMissing,
+                this, &AutoPlayController::onTrackMissing);
     }
     emit engineChanged();
 }
@@ -244,6 +246,12 @@ void AutoPlayController::onQueueExhausted()
     // separate playAt() call is needed -- it would just reload the same
     // track a second time.
     m_engine->addTrack(candidate, true);
+}
+
+void AutoPlayController::onTrackMissing(const QString &, const QString &,
+                                         const QString &, const QString &)
+{
+    if (m_active) stop(false);
 }
 
 QVariantMap AutoPlayController::pickNextCandidate() const

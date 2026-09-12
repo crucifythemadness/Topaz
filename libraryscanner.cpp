@@ -176,8 +176,10 @@ void LibraryScanner::resolveCoverArt(QList<TrackInfo> &tracks, QThreadPool &pool
 // wiring bug, since fixed by unifying on this single pipeline). Both public
 // slots now delegate here.
 void LibraryScanner::performScan(QStringList genres, QVariantList folders,
-                                  QList<TrackInfo> existingCache)
+                                  QList<TrackInfo> existingCache,
+                                  const QString &scanOnlyFolderPath)
 {
+    emit scanStarted();
     m_cancelRequested.store(false, std::memory_order_relaxed);
 
     m_lastGenres  = genres;
@@ -217,8 +219,20 @@ void LibraryScanner::performScan(QStringList genres, QVariantList folders,
     //    Canonicalizing once per folder (not per file) keeps this cheap.
     const QList<QStorageInfo> mountedVolumes = QStorageInfo::mountedVolumes();
 
+    // scanOnlyFolderPath (UC-31, LibraryModel::rescanFolderContaining()):
+    // rather than restrict `folders` itself (which would make every folder
+    // NOT passed in silently lose its cached tracks below -- performScan()
+    // treats `folders` as the complete authoritative set), every folder
+    // still contributes to rootDirs (so updateWatcher() keeps covering all
+    // of them) but only the matching one is actually walked; every other
+    // folder's existingCache entries are carried into the result verbatim
+    // instead, exactly like an unchanged file already does.
+    const bool scoped = !scanOnlyFolderPath.isEmpty();
+
     QList<QFileInfo> discovered;
     QStringList rootDirs;
+    QSet<QString> parentDirs;
+    QList<TrackInfo> passthroughResult;
     for (const QVariant &v : std::as_const(folders)) {
         if (m_cancelRequested.load(std::memory_order_relaxed)) return;
         const QVariantMap m    = v.toMap();
@@ -228,6 +242,34 @@ void LibraryScanner::performScan(QStringList genres, QVariantList folders,
         if (!canonical.isEmpty())
             path = canonical;
         rootDirs.append(path);
+
+        // Also watch this folder's own parent -- QFileSystemWatcher doesn't
+        // reliably notify when a directly-watched directory itself is
+        // deleted, only when a directory it's watching has a child
+        // added/removed. Watching the parent turns "the configured folder
+        // itself was deleted" into that same, already-reliable "child
+        // removed" case that already detects e.g. an Artist folder
+        // appearing/disappearing directly under a watched Genre root. Pure
+        // string manipulation (works even once `path` no longer exists),
+        // and runs unconditionally for every folder just like rootDirs
+        // above, so a UC-31 scoped rescan never needs to cache/carry this
+        // forward -- it's recomputed fresh from the complete `folders` list
+        // every single call. See UC-07.
+        const QString parent = QFileInfo(path).absolutePath();
+        if (!parent.isEmpty() && parent.compare(path, Qt::CaseInsensitive) != 0)
+            parentDirs.insert(parent);
+
+        if (scoped && path.compare(scanOnlyFolderPath, Qt::CaseInsensitive) != 0) {
+            QString prefix = path;
+            if (!prefix.endsWith(QChar('/')))
+                prefix += QChar('/');
+            for (const TrackInfo &c : std::as_const(existingCache)) {
+                if (c.filePath.startsWith(prefix, Qt::CaseInsensitive))
+                    passthroughResult.append(c);
+            }
+            continue;
+        }
+
         const bool recursive = m[QStringLiteral("includeSubfolders")].toBool();
         discovered.append(discoverAudioFiles(path, recursive));
     }
@@ -236,8 +278,8 @@ void LibraryScanner::performScan(QStringList genres, QVariantList folders,
     // 2. Classify against the real existingModified map: unchanged files
     //    reuse their cached entry verbatim (no tag read at all); new/changed
     //    files queue for a fresh parallel tag read.
-    QList<TrackInfo> result;
-    result.reserve(discovered.size());
+    QList<TrackInfo> result = passthroughResult;
+    result.reserve(result.size() + discovered.size());
     QStringList needsRead;
     needsRead.reserve(discovered.size());
 
@@ -295,7 +337,17 @@ void LibraryScanner::performScan(QStringList genres, QVariantList folders,
     }
 
     LibraryCache::save(result);
-    updateWatcher(rootDirs);
+
+    QStringList allWatchDirs = rootDirs;
+    for (const QString &p : std::as_const(parentDirs)) {
+        bool alreadyWatched = false;
+        for (const QString &r : std::as_const(rootDirs)) {
+            if (r.compare(p, Qt::CaseInsensitive) == 0) { alreadyWatched = true; break; }
+        }
+        if (!alreadyWatched) allWatchDirs.append(p);
+    }
+    updateWatcher(allWatchDirs);
+
     emit scanCompleted(result);
 }
 
@@ -311,4 +363,12 @@ void LibraryScanner::statCheck(QStringList genres, QVariantList folders,
                                 QList<TrackInfo> existingCache)
 {
     performScan(std::move(genres), std::move(folders), std::move(existingCache));
+}
+
+void LibraryScanner::scanFolder(QStringList genres, QVariantList folders,
+                                 QList<TrackInfo> existingCache,
+                                 QString scanOnlyFolderPath)
+{
+    performScan(std::move(genres), std::move(folders), std::move(existingCache),
+                scanOnlyFolderPath);
 }

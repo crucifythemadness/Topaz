@@ -290,19 +290,24 @@ row.
 ### Design notes
 
 - **Auto-rescan on close**: `SetupDialog` tracks a session-scoped
-  `_foldersDirty` flag, set by a `Connections { target: appConfig;
-  function onFoldersChanged() {...} }` block — every folder mutation above
-  emits `foldersChanged`, and (confirmed by grepping the whole codebase)
-  nothing outside the FILE MONITORING tab ever calls those methods or
-  connects to that signal, so it's already, structurally, exactly "a FILE
-  MONITORING edit happened this session," with no separate dirty-tracking
-  needed. Deliberately does **not** react to `genresChanged`/other settings
-  changes elsewhere in the dialog. Reset to `false` in `onAboutToShow` (so
-  only changes made *during the current open session* count) and consumed
-  in `onClosed`, which calls `libraryModel.startFullScan()` if the flag is
-  set — `closePolicy: Popup.NoAutoClose` means the header's ✕ button is the
-  dialog's only way to close, so this is a single, reliable hook. See
-  UC-05 for the resulting scan.
+  `_foldersDirty` flag, set explicitly by each of the 5 folder-editing
+  actions above (add / remove / clear / toggle SUBFOLDERS / toggle
+  ACTIVE) right where each one calls its `AppConfig` method. Deliberately
+  *not* inferred from `AppConfig::foldersChanged` firing anymore — that
+  signal is also emitted by `AppConfig::refreshFolderAvailability()`
+  after any background scan completes (see UC-07's live-refresh of this
+  same folder list), which is not a user edit and must not queue an
+  extra rescan on close. (Before UC-07's parent-directory watch existed,
+  `foldersChanged` really was only ever emitted by these 5 actions, so a
+  blanket `Connections` listener was equivalent and simpler; that
+  invariant no longer holds.) Deliberately does **not** react to
+  `genresChanged`/other settings changes elsewhere in the dialog. Reset
+  to `false` in `onAboutToShow` (so only changes made *during the
+  current open session* count) and consumed in `onClosed`, which calls
+  `libraryModel.startFullScan()` if the flag is set — `closePolicy:
+  Popup.NoAutoClose` means the header's ✕ button is the dialog's only way
+  to close, so this is a single, reliable hook. See UC-05 for the
+  resulting scan.
 
 ---
 
@@ -313,7 +318,7 @@ row.
 | **Goal** | Topaz scans all configured folders for audio files whose genre matches a configured genre and populates the library. |
 | **Actor** | User / System |
 | **Precondition** | At least one genre and one folder are configured in `AppConfig`. |
-| **Trigger** | User clicks **SCAN DIRECTORIES** in `BottomBar`, OR startup/watcher stat-check finds new/changed files, OR `SetupDialog` closes after a FILE MONITORING change (see UC-04's "Auto-rescan on close"). |
+| **Trigger** | User clicks **SCAN FOLDERS** in `BottomBar`, OR startup/watcher stat-check finds new/changed files, OR `SetupDialog` closes after a FILE MONITORING change (see UC-04's "Auto-rescan on close"). |
 
 ### Normal Flow — Full scan
 
@@ -403,7 +408,13 @@ row.
 
 - If no genres are configured: scan returns 0 tracks; user must configure genres first.
 - If no folders are configured: scan returns 0 tracks; user must configure folders first.
-- `BottomBar` SCAN DIRECTORIES button is visually disabled (label changes to "SCANNING…") while a scan is in progress.
+- `BottomBar` SCAN FOLDERS button is visually disabled (label changes to
+  "SCANNING…") while a scan is in progress, for every trigger listed
+  above — including the file-system-watcher's own debounced auto-rescan
+  (UC-07), which `LibraryScanner::performScan()` surfaces via a
+  `scanStarted()` signal (`LibraryModel::onScanStarted()`) since that
+  trigger runs entirely on the worker thread without `LibraryModel`
+  ever having requested it itself.
 
 ### Genre Matching Rule (Version 2)
 
@@ -467,18 +478,45 @@ making the track invisible to every genre-scoped view (`filteredAlbums`,
 
 | Field | Detail |
 |-------|--------|
-| **Goal** | Topaz automatically detects when audio files are added or removed while the application is running. |
+| **Goal** | Topaz automatically detects when audio files are added or removed while the application is running — including a configured root folder itself being deleted. |
 | **Actor** | System |
 | **Precondition** | At least one folder is configured; a scan has completed. |
 | **Trigger** | `QFileSystemWatcher::directoryChanged` fires. |
 
 ### Normal Flow
 
-1. `QFileSystemWatcher` (owned by `LibraryScanner` on the worker thread) watches all root configured folders.
+1. `QFileSystemWatcher` (owned by `LibraryScanner` on the worker thread)
+   watches every configured folder's root path, **plus each root's own
+   parent directory**. The parent watch exists specifically because
+   `QFileSystemWatcher` does not reliably fire `directoryChanged` when
+   the *watched directory itself* is deleted — only when something
+   changes *inside* a still-existing watched directory. Watching the
+   parent turns "the configured folder itself was deleted" into an
+   ordinary "child removed from a watched directory" event, the same
+   already-reliable mechanism that detects e.g. an Artist folder
+   appearing/disappearing directly under a watched Genre root. Computed
+   fresh on every `performScan()` call (`libraryscanner.cpp:234`) as
+   pure string manipulation (`QFileInfo(path).absolutePath()`) — no
+   extra filesystem access, and it runs unconditionally for every
+   configured folder even during a UC-31 scoped rescan, so it needs no
+   caching. Folders sharing one parent (the common case — most users put
+   every Genre folder directly under one Music root) naturally dedupe to
+   a single extra watched path.
 2. OS signals a directory change.
 3. A 2-second debounce timer (re)starts; rapid successive changes are coalesced.
 4. Timer fires → `statCheck` is triggered automatically.
-5. Updated library is emitted via `scanCompleted` → UI refreshes.
+5. Updated library is emitted via `scanCompleted` → `LibraryModel::
+   onScanCompleted()` applies the new track list **and** calls
+   `AppConfig::refreshFolderAvailability()` (a one-line `emit
+   foldersChanged()`, `AppConfig.h`) so Setup Dialog's FILE MONITORING
+   list — if open — immediately shows the folder as disconnected/missing
+   (or reconnected) instead of only reflecting reality after the next
+   restart. This is the *only* non-edit source of `foldersChanged`;
+   `SetupDialog.qml`'s `_foldersDirty` auto-rescan-on-close tracking
+   (UC-04) is deliberately set by its 5 explicit edit actions rather than
+   inferred from the signal, so a background scan completing while the
+   dialog happens to be open never triggers a spurious extra rescan on
+   close.
 
 ---
 
@@ -2347,6 +2385,9 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
 | **Precondition** | `AppConfig.crossfadeEnabled` is `true`; at least one more track follows the current one in the queue. |
 | **Trigger** | The active deck's playback position reaches `(duration − crossfadeSeconds)`. |
 
+> The next track's file existence is checked right at that trigger point,
+> before the fade-in deck's `setSource()` call — see UC-31.
+
 ### Normal Flow — Configure crossfade
 
 1. User opens **Setup → PLAYBACK** (renamed from CROSSFADE — this tab now also hosts
@@ -2870,6 +2911,17 @@ as a consequence of `activeChanged()` — no separate "reset" step needed. A `st
 signal fires alongside, and a system-tray notification is shown (see "Desktop
 notifications" below). Per the current design, nothing more sophisticated happens on
 starvation: AUTO PLAY simply stops and MANUAL MODE resumes.
+
+### Alternate: stopped by a missing track
+
+`setEngine()` also connects `PlaybackEngine::trackMissing` (see UC-31) to a
+third private slot, `onTrackMissing()`, which calls `stop(false)` if a
+session is active — the same manual-deactivation path the footer button
+uses, not the starvation path (no `starved()` signal, no starvation tray
+message), since this isn't "no candidates left," it's "the file Topaz was
+about to hand to a deck no longer exists." The MISSING TRACK dialog and
+folder rescan themselves are entirely `PlaybackEngine`/QML concerns (see
+UC-31) — `AutoPlayController` only needs to know to get out of the way.
 
 ### Desktop notifications
 
@@ -3463,9 +3515,9 @@ The "TAG INFORMATION" button already existed in `BottomBar`'s button model (icon
 but was previously a no-op. Two toggle-button idioms already existed in this file
 before this change — AUTO PLAY (Main.qml owns a full controller object with gating
 logic; the button reads `autoPlay.active` and calls `autoPlay.toggle()`) and SCAN
-DIRECTORIES (Main.qml owns a plain bool; the button just emits `scanRequested()` and
+FOLDERS (Main.qml owns a plain bool; the button just emits `scanRequested()` and
 reflects the externally-bound `scanning` property back). TAG INFORMATION follows the
-**SCAN DIRECTORIES** idiom — there's no gating logic here, just open/closed — via a
+**SCAN FOLDERS** idiom — there's no gating logic here, just open/closed — via a
 new `signal tagInfoToggleRequested()` and `property bool tagInfoPaneOpen` (bound from
 `Main.qml`), with the button's color reading `tagInfoPaneOpen` the same way the
 generic `modelData.active` path already did.
@@ -5812,4 +5864,164 @@ way.
   `playlistDirectory()` — so it can never pick a file from outside the
   folder in the first place; UC-30 is specific to `NowPlaying`'s native
   file-picker LOAD.
+
+## UC-31 Detect a Missing Queued Track Before Playing It
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | A queued track's file can be deleted (or its containing folder removed) after it was added to the queue — including mid-playlist, since UC-10's own pre-check only covers the moment a playlist is *loaded*. Before this use case, neither audio backend surfaces that failure at all: `BASS_StreamCreateFile()` returns 0 and `QMediaPlayer::setSource()` on a missing file never reaches `PlayingState`, so playback simply stalled at 0:00 with no message and no auto-skip. Topaz now checks every track's existence right before handing it to a deck, stops cleanly the instant one is missing, and self-heals the library index for just the affected folder. |
+| **Actor** | System |
+| **Trigger** | Any of: the first track added to an empty/finished queue; the crossfade lookahead reaching its trigger point; a manual NEXT/PREVIOUS/queue-row selection landing on a track whose file is gone; the natural end-of-track hard cut advancing onto one. |
+
+### Normal Flow
+
+1. **Layer A — `PlaybackEngine::loadTrack(int idx)`** is the single choke
+   point all 8 hard-cut/manual queue-transition call sites funnel through
+   (`addTrack`, `addTracks`, `removeAt` ×2, `playAt`, `togglePlay`,
+   `next`, `previous`, `advanceToNext`). It now returns `bool`: if
+   `QFileInfo::exists(m_queue.at(idx).filePath)` is `false`, it calls
+   `handleMissingTrack()` (below) and returns `false` *without* calling
+   `switchCurrentIndexTo()` — `m_currentIndex` and the displayed "now
+   playing" track are left exactly as they were, so the missing track
+   never becomes "current." Every call site changed its trailing
+   `m_deck->play()` to `if (loadTrack(idx)) m_deck->play();`, so a failed
+   load never plays a deck with no valid source.
+   - This single guard is also what satisfies "the first track the user
+     adds must be checked immediately": `addTrack()`/`addTracks()`'s
+     existing auto-play branch (queue was empty, or every track had
+     already finished — `m_queueFinished`) calls `loadTrack()`
+     synchronously at add time. There's no separate special case for
+     this — it falls out of the shared guard for free, since there's no
+     "currently playing" track yet to give a lookahead window.
+   - `TrackInfo.filePath` is always an absolute, already-resolved local
+     path by the time it's in `m_queue` (`PlaylistManager` resolves URLs
+     before storing; `LibraryCache` stores `VolumePath::quickPath()`
+     output), so a plain `QFileInfo::exists()` needs no further
+     volume/URL resolution here.
+2. **Layer B — the crossfade lookahead.** `onDeckPositionChanged()`'s
+   existing trigger (`pos >= dur - fadeMs`, where `fadeMs` is the
+   configured 2–10 s crossfade length) calls `startCrossfade()`, which
+   calls `m_decks[m_fadeInDeck]->setSource()` on the *next* track
+   directly — bypassing `loadTrack()` entirely, while the current track
+   is still audibly playing. `startCrossfade()` now checks the next
+   track's existence itself, right before that `setSource()` call; if
+   missing, it calls `handleMissingTrack()` and returns without ever
+   flipping `m_crossfading` or starting `m_fadeTimer` — the crossfade
+   never begins, so there's no audible fade-into-silence. The identical
+   guard was added to `loadPlaylistTracks()`'s separate queue-replacing
+   crossfade `setSource()` call (UC-23): if the incoming playlist's
+   first track vanished in the narrow race between `loadPlaylist()`'s own
+   pre-check and this call, the whole queue replacement is aborted
+   (old queue/deck untouched) rather than attempting a partial fallback.
+   - No separate timer/lead-time exists for the crossfade-*disabled*
+     case: there, `advanceToNext()` already runs essentially instantly
+     after the current track's natural `endOfMedia`, and Layer A's guard
+     inside `loadTrack()` catches it right there — a hard cut has no
+     "fade into nothing" window to get ahead of.
+3. **`handleMissingTrack(const TrackInfo &t)`** — the shared handler
+   both layers call:
+   ```cpp
+   void PlaybackEngine::handleMissingTrack(const TrackInfo &t)
+   {
+       if (m_deck) m_deck->pause();
+       emit trackMissing(t.artist, t.album, t.title, t.filePath);
+   }
+   ```
+   `m_deck->pause()` freezes whatever's still audible immediately (the
+   *currently* playing track in the Layer B case; a no-op if nothing was
+   playing in the Layer A case) and reuses the existing deck →
+   `playingChanged` → `isPlayingChanged()`/row `dataChanged` relay
+   (already wired for `togglePlay()`) — no new UI plumbing needed for
+   "stopped" to show up correctly. `m_userPaused` is deliberately *not*
+   reused here — it's documented as exclusively `togglePlay()`'s
+   explicit-pause flag, and setting it here would misrepresent why
+   playback stopped.
+4. **AUTO PLAY stops immediately.** `AutoPlayController::setEngine()`
+   connects the new `trackMissing` signal to a third private slot,
+   `onTrackMissing()`, alongside its existing `trackPlayedToCompletion`/
+   `queueExhausted` connections — see UC-16's "Alternate: stopped by a
+   missing track" for why this reuses the manual `stop(false)` path, not
+   the starvation path.
+5. **The MISSING TRACK dialog** (`MissingTrackDialog.qml`) — wired
+   directly to `engine.trackMissing` in `Main.qml`, the same
+   decoupling pattern `missingPlaylistTracks` already uses (UC-10):
+   `PlaybackEngine` has no knowledge of `LibraryModel`/`AppConfig`
+   folders. Shows:
+   > Track could not be found and can not be played
+   > Artist: `<artist>`
+   > Album: `<album>`
+   > Track: `<title>`
+
+   with a single OK button. `Main.qml` also kicks off the targeted
+   rescan (step 6) from the same handler.
+6. **Targeted single-folder rescan.** `LibraryModel::
+   rescanFolderContaining(filePath)` matches `filePath` against
+   `activeFolders()`'s entries (`path` prefix, respecting
+   `includeSubfolders`'s "direct child only" rule when `false`) and, if
+   one matches, dispatches `LibraryScanner::scanFolder()` — a rescan
+   scoped to just that folder, so the library self-heals without
+   touching every other configured folder's cache. No-op if a scan is
+   already running, or if no configured folder matches (e.g. it was
+   removed from FILE MONITORING in the meantime).
+
+### Why the folder rescan needed a `performScan()` change, not just a filtered call
+
+`LibraryScanner::performScan(genres, folders, existingCache)` always
+treated `folders` as the *complete* authoritative set — any folder left
+out of that list had every one of its cached tracks silently dropped
+from the result (`LibraryCache::save(result)` persists whatever
+`performScan()` builds, replacing the whole cache). Calling it with a
+single-folder subset would have wiped out every other folder's tracks,
+both in memory and on disk. Instead, `performScan()` gained an optional
+`scanOnlyFolderPath` parameter (empty for `fullScan()`/`statCheck()` —
+byte-for-byte unchanged behavior):
+- `rootDirs` (which `updateWatcher()` uses) is still built from *every*
+  folder regardless of scope, so the file-system watcher's coverage
+  never shrinks.
+- For every folder that doesn't match `scanOnlyFolderPath`,
+  `discoverAudioFiles()` is skipped entirely and its `existingCache`
+  entries (matched by `filePath` prefix) are carried into `result`
+  verbatim instead — the same "reuse the cached entry as-is" principle
+  already used for an individual unchanged file, just extended to
+  "every file in an unscanned folder."
+- Only the matching folder is actually walked/tag-read. Cover-art
+  resolution and rating enrichment still run over the full merged
+  `result` (both already documented as deterministic/order-independent,
+  so this is safe whether or not a given track was touched this pass).
+
+`LibraryScanner::scanFolder()` is a thin wrapper mirroring `fullScan()`/
+`statCheck()`; `LibraryModel::_requestFolderScan` is a new queued signal
+into the worker thread mirroring `_requestFullScan`/`_requestStatCheck`.
+Both `fullScan`/`statCheck`/`scanFolder` still funnel into the same
+`scanCompleted`/`onScanCompleted` signal, so `LibraryModel.scanning`
+resets correctly regardless of which one triggered it.
+
+### Design decisions
+
+- **Two layers, not one**: a single check inside `loadTrack()` would
+  catch every case eventually, but not early enough for the
+  crossfade-enabled path — the fade-in deck's `setSource()` is a
+  separate call that bypasses `loadTrack()` entirely, so it needed its
+  own guard to avoid starting an audible fade into a file that isn't
+  there.
+- **Genuine always-on-top window for the dialog, not a `Popup`**:
+  Milkdrop/AudioVisualizer/BigCover/TagInfo are all separate top-level
+  `Window`s (`FloatingPane.qml`), which could legitimately be floating
+  above the main `ApplicationWindow` when this fires — a `Popup` anchored
+  to the main window's own `Overlay.overlay` has no guaranteed stacking
+  order against another independent `Window`. `MissingTrackDialog.qml`
+  is its own `Window` with `flags: Qt.Dialog | Qt.FramelessWindowHint |
+  Qt.WindowStaysOnTopHint`, `modality: Qt.ApplicationModal`, and calls
+  `raise()`/`requestActivate()` on open — genuinely renders above every
+  other Topaz window. It is *not* built on `FloatingPane.qml`: that
+  base's whole design is drag-to-move + resize + right-click-to-close,
+  the wrong interaction model for a fixed, OK-only error alert. It does
+  reuse `WindowChrome.prepareWindow()` (same alpha-capable-surface +
+  DWM-border-removal prep every `FloatingPane` uses) so its rounded
+  corners render correctly and Windows 11's accent border doesn't leak
+  through.
+- **No queue mutation on detection**: the queue is left exactly as it
+  was — "the rest is up to the user" per the request. The user manually
+  navigates elsewhere, removes the bad entry, or clears the queue; no
+  automatic skip-past or removal happens.
 

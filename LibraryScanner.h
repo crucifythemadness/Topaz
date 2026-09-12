@@ -34,7 +34,9 @@ class QTimer;
 // libraryscanner.cpp for why this replaced the old fully-sequential,
 // order-dependent scanDirectory().
 //
-// QFileSystemWatcher watches root-level configured directories at runtime;
+// QFileSystemWatcher watches root-level configured directories, plus each
+// one's own parent directory (so a configured folder being deleted itself
+// is detected too -- see UC-07 for why the parent is needed), at runtime;
 // any change triggers a debounced (2 s) stat-check.
 //
 // All methods run on the worker thread; signals are delivered to the main
@@ -68,7 +70,29 @@ public slots:
                    QVariantList folders,
                    QList<TrackInfo> existingCache);
 
+    // Triggered by LibraryModel::rescanFolderContaining() (see UC-31) when a
+    // queued track's file turns out to be missing right before playback --
+    // rescans only scanOnlyFolderPath's contents while every other
+    // configured folder's cached entries are carried through untouched
+    // (see performScan()'s doc comment). `folders` must still be the
+    // *complete* configured folder list -- needed both to determine which
+    // cached entries fall outside the scanned folder and to keep
+    // updateWatcher() covering everything, not just the one folder.
+    void scanFolder(QStringList genres,
+                     QVariantList folders,
+                     QList<TrackInfo> existingCache,
+                     QString scanOnlyFolderPath);
+
 signals:
+    // Emitted as the very first thing performScan() does, regardless of
+    // which public slot (fullScan/statCheck/scanFolder) triggered it --
+    // the single choke point that lets LibraryModel know a scan is
+    // actually running even for triggers it didn't initiate itself (the
+    // file-system-watcher's debounced auto-rescan, see UC-07). The three
+    // LibraryModel-initiated triggers already set scanning=true
+    // optimistically before this signal even arrives (instant feedback
+    // for a manual click); this just closes the one gap where nothing did.
+    void scanStarted();
     void scanProgress(int done, int total);
     void scanCompleted(QList<TrackInfo> tracks);
 
@@ -77,9 +101,17 @@ private slots:
     void onDebounceTimeout();
 
 private:
-    // Shared implementation behind fullScan()/statCheck(). See class comment.
+    // Shared implementation behind fullScan()/statCheck()/scanFolder(). See
+    // class comment. scanOnlyFolderPath empty (fullScan/statCheck) scans
+    // every folder in `folders`, exactly as before. Non-empty (scanFolder,
+    // UC-31) skips discovery for every OTHER folder and instead carries its
+    // existingCache entries through unchanged, so the result never loses
+    // tracks from folders outside the requested scope -- see .cpp for why
+    // performScan couldn't safely be called with a trimmed `folders` list
+    // directly.
     void performScan(QStringList genres, QVariantList folders,
-                      QList<TrackInfo> existingCache);
+                      QList<TrackInfo> existingCache,
+                      const QString &scanOnlyFolderPath = QString());
 
     // Recursively lists every *.mp3/*.flac/*.opus file under dirPath. Pure
     // filesystem listing, no tag reads — stays sequential (fast compared to

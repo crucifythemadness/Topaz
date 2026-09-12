@@ -49,17 +49,14 @@ Popup {
     property int selectedFolderIndex: -1
     property int selectedMilkdropFolderIndex: -1
 
-    // Set whenever AppConfig.foldersChanged fires while this dialog is open
-    // (every folder add/remove/clear and SUBFOLDERS/ACTIVE toggle emits it,
-    // and nothing outside the FILE MONITORING tab does -- see UC-04/UC-05).
-    // Reset per open session in onAboutToShow so only changes made *this*
-    // time trigger the auto-rescan in onClosed below.
+    // Set explicitly by each of the 5 real FILE MONITORING edit actions
+    // below (add/remove/clear folder, SUBFOLDERS toggle, ACTIVE toggle) --
+    // see UC-04/UC-05. NOT inferred from AppConfig.foldersChanged anymore:
+    // that signal is also fired by AppConfig.refreshFolderAvailability()
+    // after any background scan completes (see UC-07), which is not a user
+    // edit and must not trigger the auto-rescan-on-close below. Reset per
+    // open session in onAboutToShow so only changes made *this* time count.
     property bool _foldersDirty: false
-
-    Connections {
-        target: root.appConfig
-        function onFoldersChanged() { root._foldersDirty = true }
-    }
 
     // Small "turning circle" busy indicator -- a dot orbiting a faint ring.
     // Stands in for the MILKDROP tab's PRESETS count while
@@ -769,10 +766,12 @@ Popup {
                                                     anchors.fill: parent
                                                     cursorShape:  Qt.PointingHandCursor
                                                     onClicked: {
-                                                        if (root.appConfig)
+                                                        if (root.appConfig) {
                                                             root.appConfig.setFolderActive(
                                                                 index,
                                                                 !modelData.active)
+                                                            root._foldersDirty = true
+                                                        }
                                                     }
                                                 }
                                             }
@@ -806,10 +805,12 @@ Popup {
                                                     anchors.fill: parent
                                                     cursorShape:  Qt.PointingHandCursor
                                                     onClicked: {
-                                                        if (root.appConfig)
+                                                        if (root.appConfig) {
                                                             root.appConfig.setFolderSubfolders(
                                                                 index,
                                                                 !modelData.includeSubfolders)
+                                                            root._foldersDirty = true
+                                                        }
                                                     }
                                                 }
                                             }
@@ -894,6 +895,7 @@ Popup {
                                     if (root.selectedFolderIndex >= 0 && root.appConfig) {
                                         root.appConfig.removeFolderAt(root.selectedFolderIndex)
                                         root.selectedFolderIndex = -1
+                                        root._foldersDirty = true
                                     }
                                 }
                             }
@@ -937,6 +939,7 @@ Popup {
                         if (root.appConfig) {
                             root.appConfig.clearFolders()
                             root.selectedFolderIndex = -1
+                            root._foldersDirty = true
                         }
                     }
                 }
@@ -3728,8 +3731,10 @@ Popup {
         id: folderDialog
         title: "Select Music Folder"
         onAccepted: {
-            if (root.appConfig)
+            if (root.appConfig) {
                 root.appConfig.addFolder(selectedFolder.toString(), true)
+                root._foldersDirty = true
+            }
         }
     }
 

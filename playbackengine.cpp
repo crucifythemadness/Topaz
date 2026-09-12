@@ -331,8 +331,7 @@ void PlaybackEngine::addTrack(const QVariantMap &trackMap, bool autoPlayAdded)
     // played through to its natural end (m_queueFinished) -- but never
     // while merely paused mid-track, which leaves m_queueFinished false.
     if ((m_currentIndex < 0 || m_queueFinished) && m_deck) {
-        loadTrack(row);
-        m_deck->play();
+        if (loadTrack(row)) m_deck->play();
     }
 
     // Clears the "just added by AUTO PLAY" flag ~2s later so
@@ -369,8 +368,7 @@ void PlaybackEngine::addTracks(const QVariantList &trackList)
 
     // Same widened auto-play condition as addTrack() -- see there.
     if ((m_currentIndex < 0 || m_queueFinished) && m_deck) {
-        loadTrack(first);
-        m_deck->play();
+        if (loadTrack(first)) m_deck->play();
     }
 }
 
@@ -394,11 +392,9 @@ void PlaybackEngine::removeAt(int idx)
         m_deck->stop();
         m_currentIndex = -1;
         if (idx < m_queue.size()) {
-            loadTrack(idx);
-            m_deck->play();
+            if (loadTrack(idx)) m_deck->play();
         } else if (!m_queue.isEmpty()) {
-            loadTrack(m_queue.size() - 1);
-            m_deck->play();
+            if (loadTrack(m_queue.size() - 1)) m_deck->play();
         } else {
             clearCoverSource();
             emit currentIndexChanged();
@@ -559,6 +555,17 @@ void PlaybackEngine::loadPlaylistTracks(const QVariantList &trackList)
         && m_deck->duration() > fadeMs
         && firstNew.duration    > fadeMs;
 
+    // A missing first track can only be discovered here for the crossfade
+    // path -- the non-eligible fallback below funnels through addTracks(),
+    // which already checks via loadTrack(). Abort the replacement outright
+    // (old queue/deck untouched) rather than trying a partial fallback for
+    // what should be an exceedingly rare race with loadPlaylist()'s own
+    // pre-check. See UC-31.
+    if (eligible && !QFileInfo::exists(firstNew.filePath)) {
+        handleMissingTrack(firstNew);
+        return;
+    }
+
     if (!eligible) {
         clearQueue();
         addTracks(trackList);
@@ -680,16 +687,14 @@ void PlaybackEngine::restoreOverrideCursor()
 void PlaybackEngine::playAt(int idx)
 {
     if (idx < 0 || idx >= m_queue.size() || !m_deck) return;
-    loadTrack(idx);
-    m_deck->play();
+    if (loadTrack(idx)) m_deck->play();
 }
 
 void PlaybackEngine::togglePlay()
 {
     if (m_queue.isEmpty() || !m_deck) return;
     if (m_currentIndex < 0) {
-        loadTrack(0);
-        m_deck->play();
+        if (loadTrack(0)) m_deck->play();
         return;
     }
     const bool playing = m_deck->isPlaying();
@@ -716,8 +721,7 @@ void PlaybackEngine::togglePlay()
 void PlaybackEngine::next()
 {
     if (m_currentIndex < 0 || m_currentIndex >= m_queue.size() - 1 || !m_deck) return;
-    loadTrack(m_currentIndex + 1);
-    m_deck->play();
+    if (loadTrack(m_currentIndex + 1)) m_deck->play();
 }
 
 void PlaybackEngine::previous()
@@ -728,8 +732,7 @@ void PlaybackEngine::previous()
         m_deck->setPosition(0);
         return;
     }
-    loadTrack(m_currentIndex - 1);
-    m_deck->play();
+    if (loadTrack(m_currentIndex - 1)) m_deck->play();
 }
 
 void PlaybackEngine::seek(qint64 ms)
@@ -751,16 +754,29 @@ void PlaybackEngine::seek(qint64 ms)
 
 // ── Private helpers ───────────────────────────────────────────────────────
 
-void PlaybackEngine::loadTrack(int idx)
+bool PlaybackEngine::loadTrack(int idx)
 {
-    if (idx < 0 || idx >= m_queue.size() || !m_deck) return;
+    if (idx < 0 || idx >= m_queue.size() || !m_deck) return false;
+
+    const TrackInfo &t = m_queue.at(idx);
+    if (!QFileInfo::exists(t.filePath)) {
+        handleMissingTrack(t);
+        return false;
+    }
 
     m_queueFinished = false;
     cancelCrossfade();
     m_deck->setVolume(1.0f);   // in case a fade left this deck's volume < 1
-    m_deck->setSource(m_queue.at(idx).filePath);
+    m_deck->setSource(t.filePath);
 
     switchCurrentIndexTo(idx);
+    return true;
+}
+
+void PlaybackEngine::handleMissingTrack(const TrackInfo &t)
+{
+    if (m_deck) m_deck->pause();
+    emit trackMissing(t.artist, t.album, t.title, t.filePath);
 }
 
 void PlaybackEngine::switchCurrentIndexTo(int idx)
@@ -825,8 +841,7 @@ void PlaybackEngine::advanceToNext()
         emit trackPlayedToCompletion(m_queue.at(m_currentIndex).filePath);
 
     if (m_currentIndex < m_queue.size() - 1) {
-        loadTrack(m_currentIndex + 1);
-        m_deck->play();
+        if (loadTrack(m_currentIndex + 1)) m_deck->play();
     } else {
         // End of queue — stay on last track, stopped
         m_queueFinished = true;
@@ -878,7 +893,13 @@ void PlaybackEngine::startCrossfade()
     m_fadeInDeck   = 1 - m_activeDeck;
     m_fadeOutIndex = m_currentIndex;
 
-    m_decks[m_fadeInDeck]->setSource(m_queue.at(nextIdx).filePath);
+    const TrackInfo &next = m_queue.at(nextIdx);
+    if (!QFileInfo::exists(next.filePath)) {
+        handleMissingTrack(next);
+        return;   // never flips m_crossfading / starts m_fadeTimer
+    }
+
+    m_decks[m_fadeInDeck]->setSource(next.filePath);
     m_decks[m_fadeInDeck]->setVolume(0.0f);
     m_decks[m_fadeInDeck]->play();
 

@@ -24,8 +24,15 @@ class QThread;
 //      • loads Topaz.library.json instantly (< 100ms for 12K tracks)
 //      • fires libraryRefreshed() so the UI can display cached data
 //      • schedules a background stat-check on the worker thread
-//   2. Gear icon → SetupDialog → user clicks SCAN DIRECTORIES
-//      → startFullScan()  (or BottomBar "SCAN DIRECTORIES" button)
+//   2. BottomBar "SCAN FOLDERS" button → startFullScan()
+//      (Setup Dialog has no scan button of its own -- editing FILE
+//      MONITORING there triggers startFullScan() automatically when the
+//      dialog closes, see UC-04's "Auto-rescan on close")
+//   3. The file-system watcher's own debounced auto-rescan (UC-07) and
+//      UC-31's missing-track self-heal rescan also flip `scanning` --
+//      the former via onScanStarted() below (LibraryScanner runs it
+//      without LibraryModel ever having requested it), the latter via
+//      rescanFolderContaining()'s own immediate set.
 class LibraryModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -94,6 +101,16 @@ public:
 
     // Trigger a full re-scan of all configured folders in background.
     Q_INVOKABLE void startFullScan();
+
+    // Rescans only the single configured FILE MONITORING folder that
+    // filePath falls under (matched by prefix against m_appConfig->
+    // activeFolders(), respecting includeSubfolders) -- called when
+    // PlaybackEngine discovers a queued track's file is missing right
+    // before playback, so the library self-heals without a full rescan.
+    // No-op if a scan is already running (same "don't stack scans" guard
+    // as startFullScan()) or no configured folder matches filePath (e.g.
+    // it was removed from FILE MONITORING in the meantime). See UC-31.
+    Q_INVOKABLE void rescanFolderContaining(const QString &filePath);
 
     // ── Invokable query helpers (used by LibraryData.qml) ────────────────
 
@@ -223,8 +240,16 @@ signals:
     void _requestStatCheck(QStringList  genres,
                            QVariantList folders,
                            QList<TrackInfo> cache);
+    void _requestFolderScan(QStringList  genres,
+                            QVariantList folders,
+                            QList<TrackInfo> cache,
+                            QString      scanOnlyFolderPath);
 
 private slots:
+    // The only scanning=true source for a scan LibraryModel didn't
+    // itself request -- see the class comment's lifecycle note and
+    // LibraryScanner::scanStarted()'s own doc comment.
+    void onScanStarted();
     void onScanProgress(int done, int total);
     void onScanCompleted(QList<TrackInfo> tracks);
 

@@ -154,6 +154,7 @@ qt_add_qml_module(topaz
         NewPlaylistDialog.qml
         MessageBox.qml
         MissingTracksDialog.qml
+        MissingTrackDialog.qml
         FloatingPane.qml
         BigCoverWindow.qml
         TagInfoWindow.qml
