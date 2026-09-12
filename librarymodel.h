@@ -261,6 +261,11 @@ private:
     // folders() when dispatching a scan, so an inactive folder is excluded
     // from discovery entirely. See UC-04/UC-05.
     QVariantList activeFolders() const;
+    // Reflects AppConfig::albumBrowserSortOrder -- true unless the user
+    // picked "artistAlbum" (Artist asc -> Album asc only, no year
+    // tiebreak). Passed into serializeAlbumAccum() by both
+    // filteredAlbums() and searchLibrary().
+    bool albumBrowserSortByYear() const;
 
     AppConfig        *m_appConfig    = nullptr;
     QList<TrackInfo>  m_tracks;

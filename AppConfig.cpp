@@ -368,6 +368,18 @@ void AppConfig::setDeleteCurrentRatingEnabled(bool enabled)
     save();
 }
 
+void AppConfig::setAlbumBrowserSortOrder(const QString &mode)
+{
+    static const QStringList kAllowed = {
+        QStringLiteral("artistYearAlbum"), QStringLiteral("artistAlbum")
+    };
+    if (!kAllowed.contains(mode)) return;
+    if (m_albumBrowserSortOrder == mode) return;
+    m_albumBrowserSortOrder = mode;
+    emit albumBrowserSortOrderChanged();
+    save();
+}
+
 // ── Big cover pane geometry ─────────────────────────────────────────────────
 
 void AppConfig::saveBigCoverPaneGeometry(int x, int y, int width, int height,
@@ -666,6 +678,8 @@ void AppConfig::applyJson(const QJsonObject &root)
     m_startFullscreen    = root[QStringLiteral("startFullscreen")].toBool(false);
     m_deleteCurrentRatingEnabled =
         root[QStringLiteral("deleteCurrentRatingEnabled")].toBool(false);
+    m_albumBrowserSortOrder =
+        root[QStringLiteral("albumBrowserSortOrder")].toString(QStringLiteral("artistYearAlbum"));
 
     const QJsonObject playback = root[QStringLiteral("playback")].toObject();
     m_crossfadeEnabled = playback[QStringLiteral("crossfadeEnabled")].toBool(false);
@@ -793,6 +807,7 @@ QVariantMap AppConfig::restoreFromJson(const QByteArray &json)
     emit panelWidthsChanged();
     emit startFullscreenChanged();
     emit deleteCurrentRatingEnabledChanged();
+    emit albumBrowserSortOrderChanged();
     emit crossfadeChanged();
     // audioBackendChanged deliberately NOT emitted -- value is unchanged.
     emit autoPlayQueueHorizonChanged();
@@ -844,6 +859,7 @@ void AppConfig::save()
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;
     root[QStringLiteral("startFullscreen")]    = m_startFullscreen;
     root[QStringLiteral("deleteCurrentRatingEnabled")] = m_deleteCurrentRatingEnabled;
+    root[QStringLiteral("albumBrowserSortOrder")]      = m_albumBrowserSortOrder;
 
     QJsonObject playback;
     playback[QStringLiteral("crossfadeEnabled")] = m_crossfadeEnabled;

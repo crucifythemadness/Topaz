@@ -850,10 +850,10 @@ current track changes (see `PlaybackEngine::currentLargeCoverSource`).
 | `genres()` | Distinct genre strings present in the library |
 | `artistsForGenre(genre)` | Album artists for a genre, sorted |
 | `albumsForArtist(artist, genre)` | Album titles for an artist, sorted |
-| `filteredAlbums(activeGenres, selectedArtist, selectedAlbum)` | Album display objects for AlbumBrowser. **Single O(N_tracks) pass** using `QHash` to group tracks by `(albumArtist\|album)` key; cover thumb and year (first non-zero seen per album, same defensive pattern as the cover thumb) collected in the same pass; no per-album full rescan. Replaces the former O(N_tracks × N_albums) three-pass algorithm. Result sorted by albumArtist ascending, then year descending, then albumTitle ascending (case-insensitive); unknown-year albums (`year == 0`) sort last within their artist group. |
+| `filteredAlbums(activeGenres, selectedArtist, selectedAlbum)` | Album display objects for AlbumBrowser. **Single O(N_tracks) pass** using `QHash` to group tracks by `(albumArtist\|album)` key; cover thumb and year (first non-zero seen per album, same defensive pattern as the cover thumb) collected in the same pass; no per-album full rescan. Replaces the former O(N_tracks × N_albums) three-pass algorithm. Result sorted by albumArtist ascending, then (unless `AppConfig.albumBrowserSortOrder === "artistAlbum"`) year descending, then albumTitle ascending (case-insensitive); unknown-year albums (`year == 0`) sort last within their artist group when the year tiebreak is active. Sort order is configurable — Setup Dialog's MISC tab "Album Browser & Search Result Sort Order" — and shared with `searchLibrary()` below via `serializeAlbumAccum()`'s `sortByYear` parameter (`LibraryModel::albumBrowserSortByYear()`). |
 | `buildLibraryTree(activeGenres)` | **Single-pass** tree builder: returns `[ { genre, artists: [ { name, albums: [{title}] } ] } ]` for `LibraryData._rebuildTree()`. One O(N_tracks) scan replaces the former N_genres + N_artists separate full-list scans. |
 | `coverThumbForAlbum(album, albumArtist)` | Base64 thumbnail for an album |
-| `searchLibrary(query, mode, activeGenres, considerGenre, matchWholeWord)` | Substring search across `albumArtist`/`album`/`title` — see UC-21. `matchWholeWord=true` requires the match to be bounded by non-alphanumeric characters (or field start/end) via a plain-`QString` `matchesWholeWord()` helper, not `QRegularExpression`; `false` (default) uses ordinary substring `contains()`, chosen once per call via a small lambda rather than branching per field. `mode` is `"all"` \| `"artists"` \| `"albums"` \| `"tracks"` (unrecognized values behave as `"all"`). **Single O(N_tracks) pass, all modes** — `albumArtist`/`album` are constant across every track in their group (the same invariant `filteredAlbums()`'s grouping key relies on), so a match on either field for one track is guaranteed to match every sibling track in that album too; no second "find matches, then rescan for siblings" pass is needed. A title-only match is inherently per-track already, which is exactly the "just this track, not its album siblings" behavior `"tracks"` mode needs. `considerGenre=false` ignores `activeGenres` entirely; `considerGenre=true` with an empty `activeGenres` returns no results (mirrors `filteredAlbums()`'s equivalent short-circuit). Empty/whitespace-only `query` returns no results. Shares its post-filter grouping/sort/serialize tail with `filteredAlbums()` via a private `serializeAlbumAccum()` helper (an anonymous-namespace `AlbumAccum` struct, extracted from the two functions' ~60 lines of previously-duplicated logic) — same `QVariantList` shape as `filteredAlbums()`, except `isActive` is always `false` (no search-result card is naturally "selected"). **Cover fix-up**: since `"tracks"`-mode (and `"all"`-mode title-only) matches only include the matching track(s), not the rest of the album, a second pass over `m_tracks` fills in any still-missing album cover from any track carrying one (skipped entirely if every matched album already has a cover) — otherwise a track whose own tag lacks embedded art would show no cover even though a sibling track has one. `filteredAlbums()`/`buildLibraryTree()` never need this since they always include an album's full track list already. |
+| `searchLibrary(query, mode, activeGenres, considerGenre, matchWholeWord)` | Substring search across `albumArtist`/`album`/`title` — see UC-21. `matchWholeWord=true` requires the match to be bounded by non-alphanumeric characters (or field start/end) via a plain-`QString` `matchesWholeWord()` helper, not `QRegularExpression`; `false` (default) uses ordinary substring `contains()`, chosen once per call via a small lambda rather than branching per field. `mode` is `"all"` \| `"artists"` \| `"albums"` \| `"tracks"` (unrecognized values behave as `"all"`). **Single O(N_tracks) pass, all modes** — `albumArtist`/`album` are constant across every track in their group (the same invariant `filteredAlbums()`'s grouping key relies on), so a match on either field for one track is guaranteed to match every sibling track in that album too; no second "find matches, then rescan for siblings" pass is needed. A title-only match is inherently per-track already, which is exactly the "just this track, not its album siblings" behavior `"tracks"` mode needs. `considerGenre=false` ignores `activeGenres` entirely; `considerGenre=true` with an empty `activeGenres` returns no results (mirrors `filteredAlbums()`'s equivalent short-circuit). Empty/whitespace-only `query` returns no results. Shares its post-filter grouping/sort/serialize tail with `filteredAlbums()` via a private `serializeAlbumAccum()` helper (an anonymous-namespace `AlbumAccum` struct, extracted from the two functions' ~60 lines of previously-duplicated logic) — same `QVariantList` shape as `filteredAlbums()`, including honoring `AppConfig.albumBrowserSortOrder` via the same `LibraryModel::albumBrowserSortByYear()` call, except `isActive` is always `false` (no search-result card is naturally "selected"). **Cover fix-up**: since `"tracks"`-mode (and `"all"`-mode title-only) matches only include the matching track(s), not the rest of the album, a second pass over `m_tracks` fills in any still-missing album cover from any track carrying one (skipped entirely if every matched album already has a cover) — otherwise a track whose own tag lacks embedded art would show no cover even though a sibling track has one. `filteredAlbums()`/`buildLibraryTree()` never need this since they always include an album's full track list already. |
 | `buildStandaloneTrackCards(tracks)` | Converts an arbitrary raw track list (the shape `PlaylistManager::loadPlaylist()` returns) into one standalone, `AlbumCard`-shaped entry **per track** — no grouping by album, unlike `filteredAlbums()`/`searchLibrary()` — see UC-22. Builds a `filePath → TrackInfo*` lookup over `m_tracks` once (O(N_tracks)) so any track still present in the scanned library reuses its own tag data at no extra I/O cost; a track no longer in the scan is still rendered, synthesized from the input map's own fields. Cover art is resolved per track via `coverThumbForAlbum(album, albumArtist)` whenever the matched/synthesized track's own `coverThumb` is empty — the common case, since `coverThumb` is only populated on one representative track per album in the whole scanned library (see UC-05) — so every track of an album shows a cover regardless of which one happens to be that representative; only an album with no cover anywhere in the library renders without one. `isActive` is always `false`. Calls `serializeAlbumAccum(albumAccum, false, /*preserveOrder=*/true)` — cards are emitted in the playlist's own track order rather than alphabetically re-sorted. |
 | `libraryRefreshed()` signal | Emitted after cache load or scan complete |
 
@@ -6039,4 +6039,61 @@ resets correctly regardless of which one triggered it.
   was — "the rest is up to the user" per the request. The user manually
   navigates elsewhere, removes the bad entry, or clears the queue; no
   automatic skip-past or removal happens.
+
+## UC-32 Configurable Album Browser & Search Result Sort Order (MISC Tab)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Let the user choose between two album sort orders for AlbumBrowser and Search results, instead of the previously-fixed rule. |
+| **Actor** | User |
+| **Trigger** | User picks a radio option in Setup → MISC → "Album Browser & Search Result Sort Order"; applies immediately, no restart needed. |
+
+A new `AppConfig.albumBrowserSortOrder` string (`Q_PROPERTY` + `Q_INVOKABLE
+setAlbumBrowserSortOrder(mode)`, same validate-and-silently-ignore-invalid
+shape as `autoPlaySongRepeat`/`autoPlayTransportAccess`), persisted as
+`Topaz.config`'s top-level `albumBrowserSortOrder` key, default
+`"artistYearAlbum"`. Allowed values:
+- `"artistYearAlbum"` (default) — Artist ascending → Year descending →
+  Album ascending (the original, previously-fixed behavior).
+- `"artistAlbum"` — Artist ascending → Album ascending (no year tiebreak
+  at all).
+
+MISC tab gains a new radio group (after Delete the Rating for the Track
+currently playing) — label, then the two options stacked vertically in a
+`Column` (`Layout.leftMargin: 24`), each reusing the identical 18px
+circle/dot radio delegate `SetupDialog.qml`'s three existing radio
+groups (`audioBackend`, `autoPlaySongRepeat`, `autoPlayTransportAccess`)
+already use, just swapping their `Row`/`Grid` wrapper for a `Column` —
+those groups lay options out horizontally since their labels are short;
+this group's two labels are long, so vertical stacking reads better and
+was explicitly requested.
+
+### Wiring into the sort itself
+
+`LibraryModel::filteredAlbums()` and `searchLibrary()` share their
+grouping/sort/serialize tail via a private `serializeAlbumAccum()`
+helper (`librarymodel.cpp`) — the two are deliberately kept "in
+lockstep" on behavior, so the new setting applies to both, not just
+AlbumBrowser. `serializeAlbumAccum()` gained a `sortByYear` parameter
+(default `true`, preserving exact prior behavior for its third caller,
+`buildStandaloneTrackCards()`, which never sorts at all via
+`preserveOrder=true` regardless): when `false`, the comparator's year
+tiebreak is skipped entirely, falling straight through to the
+album-title comparison. A new private `LibraryModel::
+albumBrowserSortByYear()` reads `AppConfig.albumBrowserSortOrder() !=
+"artistAlbum"` and is passed into both `filteredAlbums()`'s and
+`searchLibrary()`'s calls.
+
+### Live refresh, no new property plumbing needed
+
+`AlbumBrowser.qml` and `SearchData.qml` already had indirect access to
+`AppConfig` through properties they already hold — `AlbumBrowser.qml`'s
+`lib` (`LibraryData.qml`, which already exposes `property AppConfig
+appConfig`) and `SearchData.qml`'s `libraryModel` (`LibraryModel` itself
+already exposes `property AppConfig appConfig`) — so making the change
+apply immediately needed no new properties threaded through `Main.qml`,
+just one additional `Connections` block in each file reusing their
+existing refresh functions (`AlbumBrowser.qml`'s `_scheduleRefresh()`,
+`SearchData.qml`'s `_scheduleSearch()`) whenever `AppConfig.
+albumBrowserSortOrderChanged` fires.
 

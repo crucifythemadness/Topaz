@@ -43,6 +43,15 @@ Rectangle {
         function onSelectedAlbumChanged()    { root._scheduleRefresh() }
     }
 
+    // Re-sorts immediately when the user changes Setup > MISC's "Album
+    // Browser & Search Result Sort Order" -- see UC-32. lib.appConfig is
+    // already available (LibraryData.qml), so no new property plumbing
+    // is needed here.
+    Connections {
+        target: root.lib ? root.lib.appConfig : null
+        function onAlbumBrowserSortOrderChanged() { root._scheduleRefresh() }
+    }
+
     // ── Header ────────────────────────────────────────────────────────
     Item {
         id: header

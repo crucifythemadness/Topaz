@@ -52,7 +52,7 @@ struct AlbumAccum {
     QList<const TrackInfo *> tracks;
 };
 
-// Sorts (albumArtist asc, year desc, albumTitle asc, case-insensitive),
+// Sorts (albumArtist asc, [year desc,] albumTitle asc, case-insensitive),
 // sorts each album's tracks by track number, and serializes into the
 // QVariantList shape AlbumCard/AlbumBrowser expect. markFirstActive mirrors
 // filteredAlbums()'s "highlight the first card" behavior for genre/artist
@@ -60,9 +60,14 @@ struct AlbumAccum {
 // naturally "selected." preserveOrder=true (buildStandaloneTrackCards(),
 // for playlists) skips both sorts instead, since a playlist's own
 // listening order matters more than alphabetical browsing order — cards
-// then emit in the order their tracks appear in the playlist.
+// then emit in the order their tracks appear in the playlist. sortByYear
+// (default true) reflects AppConfig::albumBrowserSortOrder -- false drops
+// the year tiebreak entirely (Artist asc -> Album asc only), see
+// LibraryModel::albumBrowserSortByYear(). Both filteredAlbums() and
+// searchLibrary() honor it; buildStandaloneTrackCards() ignores it since
+// preserveOrder already skips sorting.
 QVariantList serializeAlbumAccum(QList<AlbumAccum> &albumAccum, bool markFirstActive = true,
-                                  bool preserveOrder = false)
+                                  bool preserveOrder = false, bool sortByYear = true)
 {
     if (albumAccum.isEmpty()) return {};
 
@@ -70,12 +75,12 @@ QVariantList serializeAlbumAccum(QList<AlbumAccum> &albumAccum, bool markFirstAc
     std::iota(sortedIdx.begin(), sortedIdx.end(), 0);
     if (!preserveOrder) {
         std::sort(sortedIdx.begin(), sortedIdx.end(),
-                  [&albumAccum](int a, int b) {
+                  [&albumAccum, sortByYear](int a, int b) {
                       const AlbumAccum &aa = albumAccum[a];
                       const AlbumAccum &bb = albumAccum[b];
                       int c = aa.albumArtist.compare(bb.albumArtist, Qt::CaseInsensitive);
                       if (c != 0) return c < 0;
-                      if (aa.year != bb.year) return aa.year > bb.year;
+                      if (sortByYear && aa.year != bb.year) return aa.year > bb.year;
                       return aa.album.compare(bb.album, Qt::CaseInsensitive) < 0;
                   });
     }
@@ -355,6 +360,11 @@ QVariantList LibraryModel::activeFolders() const
     return result;
 }
 
+bool LibraryModel::albumBrowserSortByYear() const
+{
+    return !m_appConfig || m_appConfig->albumBrowserSortOrder() != QStringLiteral("artistAlbum");
+}
+
 // ── Scan result slots ─────────────────────────────────────────────────────
 
 void LibraryModel::onScanStarted()
@@ -537,7 +547,8 @@ QVariantList LibraryModel::filteredAlbums(const QStringList &activeGenres,
         }
     }
 
-    return serializeAlbumAccum(albumAccum);
+    return serializeAlbumAccum(albumAccum, /*markFirstActive=*/true, /*preserveOrder=*/false,
+                                albumBrowserSortByYear());
 }
 
 QVariantList LibraryModel::searchLibrary(const QString &query,
@@ -634,7 +645,8 @@ QVariantList LibraryModel::searchLibrary(const QString &query,
         }
     }
 
-    return serializeAlbumAccum(albumAccum, /*markFirstActive=*/false);
+    return serializeAlbumAccum(albumAccum, /*markFirstActive=*/false, /*preserveOrder=*/false,
+                                albumBrowserSortByYear());
 }
 
 QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres,

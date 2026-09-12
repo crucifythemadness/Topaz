@@ -112,6 +112,12 @@ class AppConfig : public QObject
     // NowPlaying at all until this is turned on. See UC-29.
     Q_PROPERTY(bool deleteCurrentRatingEnabled READ deleteCurrentRatingEnabled NOTIFY deleteCurrentRatingEnabledChanged)
 
+    // Sort order for AlbumBrowser/Search result album cards (Setup > MISC).
+    // "artistYearAlbum" (default) = Artist asc -> Year desc -> Album asc;
+    // "artistAlbum" = Artist asc -> Album asc. Invalid values are silently
+    // ignored by the setter, same convention as autoPlaySongRepeat.
+    Q_PROPERTY(QString albumBrowserSortOrder READ albumBrowserSortOrder NOTIFY albumBrowserSortOrderChanged)
+
     // ── Crossfade settings (PLAYBACK tab) ────────────────────────────────
     Q_PROPERTY(bool   crossfadeEnabled READ crossfadeEnabled NOTIFY crossfadeChanged)
     Q_PROPERTY(double crossfadeSeconds READ crossfadeSeconds NOTIFY crossfadeChanged)
@@ -207,6 +213,7 @@ public:
     int nowPlayingWidth()      const { return m_nowPlayingWidth;    }
     bool startFullscreen()     const { return m_startFullscreen;   }
     bool deleteCurrentRatingEnabled() const { return m_deleteCurrentRatingEnabled; }
+    QString albumBrowserSortOrder() const { return m_albumBrowserSortOrder; }
 
     bool    crossfadeEnabled() const { return m_crossfadeEnabled; }
     double  crossfadeSeconds() const { return m_crossfadeSeconds; }
@@ -311,6 +318,9 @@ public:
 
     Q_INVOKABLE void setStartFullscreen(bool enabled);
     Q_INVOKABLE void setDeleteCurrentRatingEnabled(bool enabled);
+    // Ignores anything other than "artistYearAlbum"/"artistAlbum" (no-op) --
+    // same validation convention as setAutoPlaySongRepeat().
+    Q_INVOKABLE void setAlbumBrowserSortOrder(const QString &mode);
 
     // ── Crossfade operations ─────────────────────────────────────────────
     Q_INVOKABLE void setCrossfadeEnabled(bool enabled);
@@ -430,6 +440,7 @@ signals:
     void panelWidthsChanged();
     void startFullscreenChanged();
     void deleteCurrentRatingEnabledChanged();
+    void albumBrowserSortOrderChanged();
     void crossfadeChanged();
     void audioBackendChanged();
     void autoPlayQueueHorizonChanged();
@@ -475,6 +486,7 @@ private:
     int m_nowPlayingWidth    = 359;
     bool m_startFullscreen   = false;
     bool m_deleteCurrentRatingEnabled = false;
+    QString m_albumBrowserSortOrder = QStringLiteral("artistYearAlbum");
 
     bool    m_crossfadeEnabled = false;
     double  m_crossfadeSeconds = 5.0;

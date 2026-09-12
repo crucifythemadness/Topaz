@@ -699,6 +699,41 @@ Popup {
                                 }
                             }
                         }
+
+                        // MINIZ -- also no real logo, same wordmark treatment
+                        // as KISS FFT/GLEW above.
+                        RowLayout {
+                            Layout.alignment: Qt.AlignLeft
+                            spacing: 20
+
+                            Text {
+                                Layout.preferredWidth: 128
+                                Layout.alignment: Qt.AlignVCenter
+                                horizontalAlignment: Text.AlignHCenter
+                                text: "MINIZ"
+                                font.family:    Theme.fontFamilyHeadline
+                                font.pixelSize: Theme.headlineMd
+                                font.weight:    Font.Bold
+                                color: Theme.fgSurface
+                            }
+
+                            Text {
+                                Layout.alignment: Qt.AlignVCenter
+                                text: "https://github.com/richgel999/miniz"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                color: linkHoverMiniz.containsMouse
+                                       ? Theme.primary : Theme.fgSurfaceVariant
+
+                                MouseArea {
+                                    id: linkHoverMiniz
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Qt.openUrlExternally("https://github.com/richgel999/miniz")
+                                }
+                            }
+                        }
                     }
                 }
             }

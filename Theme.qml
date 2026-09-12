@@ -71,6 +71,11 @@ QtObject {
     readonly property int headlineMd: 20
     readonly property int headlineSm: 18
     readonly property int titleMd:    14
+    // Convention for every Setup Dialog radio-button option label
+    // (PLAYBACK "Playback with", AUTO PLAY "Play a Title"/"Exceptions",
+    // MISC "Album Browser & Search Result Sort Order", and any future
+    // radio group) -- use this, not labelLg/titleMd, for that role.
+    readonly property int labelXl:    13
     readonly property int labelLg:    12
     readonly property int labelMd:    11
     readonly property int labelSm:    10

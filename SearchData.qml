@@ -43,6 +43,15 @@ Item {
     onActiveGenreNamesChanged:  if (considerGenre)  _scheduleSearch()
     onEnabledGenreNamesChanged: if (!considerGenre) _scheduleSearch()
 
+    // Re-sorts immediately when the user changes Setup > MISC's "Album
+    // Browser & Search Result Sort Order" -- see UC-32. libraryModel
+    // already exposes appConfig, so no new property plumbing is needed
+    // here. _scheduleSearch() already no-ops safely with no active query.
+    Connections {
+        target: root.libraryModel ? root.libraryModel.appConfig : null
+        function onAlbumBrowserSortOrderChanged() { root._scheduleSearch() }
+    }
+
     function _scheduleSearch() {
         if (query.trim() === "") {
             // No debounce wait needed for the empty case, and start clean

@@ -1038,7 +1038,7 @@ Popup {
                                     Text {
                                         text: modelData.label
                                         font.family:    Theme.fontFamilyBody
-                                        font.pixelSize: Theme.labelLg
+                                        font.pixelSize: Theme.labelXl
                                         color: Theme.fgSurface
                                     }
 
@@ -1739,7 +1739,7 @@ Popup {
                                     Text {
                                         text: modelData.label
                                         font.family:    Theme.fontFamilyBody
-                                        font.pixelSize: Theme.labelLg
+                                        font.pixelSize: Theme.labelXl
                                         color: Theme.fgSurface
                                     }
 
@@ -1864,7 +1864,7 @@ Popup {
                                     Text {
                                         text: modelData.label
                                         font.family:    Theme.fontFamilyBody
-                                        font.pixelSize: Theme.labelLg
+                                        font.pixelSize: Theme.labelXl
                                         color: Theme.fgSurface
                                     }
 
@@ -3692,6 +3692,89 @@ Popup {
                                     if (root.appConfig)
                                         root.appConfig.setDeleteCurrentRatingEnabled(
                                             !root.appConfig.deleteCurrentRatingEnabled)
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        height: 1
+                        color: Theme.ov20
+                    }
+
+                    // ── Album Browser & Search Result Sort Order row ─────
+                    // Same radio-delegate styling as PLAYBACK's "Playback
+                    // with" / AUTO PLAY's "Play a Title"/"Exceptions"
+                    // groups, but stacked in a Column instead of a Row/Grid
+                    // -- these two labels are long, and vertical stacking
+                    // was explicitly requested. Drives
+                    // LibraryModel::filteredAlbums()/searchLibrary() via
+                    // AppConfig.albumBrowserSortOrder (see UC-01/UC-21).
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 12
+
+                        Text {
+                            text: "Album Browser & Search Result Sort Order"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Column {
+                            Layout.leftMargin: 24
+                            spacing: 12
+
+                            Repeater {
+                                model: [
+                                    { value: "artistYearAlbum",
+                                      label: "Artist ascending → Year descending → Album ascending" },
+                                    { value: "artistAlbum",
+                                      label: "Artist ascending → Album ascending" }
+                                ]
+
+                                delegate: RowLayout {
+                                    spacing: 8
+
+                                    readonly property bool selected:
+                                        root.appConfig !== null
+                                        && root.appConfig.albumBrowserSortOrder === modelData.value
+
+                                    Rectangle {
+                                        width: 18; height: 18
+                                        radius: 9
+                                        color: "transparent"
+                                        border.width: 2
+                                        border.color: selected ? Theme.secondary : Theme.outlineVariant
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 10; height: 10
+                                            radius: 5
+                                            color: Theme.secondary
+                                            visible: selected
+                                        }
+                                    }
+
+                                    Text {
+                                        text: modelData.label
+                                        font.family:    Theme.fontFamilyBody
+                                        font.pixelSize: Theme.labelXl
+                                        color: Theme.fgSurface
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (root.appConfig)
+                                                root.appConfig.setAlbumBrowserSortOrder(modelData.value)
+                                        }
+                                    }
                                 }
                             }
                         }
