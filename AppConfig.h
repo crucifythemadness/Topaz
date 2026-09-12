@@ -31,14 +31,19 @@ class QJsonObject;
 //                  // reassigned a different letter or remounted elsewhere (incl. Linux).
 //                  // "path" and "available" are NOT persisted — folders() computes them
 //                  // fresh from currently mounted volumes on every call.
-//     "crossfade": { "enabled": false, "seconds": 5.0, "audioBackend": "ffmpeg" },
-//                  // audioBackend backs the PLAYBACK tab's "Playback with" choice
-//                  // ("ffmpeg" or "bass"); kept in this object (not renamed/split
-//                  // out) even though the tab itself is no longer called
-//                  // CROSSFADE, to avoid a migration path for existing config
-//                  // files. Missing key or any other value defaults to "ffmpeg".
-//                  // Selecting "bass" is only honored once bassLibraryAvailable()
-//                  // is true (bass.dll/bassflac.dll/bassopus.dll present next to
+//     "playback": { "crossfadeEnabled": false, "crossfadeSeconds": 5.0,
+//                   "audioBackend": "ffmpeg" },
+//                  // Object/key names match the PLAYBACK tab and the
+//                  // crossfadeEnabled/crossfadeSeconds Q_PROPERTYs exactly. Used
+//                  // to be called "crossfade"/"enabled"/"seconds" -- kept that way
+//                  // for a while specifically to avoid a migration path for
+//                  // existing config files, but renamed for consistency since
+//                  // (no dual-key-reading fallback; old files just get the
+//                  // defaults below). audioBackend backs the PLAYBACK tab's
+//                  // "Playback with" choice ("ffmpeg" or "bass"); missing key or
+//                  // any other value defaults to "ffmpeg". Selecting "bass" is
+//                  // only honored once bassLibraryAvailable() is true
+//                  // (bass.dll/bassflac.dll/bassopus.dll present next to
 //                  // Topaz.exe) -- see UC-15.
 //     "autoPlay":  { "queueHorizon": 5, "titleAddingIntervalSeconds": 30,
 //                    "considerGenre": false,
@@ -72,7 +77,7 @@ class QJsonObject;
 // autoPlaySongRepeat allowed values: "once", "twice", "twiceIfNoneAvailable", "several".
 // autoPlayTransportAccess allowed values: "nothing", "playPause", "playPauseAndSelect"
 // (only consulted while autoPlayAllowManualModification is false).
-// Settings are grouped into a nested object per SetupDialog tab (crossfade, autoPlay);
+// Settings are grouped into a nested object per SetupDialog tab (playback, autoPlay);
 // genres/folders/window-layout stay flat at the top level. bigCoverPane is also
 // nested (its presence in the file means "has been positioned before" — absence
 // means first-ever open, so QML uses a centered default instead of x/y).

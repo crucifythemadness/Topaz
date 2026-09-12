@@ -667,10 +667,10 @@ void AppConfig::applyJson(const QJsonObject &root)
     m_deleteCurrentRatingEnabled =
         root[QStringLiteral("deleteCurrentRatingEnabled")].toBool(false);
 
-    const QJsonObject crossfade = root[QStringLiteral("crossfade")].toObject();
-    m_crossfadeEnabled = crossfade[QStringLiteral("enabled")].toBool(false);
-    m_crossfadeSeconds = crossfade[QStringLiteral("seconds")].toDouble(5.0);
-    const QString backend = crossfade[QStringLiteral("audioBackend")].toString();
+    const QJsonObject playback = root[QStringLiteral("playback")].toObject();
+    m_crossfadeEnabled = playback[QStringLiteral("crossfadeEnabled")].toBool(false);
+    m_crossfadeSeconds = playback[QStringLiteral("crossfadeSeconds")].toDouble(5.0);
+    const QString backend = playback[QStringLiteral("audioBackend")].toString();
     m_audioBackend = (backend == QStringLiteral("bass")) ? backend : QStringLiteral("ffmpeg");
 
     const QJsonObject autoPlay = root[QStringLiteral("autoPlay")].toObject();
@@ -845,11 +845,11 @@ void AppConfig::save()
     root[QStringLiteral("startFullscreen")]    = m_startFullscreen;
     root[QStringLiteral("deleteCurrentRatingEnabled")] = m_deleteCurrentRatingEnabled;
 
-    QJsonObject crossfade;
-    crossfade[QStringLiteral("enabled")]      = m_crossfadeEnabled;
-    crossfade[QStringLiteral("seconds")]      = m_crossfadeSeconds;
-    crossfade[QStringLiteral("audioBackend")] = m_audioBackend;
-    root[QStringLiteral("crossfade")] = crossfade;
+    QJsonObject playback;
+    playback[QStringLiteral("crossfadeEnabled")] = m_crossfadeEnabled;
+    playback[QStringLiteral("crossfadeSeconds")] = m_crossfadeSeconds;
+    playback[QStringLiteral("audioBackend")]     = m_audioBackend;
+    root[QStringLiteral("playback")] = playback;
 
     QJsonObject autoPlay;
     autoPlay[QStringLiteral("queueHorizon")]   = m_autoPlayQueueHorizon;

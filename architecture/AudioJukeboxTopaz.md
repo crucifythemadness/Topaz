@@ -1049,9 +1049,10 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     "libraryTreeWidth":   286,
     "playbackQueueWidth": 374,
     "nowPlayingWidth":    359,
-    "crossfade": {
-        "enabled": false,
-        "seconds": 5.0
+    "playback": {
+        "crossfadeEnabled": false,
+        "crossfadeSeconds": 5.0,
+        "audioBackend": "ffmpeg"
     },
     "autoPlay": {
         "queueHorizon": 5,
@@ -1093,11 +1094,14 @@ and show a "not connected" indicator instead of a broken path (see UC-04).
 `LibraryScanner` simply skips folders with an empty `path`, same as it always
 has for any other unreachable folder.
 
-Settings are grouped into a nested object per `SetupDialog` tab (`crossfade`,
+Settings are grouped into a nested object per `SetupDialog` tab (`playback`,
 `autoPlay`, `audioVisualizer`); genres/folders/window-layout stay flat at the top
 level. The `AppConfig` property/method names (`crossfadeEnabled`, `crossfadeSeconds`,
-`autoPlayQueueHorizon`, and their setters) are unchanged by this grouping — only the
-on-disk JSON shape differs. `bigCoverPane`/`tagInfoPane`/`audioVisualizerPane` are
+`autoPlayQueueHorizon`, and their setters) are unchanged by this grouping — the
+on-disk JSON object/key names now match them exactly (`playback.crossfadeEnabled`/
+`playback.crossfadeSeconds`, previously `crossfade.enabled`/`crossfade.seconds` —
+a deliberate rename, not a migration; old config files simply get the documented
+defaults for these two keys on next load, same as any other missing key). `bigCoverPane`/`tagInfoPane`/`audioVisualizerPane` are
 also nested; unlike the others, their *presence* in the file (not a stored bool) is
 what "configured" means — absent means that pane has never been positioned yet, so
 `Main.qml` uses a centered default instead of its saved `X`/`Y` (see UC-17/UC-18/UC-19).
