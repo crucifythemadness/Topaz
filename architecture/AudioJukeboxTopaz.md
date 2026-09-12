@@ -553,6 +553,7 @@ All components are registered in the `Topaz` QML module
 Topaz module
 ├── Theme.qml           singleton — all colour, typography, spacing, and radius tokens
 ├── WindowChrome         C++ QML_ELEMENT + QML_SINGLETON — stateless native helper: requests an alpha-capable surface before native window creation (real translucency) and strips the Windows 11 DWM accent border off FloatingPane windows; see UC-17
+├── HiResAudioLogo       C++ QML_ELEMENT + QML_SINGLETON — stateless, same pattern as WindowChrome; Q_INVOKABLE url() returns a file:// URL for "Hi-Res_Audio.svg" only if that file exists directly beside Topaz.exe (QCoreApplication::applicationDirPath()), else "". The logo is trademarked and Topaz has no redistribution rights, so it is deliberately never bundled as a Qt resource/compiled into Topaz.exe — TopBar.qml's Hi-Res Audio badge (shown next to "TOPAZ JUKEBOX" while the current track is FLAC) only appears if the user supplies their own copy at runtime.
 ├── AppConfig           C++ QML_ELEMENT — reads/writes Topaz.config JSON; exposes genres & folders
 ├── LibraryModel        C++ QML_ELEMENT — QAbstractListModel + scanner orchestration
 │                         property AppConfig appConfig

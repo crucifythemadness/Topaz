@@ -12,6 +12,10 @@ Rectangle {
     // Topaz's own playback level). See systemvolumecontroller.h.
     property var systemVolume: null
 
+    // Bound from Main.qml -- read-only, just for the Hi-Res Audio badge
+    // next to the branding text below (currentFormat === "FLAC").
+    property var engine: null
+
     // Bound from Main.qml -- which of the three navigation tabs is active.
     // "library" | "playlists" | "search"
     property string activeTab: "library"
@@ -49,6 +53,26 @@ Rectangle {
             font.weight:       Font.Bold
             font.letterSpacing: Theme.lsWidest
             color: Theme.fgSurface
+        }
+
+        // Hi-Res Audio badge -- only while the currently-playing track is
+        // lossless (FLAC only) AND a legitimate "Hi-Res_Audio.svg" has been
+        // placed beside Topaz.exe by the user (see HiResAudioLogo -- the
+        // logo is trademarked and deliberately never bundled/compiled into
+        // Topaz.exe itself). RowLayout excludes an invisible child (and its
+        // margin) from layout entirely, so the 16px gap only appears
+        // together with the icon.
+        Image {
+            Layout.leftMargin: 16
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredHeight: root.height - 16   // 8px gap above + below
+            Layout.preferredWidth:  Layout.preferredHeight   // SVG is ~1:1
+            visible: root.engine && root.engine.currentFormat === "FLAC"
+                     && HiResAudioLogo.url() !== ""
+            source: HiResAudioLogo.url()
+            sourceSize.width:  Layout.preferredWidth
+            sourceSize.height: Layout.preferredHeight
+            fillMode: Image.PreserveAspectFit
         }
 
         Item { Layout.fillWidth: true }

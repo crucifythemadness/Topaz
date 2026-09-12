@@ -441,6 +441,7 @@ ApplicationWindow {
         TopBar {
             Layout.fillWidth: true
             systemVolume: systemVolume
+            engine: engine
             activeTab: root.activeTab
             onSettingsRequested: setupDialog.open()
             onAboutRequested:    aboutDialog.open()

@@ -450,7 +450,12 @@ Rectangle {
                             Rectangle {
                                 width: 8; height: 8
                                 radius: 4
-                                color: Theme.secondary
+                                // Red for lossless (FLAC only) -- same literal
+                                // BottomBar's active AUTO PLAY state and the
+                                // "(IN QUEUE)" badges already use as this app's
+                                // one deliberate attention-grabbing red accent.
+                                color: (root.engine && root.engine.currentFormat === "FLAC")
+                                       ? "#FF1744" : Theme.secondary
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             Text {
