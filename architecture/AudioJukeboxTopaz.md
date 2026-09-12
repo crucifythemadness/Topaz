@@ -1712,19 +1712,29 @@ current track or a track further ahead in the queue.
 
 ### Auto-scroll to keep the current + upcoming tracks visible
 
-`queueArea.autoScrollToCurrent()` (`PlaybackQueue.qml`) runs on every
-`PlaybackEngine::queueCountChanged` (via a `Connections` block, deferred one tick with
-`Qt.callLater` so `queueList.contentHeight` already reflects the new row count) —
-i.e. on every add (`addTrack`/`addTracks`) and every remove (`removeAt`/`clearQueue`),
-from any source. It sets `queueList.contentY = currentIndex * 68` (clamped to the
-content's end), pinning the currently-playing row to the top of the visible viewport —
-already-played rows scroll out of view above it, and as many upcoming/queued tracks as
-the panel's height can hold become visible below. It's a no-op whenever the queue
-doesn't overflow the panel (`contentHeight <= height`, no scrollbar showing), so a
-short queue is never force-scrolled. This behavior is **independent of AUTO PLAY vs.
-MANUAL MODE** — it reacts purely to queue-length changes, regardless of what triggered
-them. It does *not* re-trigger on ordinary playback advancing to the next track alone
-(no count change) — only on an actual add/remove.
+`queueArea.autoScrollToCurrent()` (`PlaybackQueue.qml`) runs on both
+`PlaybackEngine::queueCountChanged` **and** `PlaybackEngine::currentIndexChanged`
+(via a `Connections` block, each deferred one tick with `Qt.callLater` so
+`queueList.contentHeight`/the new current row are already settled) — i.e. on
+every add (`addTrack`/`addTracks`), every remove (`removeAt`/`clearQueue`),
+and every time the currently-playing track itself changes, from any source.
+It sets `queueList.contentY = currentIndex * 68` (clamped to the content's
+end), pinning the currently-playing row to the top of the visible viewport —
+already-played rows scroll out of view above it, and as many upcoming/queued
+tracks as the panel's height can hold become visible below. It's a no-op
+whenever the queue doesn't overflow the panel (`contentHeight <= height`, no
+scrollbar showing), so a short queue is never force-scrolled. This behavior
+is **independent of AUTO PLAY vs. MANUAL MODE vs. a loaded playlist** — it
+was already written to not distinguish between them, but originally only
+had the `queueCountChanged` trigger wired, so AUTO PLAY (which keeps adding
+tracks to maintain its horizon) worked by coincidence while a playlist
+playing straight through (queue size never changes, only `currentIndex`
+does) or a manually-built queue with nothing further adding to it did not.
+The `currentIndexChanged` trigger closes that gap — `currentIndexChanged`
+is the single choke point every real transition (hard cut, the natural
+crossfade midpoint, UC-23's queue-replacing crossfade midpoint) and every
+manual navigation (NEXT/PREVIOUS/clicking a queue row) already shares, so
+this one addition covers all of them uniformly.
 
 ---
 

@@ -242,8 +242,12 @@ Rectangle {
         // revealing as many upcoming tracks below it as the panel can hold —
         // already-played rows scroll out of view above. Only acts when the
         // queue actually overflows the panel (a scrollbar would be showing);
-        // applies regardless of AUTO PLAY/MANUAL MODE. Triggered on every
-        // add/remove (see the Connections block on queueCountChanged below).
+        // applies regardless of AUTO PLAY/MANUAL MODE/playlist. Triggered
+        // on every add/remove AND every current-track change (see the
+        // Connections block below) -- the former covers AUTO PLAY growing
+        // the queue, the latter covers ordinary playback advancing (a
+        // playing playlist, a manually-built queue once nothing's adding
+        // to it, or any manual NEXT/PREVIOUS/row click).
         function autoScrollToCurrent() {
             if (!root.engine) return
             if (queueList.contentHeight <= queueList.height) return
@@ -255,7 +259,15 @@ Rectangle {
 
         Connections {
             target: root.engine
-            function onQueueCountChanged() { Qt.callLater(queueArea.autoScrollToCurrent) }
+            function onQueueCountChanged()   { Qt.callLater(queueArea.autoScrollToCurrent) }
+            // Covers ordinary playback advancing to the next track with no
+            // count change -- a playing playlist, or any queue once AUTO
+            // PLAY stops adding to it, never fires queueCountChanged again
+            // on its own. currentIndexChanged is the single choke point
+            // every real transition (hard cut, natural crossfade midpoint,
+            // UC-23's queue-replacing crossfade midpoint) and every manual
+            // navigation (NEXT/PREVIOUS/clicking a row) already shares.
+            function onCurrentIndexChanged() { Qt.callLater(queueArea.autoScrollToCurrent) }
         }
 
         ListView {
