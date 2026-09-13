@@ -275,6 +275,13 @@ public:
     // mirrors the existing silent-duplicate-reject convention below.
     Q_INVOKABLE void addGenre(const QString &name);
     Q_INVOKABLE void removeGenreAt(int index);
+    // Reorders the configured genre list: the entry at `from` ends up at index
+    // `to`, everything between them shifts by one -- a move on a dense list, so
+    // it can never open a hole. Silent no-op for out-of-range indices or
+    // from == to, same convention as removeGenreAt above. Drives both the
+    // SetupDialog GENRES grid order and, via the derived enabledGenres(), the
+    // GenreBar button order. See UC-33.
+    Q_INVOKABLE void moveGenre(int from, int to);
     Q_INVOKABLE void clearGenres();
 
     // ── GenreBar visibility (enabled-genre subset, see UC-03) ─────────────

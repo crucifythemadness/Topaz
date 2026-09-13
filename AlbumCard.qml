@@ -16,10 +16,17 @@
 //   queueInteractionEnabled - bool (default true; false disables drag-to-queue
 //                             and double-click-to-queue, e.g. PlaylistViewer
 //                             previewing the playlist active in the queue)
+//   wholeAlbumDoubleClickEnabled - bool (default false; AlbumBrowser-only opt-in --
+//                             double-clicking the cover art adds every track of
+//                             the album to the queue in one action. Left false
+//                             for SearchResultBrowser/PlaylistViewer, which embed
+//                             this same component but were explicitly excluded.)
 //
 // Interaction:
 //   Drag & drop  - press and drag a track row to PlaybackQueue
-//   Double-click - immediately add the track to the queue
+//   Double-click (track row)  - immediately add that track to the queue
+//   Double-click (cover art)  - add every track of the album to the queue,
+//                               only when wholeAlbumDoubleClickEnabled is true
 //
 // Drag mechanism: internal (same-window) drag via Drag.active.
 // Drag.hotSpot is updated each frame to the actual cursor scene position so
@@ -44,6 +51,18 @@ Rectangle {
     // re-queuing from it while it's already the live queue doesn't make
     // sense). Default true preserves every other call site's behavior.
     property bool   queueInteractionEnabled: true
+    // AlbumBrowser-only opt-in (see header comment above) -- default false
+    // preserves today's behavior for SearchResultBrowser/PlaylistViewer,
+    // which embed this same component unchanged.
+    property bool   wholeAlbumDoubleClickEnabled: false
+
+    // Shared by the cover-art double-click below; mirrors the exact gating
+    // the per-track double-click already uses (line ~270).
+    function addAllTracksToQueue() {
+        var allowed = !root.autoPlay || root.autoPlay.manualQueueEditingAllowed
+        if (root.engine && allowed && root.tracks.length > 0)
+            root.engine.addTracks(root.tracks)
+    }
 
     implicitHeight: cardRow.implicitHeight + 40
     color: cardHoverHandler.hovered ? Theme.surfaceContainer : Theme.surfaceContainerLow
@@ -100,6 +119,20 @@ Rectangle {
                     fillMode:          Image.PreserveAspectCrop
                     asynchronous:      true
                     layer.enabled: true
+                }
+
+                // AlbumBrowser-only: double-click the cover to queue every
+                // track of the album at once. Scoped to just this Item (not
+                // the whole card) so it can never race with the per-track
+                // trackMA below -- a full-card MouseArea was tried once
+                // before and broke drag-to-queue by intercepting presses
+                // meant for the track rows (see architecture doc, UC-06).
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: root.wholeAlbumDoubleClickEnabled && root.queueInteractionEnabled
+                    cursorShape: Qt.PointingHandCursor
+                    acceptedButtons: Qt.LeftButton
+                    onDoubleClicked: root.addAllTracksToQueue()
                 }
             }
 

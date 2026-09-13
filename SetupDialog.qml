@@ -308,8 +308,40 @@ Popup {
 
                     // Genre chips — scrollable area
                     Item {
+                        id: genreGridArea
                         Layout.fillWidth:  true
                         Layout.fillHeight: true
+
+                        // Drag-to-reorder state (-1 = no drag active). Same
+                        // two-plain-int pattern PlaybackQueue's queueArea uses
+                        // for queue reordering — see UC-11/UC-33.
+                        property int reorderFrom: -1
+                        property int reorderTo:   -1
+                        readonly property int genreCount:
+                            root.appConfig ? root.appConfig.genres.length : 0
+
+                        // Commits a finished drag. Lives here (not in the
+                        // delegate) so it outlives the Repeater item that
+                        // triggered it — see the Qt.callLater note at the
+                        // drag handle's onReleased below.
+                        function commitGenreMove(from, to) {
+                            if (!root.appConfig) return
+                            if (from < 0 || to < 0 || from === to) return
+                            root.appConfig.moveGenre(from, to)
+
+                            // Keep DELETE SELECTED pointing at the same
+                            // *genre*, not the same slot — mirrors
+                            // PlaybackEngine::moveTrack's m_currentIndex
+                            // fixup, plus the sel === from case (the queue
+                            // can't hit that; this grid can, since the
+                            // selected cell is often the one being dragged).
+                            var sel = root.selectedGenreIndex
+                            if (sel < 0) return
+                            if (sel === from)                              sel = to
+                            else if (from < to && sel > from && sel <= to) sel -= 1
+                            else if (from > to && sel >= to && sel <  from) sel += 1
+                            root.selectedGenreIndex = sel
+                        }
 
                         // Empty-state hint
                         Text {
@@ -341,16 +373,27 @@ Popup {
                             rowSpacing:    8
                             columnSpacing: 8
 
+                            // Shared by the cell delegate, the drag hit-test
+                            // mapping and the drop indicator below — all three
+                            // must agree on the pitch or the indicator drifts.
+                            readonly property real cellW: (width - (columns - 1) * columnSpacing) / columns
+                            readonly property real cellH: 54
+                            readonly property real pitchX: cellW + columnSpacing
+                            readonly property real pitchY: cellH + rowSpacing
+
                             Repeater {
                                 model: root.appConfig ? root.appConfig.genres : []
 
                                 delegate: Rectangle {
                                     id: genreCell
-                                    width:  (genreManageGrid.width
-                                             - (genreManageGrid.columns - 1) * genreManageGrid.columnSpacing)
-                                            / genreManageGrid.columns
-                                    height: 54
+                                    width:  genreManageGrid.cellW
+                                    height: genreManageGrid.cellH
                                     radius: Theme.radiusSm
+
+                                    // Dim this cell while it is the one being
+                                    // dragged — no floating ghost copy, the
+                                    // source just fades (UC-11 convention).
+                                    opacity: genreGridArea.reorderFrom === index ? 0.45 : 1.0
 
                                     readonly property bool isSelected:
                                         root.selectedGenreIndex === index
@@ -391,7 +434,9 @@ Popup {
                                         font.pixelSize:     Theme.labelMd
                                         font.letterSpacing: 1.2
                                         elide: Text.ElideRight
-                                        width: parent.width - 28
+                                        width: parent.width - 56   // reserve the 24px drag-handle
+                                                                    // strip on the left and the 28px
+                                                                    // checkbox column on the right
                                         horizontalAlignment: Text.AlignHCenter
                                         color: genreCell.isSelected
                                                ? Theme.fgSecondaryContainer
@@ -446,13 +491,115 @@ Popup {
                                         }
                                     }
 
+                                    // ── Reorder drag handle ──────────────────
+                                    // Reserved 24px column on the cell's left
+                                    // edge, same non-overlapping-hit-columns
+                                    // convention as genreEnableHit above:
+                                    // dragging here never selects the cell,
+                                    // clicking the cell body never starts a
+                                    // drag. Every genre is draggable, enabled
+                                    // or not — order and enabled-membership
+                                    // are orthogonal (see UC-33). The Item and
+                                    // its MouseArea are always present — only
+                                    // the glyph's visible reacts to hover,
+                                    // which is the safe side of the
+                                    // hover-visibility deadlock described in
+                                    // UC-11 (the deadlock only occurs when the
+                                    // handle *item itself* is hidden based on
+                                    // a hover flag its own MouseArea steals).
+                                    Item {
+                                        id: genreDragHandle
+                                        width: 24
+                                        z: 2
+                                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "⠇"   // braille six-dot — same drag-handle glyph as PlaybackQueue
+                                            font.pixelSize: 12
+                                            color: Theme.fgSurfaceVariant
+                                            visible: genreDragMA.containsMouse
+                                                     || cellHover.containsMouse
+                                                     || genreGridArea.reorderFrom === index
+                                        }
+
+                                        MouseArea {
+                                            id: genreDragMA
+                                            anchors.fill: parent
+                                            hoverEnabled:    true
+                                            // No Flickable ancestor here (the grid
+                                            // is fixed/no-scroll), so nothing can
+                                            // currently steal the gesture — kept to
+                                            // match UC-11 and to stay correct if
+                                            // this panel ever gains one.
+                                            preventStealing: true
+                                            cursorShape: genreGridArea.reorderFrom >= 0
+                                                         ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+
+                                            onPressed: function(mouse) {
+                                                if (genreGridArea.genreCount < 2) return
+                                                genreGridArea.reorderFrom = index
+                                                genreGridArea.reorderTo   = index
+                                            }
+
+                                            onPositionChanged: function(mouse) {
+                                                if (genreGridArea.reorderFrom < 0) return
+                                                // 2D hit test, straight into
+                                                // genreManageGrid's local space --
+                                                // no contentY term because nothing
+                                                // here scrolls (cf. UC-11, which
+                                                // had to map into a ListView's
+                                                // contentItem).
+                                                var pt   = mapToItem(genreManageGrid, mouse.x, mouse.y)
+                                                var cols = genreManageGrid.columns
+                                                var col  = Math.floor(pt.x / genreManageGrid.pitchX)
+                                                var row  = Math.floor(pt.y / genreManageGrid.pitchY)
+                                                col = Math.max(0, Math.min(col, cols - 1))
+                                                row = Math.max(0, row)
+                                                var flat = row * cols + col
+                                                // Clamping (not rejecting)
+                                                // out-of-range positions is
+                                                // UC-11's rule: dragging past the
+                                                // last genre or onto a trailing
+                                                // empty slot simply means "move
+                                                // to the end".
+                                                genreGridArea.reorderTo =
+                                                    Math.max(0, Math.min(flat, genreGridArea.genreCount - 1))
+                                            }
+
+                                            onReleased: function(mouse) {
+                                                var from = genreGridArea.reorderFrom
+                                                var to   = genreGridArea.reorderTo
+                                                // Reset first so the indicator
+                                                // is gone before the model
+                                                // changes.
+                                                genreGridArea.reorderFrom = -1
+                                                genreGridArea.reorderTo   = -1
+                                                // Deferred one tick on purpose:
+                                                // moveGenre() emits
+                                                // genresChanged synchronously,
+                                                // which resets this Repeater's
+                                                // QStringList model and tears
+                                                // down *this very delegate* --
+                                                // including the MouseArea whose
+                                                // handler we are standing in.
+                                                // Qt.callLater moves the
+                                                // mutation out of that frame
+                                                // entirely.
+                                                if (from >= 0 && to >= 0 && from !== to)
+                                                    Qt.callLater(genreGridArea.commitGenreMove, from, to)
+                                            }
+                                        }
+                                    }
+
                                     // Cell-wide selection (for DELETE SELECTED) --
-                                    // deliberately stops short of genreEnableHit's
-                                    // column above so the two never overlap.
+                                    // deliberately stops short of genreDragHandle's
+                                    // column on the left and genreEnableHit's
+                                    // column on the right so none ever overlap.
                                     MouseArea {
                                         id: cellHover
-                                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-                                        width: parent.width - 30
+                                        anchors { left: genreDragHandle.right; top: parent.top; bottom: parent.bottom }
+                                        width: parent.width - genreDragHandle.width - 30
                                         hoverEnabled: true
                                         cursorShape:  Qt.PointingHandCursor
                                         onClicked: root.selectedGenreIndex =
@@ -460,6 +607,54 @@ Popup {
                                     }
                                 }
                             }
+
+                            // Inert visual placeholders for the unused slots of
+                            // the fixed 40-cell board (5 x 8). Purely decorative
+                            // -- no MouseArea, so they can never intercept a
+                            // click or a drag -- but they make the capacity
+                            // legible and make the "no gaps" invariant
+                            // self-evident: because the order lives in a dense
+                            // QStringList, empty slots can only ever be
+                            // trailing ones.
+                            Repeater {
+                                model: root.appConfig
+                                       ? Math.max(0, root.appConfig.maxGenres() - root.appConfig.genres.length)
+                                       : 0
+                                delegate: Rectangle {
+                                    width:  genreManageGrid.cellW
+                                    height: genreManageGrid.cellH
+                                    radius: Theme.radiusSm
+                                    color:  "transparent"
+                                    border.width: 1
+                                    border.color: Theme.ov10
+                                }
+                            }
+                        }
+
+                        // ── Reorder drop indicator ───────────────────────────
+                        // One shared outline (UC-11's "single indicator" rule,
+                        // in 2D) marking the slot the dragged genre will END UP
+                        // in -- moveGenre()'s `to` is a final index, not an
+                        // insert-before position, so an outline is the honest
+                        // rendering; an insertion caret would also be ambiguous
+                        // at row wraps. Deliberately NOT a child of
+                        // genreManageGrid: a positioner lays out every visible
+                        // child, so an indicator inside it would be given its
+                        // own cell. Grid coords == genreGridArea coords because
+                        // the Grid fills this Item.
+                        Rectangle {
+                            z: 10
+                            visible: genreGridArea.reorderFrom >= 0
+                                     && genreGridArea.reorderTo   >= 0
+                                     && genreGridArea.reorderTo  !== genreGridArea.reorderFrom
+                            width:  genreManageGrid.cellW
+                            height: genreManageGrid.cellH
+                            x: (genreGridArea.reorderTo % genreManageGrid.columns) * genreManageGrid.pitchX
+                            y: Math.floor(genreGridArea.reorderTo / genreManageGrid.columns) * genreManageGrid.pitchY
+                            color:  Theme.s10
+                            radius: Theme.radiusSm
+                            border.width: 2
+                            border.color: Theme.secondary
                         }
                     }
 

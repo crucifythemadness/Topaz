@@ -107,6 +107,30 @@ void AppConfig::removeGenreAt(int index)
     save();
 }
 
+void AppConfig::moveGenre(int from, int to)
+{
+    if (from == to)
+        return;
+    if (from < 0 || from >= m_genres.size())
+        return;
+    if (to   < 0 || to   >= m_genres.size())
+        return;
+
+    // enabledGenres() is derived from m_genres' order, so a reorder can
+    // change its *value* without changing membership at all -- snapshot it
+    // to avoid firing enabledGenresChanged (and resetting the live
+    // genre/artist/album selection via LibraryData.rebuildGenreModel())
+    // when only disabled genres moved past each other.
+    const QStringList enabledBefore = enabledGenres();
+
+    m_genres.move(from, to);
+
+    emit genresChanged();
+    if (enabledGenres() != enabledBefore)
+        emit enabledGenresChanged();
+    save();
+}
+
 void AppConfig::clearGenres()
 {
     if (m_genres.isEmpty())

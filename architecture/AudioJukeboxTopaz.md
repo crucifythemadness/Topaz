@@ -195,6 +195,19 @@ row.
 4. `LibraryData.rebuildGenreModel()` fires; the button disappears from `GenreBar`
    if it had been enabled.
 
+### Normal Flow — Reorder a genre
+
+1. User drags a genre cell's drag handle to a new position in the grid.
+2. `appConfig.moveGenre(from, to)` moves the entry within `m_genres` (a plain
+   list `move`, so no gap is ever created), emits `genresChanged` (and
+   `enabledGenresChanged` only if the derived `enabledGenres()` value
+   actually changed), auto-saves.
+3. `LibraryData.rebuildGenreModel()` fires whenever `enabledGenresChanged`
+   was emitted → `GenreBar` buttons re-render in the new order.
+
+See **UC-33** for the full drag mechanism (2D hit-testing, drop indicator,
+selection-index remapping).
+
 ### Normal Flow — Delete all genres
 
 1. User clicks **DELETE ALL**.
@@ -215,6 +228,8 @@ row.
   entries than it has room for. Display order always follows `genres`' order —
   membership is tracked as a plain set (`QSet<QString>`), never a separately
   ordered list, so it can't desync from add/remove/reorder of the configured list.
+  The user controls that order directly by dragging genre cells in the GENRES
+  grid — see UC-33.
 - **Migration**: config files predating this feature have no `enabledGenres` key.
   On load, `AppConfig` treats that as "enable every configured genre, up to 30" —
   every pre-existing install keeps showing exactly the `GenreBar` buttons it did
@@ -1113,6 +1128,7 @@ what "configured" means — absent means that pane has never been positioned yet
 |--------|-------------|
 | `addGenre(name)` | Append genre (deduplicates case-insensitively); auto-saves. |
 | `removeGenreAt(index)` | Remove genre by index; auto-saves. |
+| `moveGenre(from, to)` | Move genre from one index to another, shifting the entries between them; auto-saves. See UC-33. |
 | `clearGenres()` | Remove all genres; auto-saves. |
 | `addFolder(rawPath, includeSubfolders)` | Converts `rawPath` to a volume-anchored `VolumePath` (`volumepath.h`) and appends it (deduplicates by `(volume, relPath)`); auto-saves. |
 | `removeFolderAt(index)` | Remove folder by index; auto-saves. |
@@ -1212,7 +1228,7 @@ Main.qml
    │  setupDialog.open()
    ▼
 SetupDialog (GENRES tab)
-   │  appConfig.addGenre(name)  /  removeGenreAt(i)  /  clearGenres()
+   │  appConfig.addGenre(name)  /  removeGenreAt(i)  /  moveGenre(from, to)  /  clearGenres()
    ▼
 AppConfig (C++)
    ├── mutates m_genres
@@ -1514,6 +1530,7 @@ configurable via the app JSON config) will be introduced at that point.
       +autoPlayTransportAccess string
       +addGenre(name)
       +removeGenreAt(index)
+      +moveGenre(from, to)
       +addFolder(path, subfolders)
       +removeFolderAt(index)
       +setFolderActive(index, active)
@@ -1618,6 +1635,16 @@ configurable via the app JSON config) will be introduced at that point.
 2. `trackMA.onDoubleClicked` calls `root.engine.addTracks([modelData])` directly.
 3. Same result as a successful drag-drop, without leaving the album browser.
 
+### Normal Flow — Double-click cover art to add the whole album (AlbumBrowser only)
+
+See **UC-34** for the full design — summary: `AlbumBrowser.qml`'s delegate
+sets a new opt-in `AlbumCard.wholeAlbumDoubleClickEnabled: true`, which
+arms a `MouseArea` scoped to just the 160×160 cover-art `Item` (never the
+whole card); double-clicking it calls `root.engine.addTracks(root.tracks)`
+— the same batch-capable invokable as above, just with every track of the
+album instead of one. `SearchResultBrowser`/`PlaylistViewer` leave the
+property at its default `false`, so they get none of this.
+
 ### Why dynamic `Drag.hotSpot` is required
 
 Qt's DropArea fires when the drag source item's hotspot (`item.mapToScene(Drag.hotSpot)`) is inside the DropArea's scene bounds. If `trackRow` never moves (it stays in the AlbumBrowser layout), the hotspot stays in the AlbumBrowser area and never reaches the PlaybackQueue DropArea — so the drop never triggers. Updating `Drag.hotSpot` every `positionChanged` to equal `cursorScenePos - trackRowScenePos` ensures the absolute hotspot position always matches the mouse cursor, regardless of where `trackRow` sits in the scene.
@@ -1651,7 +1678,7 @@ The `albumList` ListView is interactive (flick-scrollable). Without `preventStea
 
 - **No multi-selection**: `AlbumCard` carries no selection state — no `selectedIndices` JS object, no Ctrl+click logic.
 - **No context menus**: `QtQuick.Controls.Menu` removed from `AlbumCard`. Each `Menu` is backed by a `QQuickPopup` overlay; instantiating dozens of them per genre change was the primary source of UI lag.
-- **No album drag**: the cover area is not a drag source; only individual track rows are draggable.
+- **No album drag**: the cover area is not a drag source; only individual track rows are draggable. It is, however, a double-click target in AlbumBrowser only — see UC-34.
 - **Minimal engine reference in `AlbumCard`**: `engine` is an optional `property var` on `AlbumCard`, used only for double-click add-to-queue and the drag cursor override via `beginDragCursor` / `setDragCursorAllowed` / `restoreOverrideCursor`. `AlbumBrowser` itself has no engine reference. Setting the cursor via a C++ invokable (`QGuiApplication`'s override-cursor stack) is necessary because a QML `cursorShape` binding on `trackMA` is ineffective once the mouse leaves the `MouseArea`'s bounds during a drag — the global override persists regardless of which item is under the cursor. `setDragCursorAllowed()` deliberately uses `QGuiApplication::changeOverrideCursor()` (changes the shape of the currently-active override) rather than another `setOverrideCursor()` call while switching between "+"/"not allowed" mid-drag — stacking a second override there would require a second `restoreOverrideCursor()` to unwind it, which nothing in the drag flow calls.
 
 ---
@@ -6096,4 +6123,184 @@ just one additional `Connections` block in each file reusing their
 existing refresh functions (`AlbumBrowser.qml`'s `_scheduleRefresh()`,
 `SearchData.qml`'s `_scheduleSearch()`) whenever `AppConfig.
 albumBrowserSortOrderChanged` fires.
+
+## UC-33 Reorder Genres in the Setup Dialog GENRES Grid
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | User drags a genre cell in Setup → GENRES onto another position; every other genre shifts to close the gap; the new order persists and `GenreBar`'s buttons immediately re-render in it. |
+| **Actor** | User |
+| **Precondition** | GENRES tab open, at least 2 configured genres. |
+| **Trigger** | User presses and drags a genre cell's drag handle (⠇, left edge). |
+
+The grid order shown here (`AppConfig.genres`) is the single source of
+truth genres are identified *and* ordered by; `enabledGenres()` (the
+`GenreBar`-visible subset, see UC-03) is always derived fresh from
+`genres`' own order, so reordering the full list automatically reorders
+`GenreBar` too, with no changes needed to `GenreBar.qml`/`LibraryData.qml`.
+
+### Normal Flow
+
+1. User presses the drag handle on a genre cell. `genreGridArea.reorderFrom`
+   and `reorderTo` are both set to that cell's index (a no-op if fewer than
+   2 genres are configured).
+2. User moves the mouse. `genreDragMA.onPositionChanged` maps the cursor
+   directly into `genreManageGrid`'s local coordinate space (no
+   scroll-offset correction needed — this grid, unlike UC-11's `ListView`,
+   has no `Flickable` ancestor and never scrolls) and computes:
+   - `col = clamp(floor(pt.x / pitchX), 0, columns - 1)`
+   - `row = floor(pt.y / pitchY)`
+   - `flat = row * columns + col`, clamped to `[0, genreCount - 1]`
+   `reorderTo` is set to `flat`.
+3. The source cell dims to 45% opacity; a single shared outline `Rectangle`
+   (not a per-delegate highlight) is drawn over the target cell at
+   `(reorderTo % columns, reorderTo / columns)`.
+4. User releases. `reorderFrom`/`reorderTo` reset to `-1` first (so the
+   outline disappears before the model changes), then
+   `Qt.callLater(commitGenreMove, from, to)` runs one tick later —
+   deferred because `moveGenre()` fires `genresChanged` synchronously,
+   which resets the `Repeater`'s `QStringList` model and would otherwise
+   tear down the very delegate/`MouseArea` whose handler is running.
+5. `commitGenreMove()` calls `appConfig.moveGenre(from, to)`, which moves
+   the entry within `m_genres` (a plain list `move` — hole-free by
+   construction) and emits `genresChanged` (+ `enabledGenresChanged` only
+   if the derived enabled-subset's order actually changed), then
+   auto-saves.
+6. `commitGenreMove()` also remaps `root.selectedGenreIndex` (used by
+   DELETE SELECTED) with the same shift arithmetic
+   `PlaybackEngine::moveTrack` uses for `m_currentIndex`
+   (`playbackengine.cpp`), plus an extra case for "the selected cell is the
+   one that was just dragged" — without this, DELETE SELECTED could
+   silently target the wrong genre after a reorder.
+7. If `enabledGenresChanged` fired, `LibraryData.rebuildGenreModel()` runs
+   and `GenreBar`'s buttons re-render in the new order.
+
+### Alternates
+
+- Same-cell release (`from === to`): no-op, `moveGenre` is never called,
+  nothing is saved.
+- Drag released past the grid's edges or onto a trailing empty placeholder
+  slot: clamped, not rejected — lands at the nearest valid index (first or
+  last configured genre).
+- No Escape-to-cancel: any release commits to wherever `reorderTo` last
+  resolved, same as UC-11.
+
+### Why an outline instead of an insertion caret
+
+`moveGenre(from, to)`'s `to` is the *final index* the dragged genre will
+occupy, not an insert-before position — the honest indicator is therefore
+"this cell is where your genre lands" (an outline over that cell), not a
+line between two cells. A caret is also ambiguous in a 2D grid at row
+wraps (is "after the last cell of row 1" the same gap as "before the
+first cell of row 2"?), which a 1D vertical list like UC-11's queue never
+has to resolve.
+
+### Relationship to UC-11's drag mechanism
+
+The drag mechanism itself — pure mouse-position tracking, no
+`Drag`/`DropArea` — and *why* it was chosen are documented once in
+**UC-11 → "Why pure mouse tracking instead of `Drag`/`DropArea`"** and are
+not repeated here; UC-33 is that same mechanism generalized from a 1D
+vertical list to a 2D grid. The two differ in exactly the ways a
+dimensionality change requires: UC-11's index math is `floor(pt.y /
+rowHeight)`, purely vertical; UC-33's is a genuine `(row, col)` pair
+flattened via `row * columns + col`. UC-11 maps into a `ListView`'s
+`contentItem` to account for scrolling; UC-33 maps directly into the grid
+itself, since the GENRES grid is fixed-size and never scrolls.
+
+### Design decisions
+
+- **Every genre cell is draggable, enabled or disabled** — order
+  (`m_genres`) and enabled-membership (`m_enabledGenreSet`) are orthogonal;
+  a disabled genre's slot still matters for when it's later enabled.
+- **Dedicated 24px drag-handle column on the cell's left edge**, not
+  whole-cell drag with a movement threshold. The cell already reserves
+  non-overlapping hit-columns for the enable checkbox and the
+  select-for-delete click (see UC-03); a third reserved column preserves
+  that convention instead of fighting it with press/move disambiguation
+  logic.
+- **`selectedGenreIndex` remapped, not cleared, after a move** — clearing
+  it would silently discard the user's DELETE SELECTED intent for no
+  reason; remapping (item 6 above) keeps it pointing at the same genre.
+- **`enabledGenresChanged` emitted only when the derived value actually
+  changes** — reordering two *disabled* genres past each other changes
+  `m_genres`' order but not `enabledGenres()`'s value, so `LibraryData`'s
+  selection-resetting `rebuildGenreModel()` is skipped in that case.
+- **All 40 slots rendered, trailing ones as inert placeholders** — a
+  second, `MouseArea`-free `Repeater` renders `maxGenres() -
+  genres.length` empty outlined cells after the real ones, making the
+  fixed-size board and the "no gaps" invariant (empty slots can only ever
+  be trailing, because the order is a single dense list) visually
+  self-evident.
+
+## UC-34 Double-Click an Album's Cover Art to Queue All Its Tracks (AlbumBrowser only)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Double-clicking an album's cover art in `AlbumBrowser` adds every track of that album to the queue in one action, instead of double-clicking each track row individually. |
+| **Actor** | User |
+| **Precondition** | At least one album is visible in `AlbumBrowser`. |
+| **Trigger** | User double-clicks an album's cover art thumbnail. |
+
+`AlbumCard.qml` is shared, unmodified-per-host, by three panels —
+`AlbumBrowser.qml`, `SearchResultBrowser.qml`, and `PlaylistViewer.qml` —
+which pass it an identical prop set today. This feature is explicitly
+scoped to `AlbumBrowser` only; `SearchResultBrowser`'s true album
+groupings and `PlaylistViewer`'s one-track-per-card pseudo-albums (from
+`LibraryModel::buildStandaloneTrackCards()`, see UC-10) are deliberately
+left untouched.
+
+### Normal Flow
+
+1. User double-clicks the 160×160 cover-art image on an `AlbumBrowser`
+   album card.
+2. A `MouseArea` scoped to just that cover-art `Item` (not the whole
+   card) fires `onDoubleClicked`, calling `root.addAllTracksToQueue()`.
+3. `addAllTracksToQueue()` applies the same `autoPlay.
+   manualQueueEditingAllowed` gate the existing per-track double-click
+   uses, then calls `root.engine.addTracks(root.tracks)` — `root.tracks`
+   is already the complete per-album track array every delegate carries
+   (the same array the track-row `Repeater` iterates), so no new
+   `LibraryModel`/`PlaybackEngine` API was needed.
+4. `PlaybackEngine::addTracks()` (already batch-capable, see UC-06)
+   appends every track in one `beginInsertRows`/`endInsertRows`, syncs to
+   the active playlist file if one is loaded and unlocked, and
+   auto-plays once if the queue was previously empty.
+
+### Why the cover art, not the whole card
+
+`AlbumCard` deliberately has no whole-card `MouseArea` — one existed
+once (`cardHover`) and was removed because, sitting topmost, it
+intercepted presses before the per-track `trackMA` could see them,
+breaking track-row drag-to-queue (see UC-06, "Why `HoverHandler` instead
+of `MouseArea` for card hover"). Scoping the new double-click handler to
+just the cover-art `Item` — a plain, unshared `Item` entirely outside the
+track-row `Repeater`'s bounds — sidesteps that failure mode completely:
+it can never overlap or race with `trackMA`, so no z-order/event-stealing
+risk is reintroduced.
+
+### Why an opt-in property instead of a signal or a per-host wrapper
+
+A new `AlbumCard` property, `wholeAlbumDoubleClickEnabled` (default
+`false`), is set `true` only by `AlbumBrowser.qml`'s delegate. This
+mirrors the existing `queueInteractionEnabled` idiom (also a plain
+opt-out boolean, set only by the one host — `PlaylistViewer` — that needs
+non-default behavior) rather than introducing a new signal-based contract
+or forking `AlbumCard` into host-specific variants. `SearchResultBrowser`
+and `PlaylistViewer` need zero changes; the property's default preserves
+their exact prior behavior.
+
+### Design decisions
+
+- **Cover art only, not the whole card** — see above; the only region
+  structurally guaranteed to never overlap a track row.
+- **Default-off opt-in property** — `SearchResultBrowser.qml` and
+  `PlaylistViewer.qml` require no changes at all; the feature is
+  impossible to accidentally leak into them.
+- **Reuses `addTracks()` and the `manualQueueEditingAllowed` gate
+  verbatim** — no new C++ invocable, no new gating logic to keep in sync
+  with the existing per-track double-click.
+- **Cursor feedback gated the same way** — the cover shows
+  `Qt.PointingHandCursor` only when `wholeAlbumDoubleClickEnabled` is
+  true, so it doesn't look falsely interactive in the two excluded hosts.
 

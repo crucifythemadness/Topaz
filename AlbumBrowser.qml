@@ -104,6 +104,7 @@ Rectangle {
             tracks:      modelData.tracks
             engine:      root.engine
             autoPlay:    root.autoPlay
+            wholeAlbumDoubleClickEnabled: true
         }
 
         // Empty state
