@@ -263,7 +263,7 @@ void AppConfig::setCrossfadeEnabled(bool enabled)
 
 void AppConfig::setCrossfadeSeconds(double seconds)
 {
-    seconds = qBound(2.0, seconds, 10.0);
+    seconds = qBound(2.0, seconds, 12.0);
     seconds = std::round(seconds * 2.0) / 2.0;   // snap to nearest 0.5 s
     if (qFuzzyCompare(m_crossfadeSeconds, seconds)) return;
     m_crossfadeSeconds = seconds;

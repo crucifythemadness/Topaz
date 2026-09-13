@@ -31,10 +31,15 @@ Item {
     property bool   matchWholeWord: false
     property var    results:        []
 
-    // SearchResultBrowser's ListView.contentY, persisted here (not in the
-    // view itself) so it survives the view being destroyed/recreated by
+    // SearchResultBrowser's top-visible-row anchor, persisted here (not in
+    // the view itself) so it survives the view being destroyed/recreated by
     // Main.qml's Loader when switching away from and back to SEARCH.
-    property real   resultScrollY:  0
+    // Index-based (not a raw contentY pixel value) because AlbumCard's
+    // content-derived height makes contentHeight only an estimate until
+    // every delegate is realized -- restoring a pixel value can land on a
+    // different logical row than where the user actually was. See UC-12.
+    property int    resultScrollIndex:  0
+    property real   resultScrollOffset: 0
 
     onQueryChanged:          _scheduleSearch()
     onModeChanged:           _scheduleSearch()

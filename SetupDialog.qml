@@ -1386,7 +1386,7 @@ Popup {
                                 enabled: root.appConfig !== null
                                          && root.appConfig.crossfadeEnabled
                                 from: 2.0
-                                to:   10.0
+                                to:   12.0
                                 stepSize: 0.5
                                 snapMode: Slider.SnapAlways
                                 value: root.appConfig ? root.appConfig.crossfadeSeconds : 5.0
@@ -1431,7 +1431,7 @@ Popup {
                             }
 
                             Text {
-                                text: "10.0 s"
+                                text: "12.0 s"
                                 font.family:    Theme.fontFamilyMono
                                 font.pixelSize: Theme.labelSm
                                 color: Theme.fgSurfaceVariant

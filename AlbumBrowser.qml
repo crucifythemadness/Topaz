@@ -19,11 +19,24 @@ Rectangle {
         currentAlbums = lib ? lib.filteredAlbums() : []
         // Restore the scroll position saved from this same lib the last
         // time this view was loaded (Main.qml's Loader destroys/recreates
-        // this component on every LIBRARY<->SEARCH switch). Qt.callLater
-        // defers past this tick so contentHeight has caught up with the
-        // model just assigned above -- setting contentY immediately can
-        // get clamped back to 0 first.
-        if (lib) Qt.callLater(function() { albumList.contentY = lib.albumScrollY })
+        // this component on every LIBRARY<->SEARCH switch). Index-based
+        // (not a raw contentY pixel value) for the same reason as the
+        // scrollbar drag fix below -- see UC-12: AlbumCard's content-derived
+        // height makes contentHeight only an estimate until every delegate
+        // is realized, so restoring a pixel value can land on a different
+        // logical row than where the user actually was. Qt.callLater defers
+        // past this tick so the model just assigned above has taken effect.
+        if (lib) Qt.callLater(function() {
+            var idx = lib.albumScrollIndex
+            if (idx < 0 || idx >= albumList.count) return
+            albumList.positionViewAtIndex(idx, ListView.Beginning)
+            var it = albumList.itemAtIndex(idx)
+            if (it) {
+                var maxY = albumList.originY
+                         + Math.max(0, albumList.contentHeight - albumList.height)
+                albumList.contentY = Math.min(albumList.contentY + lib.albumScrollOffset, maxY)
+            }
+        })
     }
 
     // Use Qt.callLater so the LibraryTree (and the rest of the current frame)
@@ -90,7 +103,14 @@ Rectangle {
         clip:        true
         spacing:     24
         cacheBuffer: 200
-        onContentYChanged: if (root.lib) root.lib.albumScrollY = contentY
+        onContentYChanged: {
+            if (!root.lib) return
+            var idx = albumList.indexAt(1, albumList.contentY + 1)
+            if (idx < 0) return
+            var it = albumList.itemAtIndex(idx)
+            root.lib.albumScrollIndex  = idx
+            root.lib.albumScrollOffset = it ? (albumList.contentY - it.y) : 0
+        }
 
         model: root.currentAlbums
 
@@ -144,24 +164,56 @@ Rectangle {
                     preventStealing: true
                     cursorShape:     Qt.PointingHandCursor
 
-                    property real pressTrackY:   0
-                    property real pressContentY: 0
+                    // Offset of the press point inside the thumb, so it
+                    // doesn't teleport under the cursor on the first move.
+                    // The ONLY press-time state needed -- every move
+                    // recomputes an absolute target from the cursor's
+                    // absolute track position (see UC-12). Deliberately no
+                    // pressContentY: contentY's own frame (originY) shifts
+                    // as AlbumCard's content-derived delegate heights get
+                    // (re-)estimated during the drag.
+                    property real pressGrabY: 0
 
                     onPressed: function(mouse) {
-                        var pt = mapToItem(albumScrollTrack, mouse.x, mouse.y)
-                        pressTrackY   = pt.y
-                        pressContentY = albumList.contentY
+                        pressGrabY = mouse.y
                     }
 
                     onPositionChanged: function(mouse) {
                         if (!pressed) return
-                        var pt = mapToItem(albumScrollTrack, mouse.x, mouse.y)
+                        var count = albumList.count
+                        if (count <= 0) return
+
                         var trackRange = albumScrollTrack.height - albumScrollThumb.height
                         if (trackRange <= 0) return
-                        var contentRange = albumList.contentHeight - albumList.height
-                        if (contentRange <= 0) return
-                        var newY = pressContentY + (pt.y - pressTrackY) * (contentRange / trackRange)
-                        albumList.contentY = Math.max(0, Math.min(newY, contentRange))
+
+                        var pt   = mapToItem(albumScrollTrack, mouse.x, mouse.y)
+                        var grab = Math.min(pressGrabY, albumScrollThumb.height)
+                        var frac = Math.max(0, Math.min((pt.y - grab) / trackRange, 1))
+
+                        // Endpoints use Qt's own helpers -- real laid-out
+                        // geometry, correct even when the global
+                        // contentHeight estimate is off.
+                        if (frac <= 0.0005) { albumList.positionViewAtBeginning(); return }
+                        if (frac >= 0.9995) { albumList.positionViewAtEnd();       return }
+
+                        // count is exact; contentHeight is only an estimate
+                        // for content-derived delegate heights (AlbumCard).
+                        var span = Math.max(0, count * (1 - albumList.visibleArea.heightRatio))
+                        var pos  = frac * span
+                        var idx  = Math.max(0, Math.min(Math.floor(pos), count - 1))
+                        albumList.positionViewAtIndex(idx, ListView.Beginning)
+
+                        // Interpolate inside the delegate just landed on, so
+                        // dragging through a few tall cards stays smooth.
+                        var it = albumList.itemAtIndex(idx)
+                        if (it) {
+                            var rem  = Math.max(0, pos - idx)
+                            var maxY = albumList.originY
+                                     + Math.max(0, albumList.contentHeight - albumList.height)
+                            albumList.contentY =
+                                Math.min(albumList.contentY + rem * (it.height + albumList.spacing),
+                                         maxY)
+                        }
                     }
                 }
             }

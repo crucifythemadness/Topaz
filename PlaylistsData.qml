@@ -37,10 +37,16 @@ Item {
     // LOAD is actually clicked (PlaylistViewer.qml), not at preview time.
     property var    selectedMissingTracks: []
 
-    // PlaylistViewer's ListView.contentY, persisted here so it survives the
-    // view being destroyed/recreated by Main.qml's Loader -- same pattern as
-    // LibraryData.albumScrollY / SearchData.resultScrollY (see UC-21).
-    property real   resultScrollY: 0
+    // PlaylistViewer's top-visible-row anchor, persisted here so it survives
+    // the view being destroyed/recreated by Main.qml's Loader -- same
+    // pattern as LibraryData.albumScrollIndex/Offset and
+    // SearchData.resultScrollIndex/Offset (see UC-21). Index-based (not a
+    // raw contentY pixel value) because AlbumCard's content-derived height
+    // makes contentHeight only an estimate until every delegate is
+    // realized -- restoring a pixel value can land on a different logical
+    // row than where the user actually was. See UC-12.
+    property int    resultScrollIndex:  0
+    property real   resultScrollOffset: 0
 
     function refreshPlaylists() {
         playlists = playlistManager ? playlistManager.listPlaylists() : []

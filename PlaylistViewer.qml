@@ -36,6 +36,12 @@ Rectangle {
     property var _liveQueueRawTracks: []
     property var _liveQueueAlbums:    []
 
+    // Set when a live-queue refresh arrives while the user is dragging the
+    // scrollbar thumb -- the refresh replaces the whole currentAlbums array,
+    // which resets resultList to the top and would stomp the in-progress
+    // gesture. Replayed on release by the Connections block below. See UC-12.
+    property bool _liveQueueRefreshPending: false
+
     // Raw track maps for the previewed playlist -- feeds EXPORT's
     // enablement/payload and the total-playtime caption. Live mirror when
     // previewing the active playlist (see refreshLiveQueue()), the normal
@@ -72,6 +78,7 @@ Rectangle {
     // (a wholesale model-array replacement) and nothing would re-correct
     // it until the next track advance.
     function refreshLiveQueue() {
+        if (resultThumbMA.pressed) { root._liveQueueRefreshPending = true; return }
         if (!root.engine || !root.playlistsData || !root.playlistsData.libraryModel) return
         root._liveQueueRawTracks = root.engine.trackList()
         root._liveQueueAlbums =
@@ -86,6 +93,7 @@ Rectangle {
     // holds regardless of *how* the active playlist became the previewed
     // one or what changed about it.
     function scrollToNowPlaying() {
+        if (resultThumbMA.pressed) return
         if (root.isSelectedActiveInQueue && root.engine && root.engine.currentIndex >= 0)
             resultList.positionViewAtIndex(root.engine.currentIndex, ListView.Beginning)
     }
@@ -105,6 +113,21 @@ Rectangle {
         function onCurrentIndexChanged() { root.scrollToNowPlaying() }
     }
 
+    // Replays a live-queue refresh that was deferred because the user was
+    // mid-drag on the scrollbar thumb. pressed -> false covers both a normal
+    // release and a cancelled/stolen grab, so this needs no handlers inside
+    // the scrollbar block itself (keeping it byte-identical to
+    // SearchResultBrowser's). See UC-12.
+    Connections {
+        target: resultThumbMA
+        function onPressedChanged() {
+            if (!resultThumbMA.pressed && root._liveQueueRefreshPending) {
+                root._liveQueueRefreshPending = false
+                root.refreshLiveQueue()
+            }
+        }
+    }
+
     // Covers *manually* selecting the active playlist's row in
     // PlaylistsPanel while already sitting on the PLAYLISTS tab -- a
     // plain property change, not a remount, so onPlaylistsDataChanged
@@ -118,9 +141,13 @@ Rectangle {
     // switch, so this fires once per entry into PLAYLISTS, not just once
     // ever. Also restores the saved scroll position (non-active playlist)
     // or scrolls to the now-playing row (active playlist, via
-    // refreshLiveQueue()). Qt.callLater defers the non-active branch past
-    // this tick so contentHeight has caught up with currentAlbums first
-    // -- setting contentY immediately can get clamped back to 0.
+    // refreshLiveQueue()). Restore is index-based (not a raw contentY pixel
+    // value) for the same reason as the scrollbar drag fix below -- see
+    // UC-12: AlbumCard's content-derived height makes contentHeight only an
+    // estimate until every delegate is realized, so restoring a pixel value
+    // can land on a different logical row than where the user actually
+    // was. Qt.callLater defers the non-active branch past this tick so
+    // currentAlbums has taken effect.
     onPlaylistsDataChanged: {
         if (!playlistsData) return
         if (playlistsData.selectedFileName !== "") {
@@ -129,7 +156,17 @@ Rectangle {
         }
         if (!root.isSelectedActiveInQueue)
             Qt.callLater(function() {
-                if (playlistsData) resultList.contentY = playlistsData.resultScrollY
+                if (!playlistsData) return
+                var idx = playlistsData.resultScrollIndex
+                if (idx < 0 || idx >= resultList.count) return
+                resultList.positionViewAtIndex(idx, ListView.Beginning)
+                var it = resultList.itemAtIndex(idx)
+                if (it) {
+                    var maxY = resultList.originY
+                             + Math.max(0, resultList.contentHeight - resultList.height)
+                    resultList.contentY =
+                        Math.min(resultList.contentY + playlistsData.resultScrollOffset, maxY)
+                }
             })
     }
 
@@ -418,7 +455,14 @@ Rectangle {
         clip:        true
         spacing:     24
         cacheBuffer: 200
-        onContentYChanged: if (root.playlistsData) root.playlistsData.resultScrollY = contentY
+        onContentYChanged: {
+            if (!root.playlistsData) return
+            var idx = resultList.indexAt(1, resultList.contentY + 1)
+            if (idx < 0) return
+            var it = resultList.itemAtIndex(idx)
+            root.playlistsData.resultScrollIndex  = idx
+            root.playlistsData.resultScrollOffset = it ? (resultList.contentY - it.y) : 0
+        }
 
         model: root.currentAlbums
 
@@ -473,24 +517,56 @@ Rectangle {
                     preventStealing: true
                     cursorShape:     Qt.PointingHandCursor
 
-                    property real pressTrackY:   0
-                    property real pressContentY: 0
+                    // Offset of the press point inside the thumb, so it
+                    // doesn't teleport under the cursor on the first move.
+                    // The ONLY press-time state needed -- every move
+                    // recomputes an absolute target from the cursor's
+                    // absolute track position (see UC-12). Deliberately no
+                    // pressContentY: contentY's own frame (originY) shifts
+                    // as AlbumCard's content-derived delegate heights get
+                    // (re-)estimated during the drag.
+                    property real pressGrabY: 0
 
                     onPressed: function(mouse) {
-                        var pt = mapToItem(resultScrollTrack, mouse.x, mouse.y)
-                        pressTrackY   = pt.y
-                        pressContentY = resultList.contentY
+                        pressGrabY = mouse.y
                     }
 
                     onPositionChanged: function(mouse) {
                         if (!pressed) return
-                        var pt = mapToItem(resultScrollTrack, mouse.x, mouse.y)
+                        var count = resultList.count
+                        if (count <= 0) return
+
                         var trackRange = resultScrollTrack.height - resultScrollThumb.height
                         if (trackRange <= 0) return
-                        var contentRange = resultList.contentHeight - resultList.height
-                        if (contentRange <= 0) return
-                        var newY = pressContentY + (pt.y - pressTrackY) * (contentRange / trackRange)
-                        resultList.contentY = Math.max(0, Math.min(newY, contentRange))
+
+                        var pt   = mapToItem(resultScrollTrack, mouse.x, mouse.y)
+                        var grab = Math.min(pressGrabY, resultScrollThumb.height)
+                        var frac = Math.max(0, Math.min((pt.y - grab) / trackRange, 1))
+
+                        // Endpoints use Qt's own helpers -- real laid-out
+                        // geometry, correct even when the global
+                        // contentHeight estimate is off.
+                        if (frac <= 0.0005) { resultList.positionViewAtBeginning(); return }
+                        if (frac >= 0.9995) { resultList.positionViewAtEnd();       return }
+
+                        // count is exact; contentHeight is only an estimate
+                        // for content-derived delegate heights (AlbumCard).
+                        var span = Math.max(0, count * (1 - resultList.visibleArea.heightRatio))
+                        var pos  = frac * span
+                        var idx  = Math.max(0, Math.min(Math.floor(pos), count - 1))
+                        resultList.positionViewAtIndex(idx, ListView.Beginning)
+
+                        // Interpolate inside the delegate just landed on, so
+                        // dragging through a few tall cards stays smooth.
+                        var it = resultList.itemAtIndex(idx)
+                        if (it) {
+                            var rem  = Math.max(0, pos - idx)
+                            var maxY = resultList.originY
+                                     + Math.max(0, resultList.contentHeight - resultList.height)
+                            resultList.contentY =
+                                Math.min(resultList.contentY + rem * (it.height + resultList.spacing),
+                                         maxY)
+                        }
                     }
                 }
             }

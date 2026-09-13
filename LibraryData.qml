@@ -62,10 +62,15 @@ Item {
     property string selectedArtist:  ""
     property string selectedAlbum:   ""
 
-    // AlbumBrowser's ListView.contentY, persisted here (not in the view
+    // AlbumBrowser's top-visible-row anchor, persisted here (not in the view
     // itself) so it survives the view being destroyed/recreated by
     // Main.qml's Loader when switching away from and back to LIBRARY.
-    property real   albumScrollY:    0
+    // Index-based (not a raw contentY pixel value) because AlbumCard's
+    // content-derived height makes contentHeight only an estimate until
+    // every delegate is realized -- restoring a pixel value can land on a
+    // different logical row than where the user actually was. See UC-12.
+    property int    albumScrollIndex:  0
+    property real   albumScrollOffset: 0
 
     // Set (one-way) by Main.qml from its own activeTab. Read-only here --
     // used only to suppress the LIBRARY-tab-specific genre auto-select
@@ -207,6 +212,6 @@ Item {
     }
 
     function _slug(s) {
-        return s.toUpperCase().replace(/ /g, "_")
+        return s.toUpperCase()
     }
 }

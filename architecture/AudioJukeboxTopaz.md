@@ -578,17 +578,17 @@ Topaz module
 │                         property AppConfig appConfig
 │                         property LibraryModel libraryModel
 │                         property string activeTab  (one-way bound from Main.qml's own activeTab; suppresses genre auto-selection in toggleGenre() while SEARCH is active, see UC-01/UC-21)
-│                         property real albumScrollY  (AlbumBrowser's ListView.contentY, persisted here so it survives the Loader swap, see UC-21)
+│                         property int albumScrollIndex, property real albumScrollOffset  (AlbumBrowser's top-visible-row anchor, persisted here so it survives the Loader swap; index-based, not a raw contentY pixel, because AlbumCard's content-derived height makes contentHeight only an estimate — see UC-12/UC-21)
 ├── SearchData.qml      independent search state model — see UC-21 (deliberately not coupled to LibraryData beyond one read-only property)
 │                         property LibraryModel libraryModel
 │                         property var activeGenreNames  (one-way bound from LibraryData.activeGenreNames by Main.qml)
 │                         property string query, mode ("all"/"artists"/"albums"/"tracks"), property bool considerGenre, property bool matchWholeWord, property var results
-│                         property real resultScrollY  (SearchResultBrowser's ListView.contentY, persisted here so it survives the Loader swap, see UC-21)
+│                         property int resultScrollIndex, property real resultScrollOffset  (SearchResultBrowser's top-visible-row anchor, persisted here so it survives the Loader swap; index-based for the same reason as albumScrollIndex/Offset above — see UC-12/UC-21)
 ├── PlaylistsData.qml   independent playlists-tab state model — see UC-22 (deliberately not coupled to LibraryData/SearchData beyond one read-only property)
 │                         property PlaylistManager playlistManager, property LibraryModel libraryModel
 │                         property var engine  (one-way ref to PlaybackEngine, read-only — used only to recognize the playlist currently active in the queue)
 │                         property var playlists, property string selectedFileName/selectedDisplayName, property var albums, property var selectedRawTracks, property var selectedMissingTracks
-│                         property real resultScrollY  (PlaylistViewer's ListView.contentY, persisted here so it survives the Loader swap, see UC-22)
+│                         property int resultScrollIndex, property real resultScrollOffset  (PlaylistViewer's top-visible-row anchor, persisted here so it survives the Loader swap; index-based for the same reason as LibraryData.albumScrollIndex/Offset — see UC-12/UC-22)
 ├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, SearchData, PlaylistsData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, AudioVisualizerController, SetupDialog, NewPlaylistDialog
 │                         property string activeTab ("library"/"playlists"/"search")  — drives TopBar's tab highlighting and which components the SplitView's first two Loaders load, see UC-21/UC-22
 │                         property bool bigCoverPaneOpen  (toggled by NowPlaying.onBigCoverRequested / BigCoverWindow.onCloseRequested)
@@ -1137,7 +1137,7 @@ what "configured" means — absent means that pane has never been positioned yet
 | `setFolderActive(index, flag)` | Toggle whether this folder is scanned at all (default `true`); auto-saves. Takes effect on the next scan, not immediately — see UC-04/UC-05. |
 | `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. |
 | `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s PLAYBACK tab toggle (see UC-15). |
-| `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 10.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s PLAYBACK tab slider. |
+| `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 12.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s PLAYBACK tab slider. |
 | `audioBackend` / `setAudioBackend(mode)` | Playback backend, `"ffmpeg"` (default) or `"bass"`; ignored for any other value; auto-saves. Set from `SetupDialog`'s PLAYBACK tab radio group. Selecting `"bass"` is only honored once `bassLibraryAvailable()` is true — inert until `PlaybackEngine` gains a real dual-backend abstraction (see UC-15). |
 | `bassLibraryAvailable()` | `true` only if `bass.dll`, `bassflac.dll`, and `bassopus.dll` are all present next to the running executable. Checked before `audioBackend` can be set to `"bass"` (see UC-15). |
 | `autoPlayQueueHorizon` / `setAutoPlayQueueHorizon(tracks)` | How many tracks the (still-unimplemented) AUTO PLAY feature should keep filled into `PlaybackQueue` as a lookahead (default `5`); clamped to `[1, 15]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Queue Horizon"); not yet consumed by any queue-filling logic (see UC-14). |
@@ -1508,7 +1508,8 @@ configurable via the app JSON config) will be introduced at that point.
       +albums QVariantList
       +selectedRawTracks QVariantList
       +selectedMissingTracks QVariantList
-      +resultScrollY real
+      +resultScrollIndex int
+      +resultScrollOffset real
       +refreshPlaylists()
       +selectPlaylist(fileName)
       +clearSelection()
@@ -2242,23 +2243,148 @@ configured crossfade length) it behaves exactly like the original
 | **Goal** | User scrolls a panel's list by pressing and dragging its scrollbar thumb. |
 | **Actor** | User |
 | **Precondition** | The panel's content is taller than its viewport (thumb visible). |
-| **Trigger** | User presses the left mouse button on the thumb in `LibraryTree`, `AlbumBrowser`, or `PlaybackQueue` and drags vertically. |
+| **Trigger** | User presses the left mouse button on the thumb in `LibraryTree`, `AlbumBrowser`, `SearchResultBrowser`, `PlaylistViewer`, or `PlaybackQueue` and drags vertically. |
 
-### Normal Flow
+Two variants exist, split by whether the panel's delegate has a fixed or
+content-derived height:
+
+### Normal Flow — fixed-height panels (`LibraryTree`, `PlaybackQueue`)
 
 1. User presses the thumb. The `MouseArea` on the thumb records the press position (mapped into the track's coordinate space via `mapToItem`) and the list's current `contentY`.
 2. User drags up or down. Each move event re-maps the cursor into track space, scales the pixel delta by the ratio of scrollable content range to available track range (`(contentHeight - height) / (trackHeight - thumbHeight)`), and assigns the result to the list's `contentY` (clamped to `[0, contentHeight - height]`).
 3. The thumb's existing position/size bindings (`y`/`height` driven by `ListView.visibleArea.yPosition`/`heightRatio`) follow automatically as `contentY` changes — no separate redraw logic is needed.
+
+This pixel-delta approach is correct here specifically because both panels'
+delegates have a small, fixed set of possible heights known upfront
+(`LibraryTree`: 44/40/28/36 px by row type; `PlaybackQueue`: a flat 68 px)
+— `contentHeight` is exact from the very first layout pass, never an
+estimate.
+
+### Normal Flow — variable-height panels (`AlbumBrowser`, `SearchResultBrowser`, `PlaylistViewer`)
+
+These three all use `AlbumCard` as their delegate, whose height is
+content-derived (`implicitHeight: cardRow.implicitHeight + 40`, driven by
+a per-track `Repeater` at 30 px/row) — so `contentHeight` is only an
+*estimate*, extrapolated from the running average of already-realized
+delegates, until every delegate has actually been laid out. Pixel-delta
+math against an estimate that keeps shifting mid-drag doesn't work (see
+"Why the variable-height panels use index-based positioning" below), so
+these three panels drive the drag by model **index** instead:
+
+1. User presses the thumb. The `MouseArea` records only the press point's
+   offset *inside* the thumb (`pressGrabY`) — no `contentY`/track-position
+   baseline is captured.
+2. User drags up or down. Each move computes an absolute fraction along
+   the track from the cursor's absolute position, maps it onto the
+   reachable top-item index range (`count * (1 - visibleArea.heightRatio)`),
+   and calls `positionViewAtIndex(idx, ListView.Beginning)` — `count` is
+   exact and known upfront, unlike accumulated pixel height. The
+   just-realized delegate's real height is then read via `itemAtIndex()`
+   and the fractional remainder applied as a small `contentY` nudge, so
+   dragging through a handful of very tall cards still feels continuous.
+   Dragging to within 0.05% of either end of the track calls
+   `positionViewAtBeginning()`/`positionViewAtEnd()` directly instead —
+   both use real laid-out geometry and land on the true visual start/end
+   regardless of how far off the global estimate is.
+3. The thumb's `y`/`height` bindings are unchanged from the fixed-height
+   variant — still driven by `visibleArea.yPosition`/`heightRatio`,
+   purely cosmetic, and self-correcting as Qt's estimate settles.
+
+### Normal Flow — shared (all 5 panels)
+
 4. The thumb shifts to `Theme.secondary` while the drag is active, and to `Theme.fgSurfaceVariant` on hover when idle, mirroring the color language already used for the `SplitView` panel-resize handles (rest → hover → active-drag).
 5. User releases the mouse button; the thumb returns to its rest color (`Theme.outlineVariant`).
 
+### Why the variable-height panels use index-based positioning
+
+The original implementation used the identical pixel-delta formula for
+all five panels, and worked for none of `AlbumBrowser`/
+`SearchResultBrowser`/`PlaylistViewer` — dragging down would often flip
+back up partway, flicker/jitter, and eventually get stuck unable to go
+further down (up still worked). Root cause, confirmed by comparing against
+the two panels that did work:
+
+1. `AlbumCard`'s `implicitHeight` is content-derived (proportional to a
+   per-album/per-track-card track count), so `ListView.contentHeight` for
+   these three panels is never exact until every delegate is realized —
+   it's an extrapolation from the running average of already-realized
+   delegates' heights, and that average — along with `originY`, the
+   coordinate frame `contentY` is measured against — gets revised every
+   time a new delegate is realized inside the `cacheBuffer` window, which
+   is exactly what happens continuously while dragging.
+2. The old handler captured a `contentY` baseline once at press-time and
+   added a scaled pixel delta to it on every move, implicitly assuming a
+   stable frame (its `Math.max(0, …)` clamp assumes `originY === 0`,
+   which only holds for fixed/near-uniform-height lists). When the
+   estimate is revised mid-drag, that assumption breaks: jitter (the
+   scale factor changes on every move), snap-back (a downward revision of
+   the estimate + the clamp yanks `contentY` back), and stuck-going-down
+   (downward drag keeps pushing into the unrealized "estimation
+   frontier" and gets clamped there, while upward drag revisits
+   already-realized, already-stable geometry — matching the reported
+   asymmetry exactly).
+3. `count` (the number of items in the model) is exact and known upfront,
+   unlike accumulated pixel height — so re-expressing the drag target as
+   an index rather than a `contentY` pixel value sidesteps the estimate
+   entirely for the scroll *target itself* (only the thumb's own
+   cosmetic `y`/`height` still derive from the estimate, same as before).
+4. The index scale `count * (1 - heightRatio)` (not `count` or
+   `count - 1`) is a deliberate choice, not an approximation: for a
+   uniform-height list it reduces algebraically to exactly the old pixel
+   formula (`contentY = frac * (contentHeight - height)`), which is why
+   this is a strict generalization rather than a behavior change for
+   `LibraryTree`/`PlaybackQueue` — they were left untouched precisely
+   because applying the same formula there would have been a no-op.
+   `count` alone would leave a dead zone at the bottom of the track
+   proportional to `heightRatio`; `count - 1` would make a single very
+   tall card (one album, e.g.) effectively undraggable except at the
+   extremes.
+5. Endpoints use `positionViewAtBeginning()`/`positionViewAtEnd()` rather
+   than a manual `contentY = 0` / `contentY = contentHeight - height`,
+   because Qt's own helpers force layout of the first/last delegate and
+   align it against real, current geometry — a manual pixel assignment
+   would inherit whatever error the estimate still has for the
+   unrealized region.
+6. This supersedes commit `0b28e9f`'s deferred "AlbumBrowser Scrollbar is
+   still not working properly when there are many albums shown" note —
+   the underlying instability was never specific to "many albums," but
+   to *content-derived delegate height*, which is why it also affected
+   `SearchResultBrowser`/`PlaylistViewer` (added later, inheriting the
+   same `AlbumCard` delegate) identically.
+7. **Known residual, not fixed here**: because the thumb's own `y` is
+   still parameterized by pixel fraction while the drag target is now
+   parameterized by index fraction, the thumb can drift slightly out from
+   under the cursor during a drag through very unevenly-sized cards. This
+   is cosmetic only and strictly better than the prior behavior; a
+   documented follow-up (not implemented) would pin the thumb to the
+   cursor's actual position while `pressed`.
+8. **Not done in this change**: unifying all five panels' "Custom
+   scrollbar" blocks into one shared `ScrollbarThumb.qml` component. The
+   two variants are no longer literally identical (one pixel-based, one
+   index-based), and this was a bugfix, not a refactor — extracting a
+   shared component would have forced touching the two files that
+   already worked correctly. Recorded here as a possible future
+   consolidation once the index-based variant has soaked.
+
+The same root cause (and the same index-based fix) also applies to
+cross-tab scroll-position *restore* for these three panels — see UC-22.
+`PlaylistViewer` additionally guards its live-queue auto-scroll against an
+in-progress thumb drag — also see UC-22.
+
 ### Design notes
 
-- Implemented identically (aside from the bound `ListView` id: `treeList`, `albumList`, `queueList`) in `LibraryTree.qml`, `AlbumBrowser.qml`, and `PlaybackQueue.qml`, each of which already has its own local "Custom scrollbar" block rather than a shared component.
+- Implemented as five separate local "Custom scrollbar" blocks (not a
+  shared component — see point 8 above), one per panel: `LibraryTree.qml`
+  (`treeList`/`treeScrollTrack`/`treeScrollThumb`/`treeThumbMA`),
+  `PlaybackQueue.qml` (`queueList`/`queueScrollTrack`/`queueScrollThumb`/
+  `queueThumbMA`), `AlbumBrowser.qml` (`albumList`/`albumScrollTrack`/
+  `albumScrollThumb`/`albumThumbMA`), and `SearchResultBrowser.qml`/
+  `PlaylistViewer.qml` (both use the identical `resultList`/
+  `resultScrollTrack`/`resultScrollThumb`/`resultThumbMA` ids).
 - Reuses the `mapToItem`-based drag-tracking approach already used for `AlbumCard`'s track drag and `PlaybackQueue`'s queue-reorder drag handle (see UC-06 and UC-11) rather than introducing a new interaction technique.
 - `preventStealing: true` on the thumb's `MouseArea` keeps the `ListView`'s own flick gesture from stealing the drag, the same technique already used for the queue-reorder drag handle.
 - Mouse-wheel scrolling and click-drag on the list content itself are unaffected — this only adds a second way to scroll, via the thumb.
-- Row/track delegates in `LibraryTree`, `AlbumCard` (used by `AlbumBrowser`), and `PlaybackQueue` all reserve the rightmost 8 px for the scrollbar thumb's column — either by making the delegate itself narrower (`LibraryTree`, `width: treeList.width - 8`) or by trimming the row's click-catching `MouseArea` with `anchors.rightMargin: 8` (`AlbumCard`'s `trackMA`, `PlaybackQueue`'s `rowHover`) — so row interaction never competes with the scrollbar thumb for the same mouse press. Without this, a row's own `MouseArea` can win the press instead of the thumb (identical idle cursor on both makes this invisible until the user drags), reinterpreting the gesture as that row's own drag instead of a scroll. The scrollbar track `Rectangle` in each panel also sets `z: 2` as a defensive guarantee that it hit-tests above delegate content.
+- Row/track delegates in `LibraryTree`, `AlbumCard` (used by `AlbumBrowser`/`SearchResultBrowser`/`PlaylistViewer`), and `PlaybackQueue` all reserve the rightmost 8 px for the scrollbar thumb's column — either by making the delegate itself narrower (`LibraryTree`, `width: treeList.width - 8`) or by trimming the row's click-catching `MouseArea` with `anchors.rightMargin: 8` (`AlbumCard`'s `trackMA`, `PlaybackQueue`'s `rowHover`) — so row interaction never competes with the scrollbar thumb for the same mouse press. Without this, a row's own `MouseArea` can win the press instead of the thumb (identical idle cursor on both makes this invisible until the user drags), reinterpreting the gesture as that row's own drag instead of a scroll. The scrollbar track `Rectangle` in each panel also sets `z: 2` as a defensive guarantee that it hit-tests above delegate content.
 
 ---
 
@@ -2438,12 +2564,12 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
    PLAYLIST toggle) → `appConfig.setCrossfadeEnabled(...)` → auto-saves to
    `Topaz.config`. The **Length** row (label, value, slider, min/max) dims to 35%
    opacity and the slider is disabled while crossfade is off.
-3. User drags the **Length** slider (`QtQuick.Controls.Slider`, `2.0`–`10.0` s,
+3. User drags the **Length** slider (`QtQuick.Controls.Slider`, `2.0`–`12.0` s,
    `stepSize: 0.5`, restyled to match the theme). The live value is shown above the
    slider (bound to the slider's own `value`, so it updates smoothly while dragging);
-   `"2.0 s"`/`"10.0 s"` labels flank the track as the min/max. `onMoved` (fires only on
+   `"2.0 s"`/`"12.0 s"` labels flank the track as the min/max. `onMoved` (fires only on
    user interaction, not programmatic changes) calls `appConfig.setCrossfadeSeconds(...)`,
-   which clamps to `[2.0, 10.0]`, snaps to the nearest `0.5`, and auto-saves.
+   which clamps to `[2.0, 12.0]`, snaps to the nearest `0.5`, and auto-saves.
 4. `PlaybackEngine` reads both settings live from `appConfig` on every eligibility
    check (never cached), so a change takes effect starting with the very next
    transition — no restart needed.
@@ -4464,21 +4590,31 @@ on, so only the most recent switch's name ever actually reaches the screen.
   (rather than relying on `SplitView`'s undocumented behavior for
   runtime-toggled child visibility).
 - **`AlbumBrowser`/`SearchResultBrowser` scroll position IS preserved**
-  across the swap, unlike `LibraryTree`'s: each `ListView`'s `contentY` is
-  mirrored into `LibraryData.albumScrollY`/`SearchData.resultScrollY`
-  (`onContentYChanged`) — since those data objects, unlike the views
-  themselves, survive the `Loader` swap — and restored via `Qt.callLater`
-  the next time that view is (re)created (`onLibChanged`/
+  across the swap, unlike `LibraryTree`'s: each `ListView`'s top-visible
+  row is mirrored into `LibraryData.albumScrollIndex`/`albumScrollOffset`
+  and `SearchData.resultScrollIndex`/`resultScrollOffset`
+  (`onContentYChanged`, computed via `ListView.indexAt()`) — since those
+  data objects, unlike the views themselves, survive the `Loader` swap —
+  and restored via `positionViewAtIndex()` (plus the sub-offset) inside a
+  `Qt.callLater` the next time that view is (re)created (`onLibChanged`/
   `onSearchDataChanged`, both of which fire exactly once per (re)creation,
-  not on every ordinary model refresh while the view stays loaded). The
-  `Qt.callLater` defer is required, not optional: setting `contentY` in the
-  same tick as the model change gets clamped back to 0 before
-  `contentHeight` catches up — the same technique `LibraryTree.qml`
-  already uses to preserve its own scroll position across a flat-list
-  rebuild (`onExpandedArtistsChanged`). `LibraryTree`'s own scroll offset
-  and expand-state remain unpreserved (see previous point) since those stay
-  genuinely tied to the destroyed/recreated view instance itself, with no
-  natural home on `LibraryData` the way a single scroll float has.
+  not on every ordinary model refresh while the view stays loaded). This
+  is index-based rather than a raw `contentY` pixel value for the same
+  reason the scrollbar-drag fix is (see UC-12, "Why the variable-height
+  panels use index-based positioning"): `AlbumCard`'s content-derived
+  height makes `contentHeight` only an estimate until every delegate is
+  realized, and right after a `Loader` recreates the view only the first
+  few delegates exist — restoring a saved pixel value against that
+  still-top-biased estimate can land on a different logical row than
+  where the user actually was, and a single `Qt.callLater` tick doesn't
+  guarantee enough delegates get realized to fix that. The `Qt.callLater`
+  defer is still required for a different reason: the model
+  (`currentAlbums`) needs to have actually been assigned before
+  `positionViewAtIndex()`/`count` are meaningful. `LibraryTree`'s own
+  scroll offset and expand-state remain unpreserved (see previous point)
+  since those stay genuinely tied to the destroyed/recreated view
+  instance itself, with no natural home on `LibraryData` the way a scroll
+  anchor has.
 
 ---
 
@@ -4646,7 +4782,9 @@ track advance, since adding a track doesn't itself change
 while already on PLAYLISTS), and `onPlaylistsDataChanged` (switching into
 PLAYLISTS while it's already selected), the scroll position holds correct
 regardless of *what* changed or *how* the active playlist became the
-previewed one.
+previewed one. Both `scrollToNowPlaying()` and `refreshLiveQueue()` are
+no-ops while the user is mid-drag on the scrollbar thumb — see "Scrollbar
+drag and live-queue updates no longer fight each other" below and UC-12.
 
 **Re-sync on every PLAYLISTS entry.** `PlaylistViewer`'s
 `onPlaylistsDataChanged` — which, since `Main.qml`'s `Loader` destroys and
@@ -4734,9 +4872,26 @@ Design notes).
   happens to be visible.
 - **Scroll position preserved across the `Loader` swap**: identical
   mechanism to `AlbumBrowser`/`SearchResultBrowser` (previous section) —
-  `PlaylistViewer`'s `ListView.contentY` mirrors into
-  `PlaylistsData.resultScrollY` and is restored via `Qt.callLater` on
-  `onPlaylistsDataChanged`.
+  `PlaylistViewer`'s top-visible-row anchor mirrors into
+  `PlaylistsData.resultScrollIndex`/`resultScrollOffset` and is restored
+  via `positionViewAtIndex()` inside a `Qt.callLater` on
+  `onPlaylistsDataChanged` — only for the non-active-playlist branch;
+  the active/now-playing branch keeps using `scrollToNowPlaying()`
+  (already index-based, see below).
+- **Scrollbar drag and live-queue updates no longer fight each other**:
+  `scrollToNowPlaying()` and `refreshLiveQueue()` are both no-ops while
+  `resultThumbMA.pressed` (the scrollbar thumb's `MouseArea`, see UC-12).
+  A bare track advance during a drag is simply dropped — the user's
+  manual scroll position wins, since nothing about *where* they're
+  looking needs to change just because a track advanced. A live-queue
+  content change (AUTO PLAY appending a track, a reorder) during a drag
+  is instead deferred: `_liveQueueRefreshPending` is set, and a
+  `Connections` block on `resultThumbMA.pressedChanged` replays the
+  suppressed `refreshLiveQueue()` once the drag ends (covering both a
+  normal release and a cancelled/stolen grab) — losing a live update
+  entirely would leave `_liveQueueRawTracks`/`_liveQueueAlbums` stale
+  (wrong EXPORT payload, wrong playtime caption), which dropping-only
+  would have caused.
 
 ---
 
@@ -5942,7 +6097,7 @@ way.
      volume/URL resolution here.
 2. **Layer B — the crossfade lookahead.** `onDeckPositionChanged()`'s
    existing trigger (`pos >= dur - fadeMs`, where `fadeMs` is the
-   configured 2–10 s crossfade length) calls `startCrossfade()`, which
+   configured 2–12 s crossfade length) calls `startCrossfade()`, which
    calls `m_decks[m_fadeInDeck]->setSource()` on the *next* track
    directly — bypassing `loadTrack()` entirely, while the current track
    is still audibly playing. `startCrossfade()` now checks the next
