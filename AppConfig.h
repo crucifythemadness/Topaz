@@ -82,6 +82,15 @@ class QJsonObject;
 // nested (its presence in the file means "has been positioned before" — absence
 // means first-ever open, so QML uses a centered default instead of x/y).
 //
+// The main window's own geometry follows the same flat convention as
+// windowWidth/windowHeight: "windowX"/"windowY"/"windowScreenName" (last
+// windowed, i.e. non-fullscreen, position) plus a flat
+// "windowPositionConfigured" bool (same "never positioned yet" vs "restore
+// this" distinction as bigCoverPaneConfigured, just flat instead of
+// presence-of-a-nested-object, to match window-layout's existing flat
+// style). screenName also picks which monitor Main.qml enters
+// Window.FullScreen on at startup when startFullscreen is set.
+//
 // Instantiated in Main.qml as:  AppConfig { id: appConfig }
 // Passed to LibraryData and SetupDialog via property binding.
 
@@ -99,6 +108,15 @@ class AppConfig : public QObject
     // ── Layout state (window size + panel widths) ─────────────────────────
     Q_PROPERTY(int windowWidth        READ windowWidth        NOTIFY windowGeometryChanged)
     Q_PROPERTY(int windowHeight       READ windowHeight       NOTIFY windowGeometryChanged)
+    // Last windowed (non-fullscreen) position + which monitor it was on.
+    // windowPositionConfigured distinguishes "never positioned yet" (fresh
+    // config) from "restore to this position" -- same reason
+    // bigCoverPaneConfigured exists below, just flat instead of nested to
+    // match window-layout's existing flat style.
+    Q_PROPERTY(bool windowPositionConfigured READ windowPositionConfigured NOTIFY windowGeometryChanged)
+    Q_PROPERTY(int windowX            READ windowX             NOTIFY windowGeometryChanged)
+    Q_PROPERTY(int windowY            READ windowY             NOTIFY windowGeometryChanged)
+    Q_PROPERTY(QString windowScreenName READ windowScreenName  NOTIFY windowGeometryChanged)
     Q_PROPERTY(int libraryTreeWidth   READ libraryTreeWidth   NOTIFY panelWidthsChanged)
     Q_PROPERTY(int playbackQueueWidth READ playbackQueueWidth NOTIFY panelWidthsChanged)
     Q_PROPERTY(int nowPlayingWidth    READ nowPlayingWidth    NOTIFY panelWidthsChanged)
@@ -208,6 +226,10 @@ public:
 
     int windowWidth()          const { return m_windowWidth;        }
     int windowHeight()         const { return m_windowHeight;       }
+    bool windowPositionConfigured() const { return m_windowPositionConfigured; }
+    int windowX()               const { return m_windowX;             }
+    int windowY()               const { return m_windowY;             }
+    QString windowScreenName()  const { return m_windowScreenName;    }
     int libraryTreeWidth()     const { return m_libraryTreeWidth;   }
     int playbackQueueWidth()   const { return m_playbackQueueWidth; }
     int nowPlayingWidth()      const { return m_nowPlayingWidth;    }
@@ -322,6 +344,14 @@ public:
                                 int libraryTreeWidth,
                                 int playbackQueueWidth,
                                 int nowPlayingWidth);
+
+    // Persists the main window's last windowed (non-fullscreen) position and
+    // which monitor it was on -- same calling convention as
+    // saveBigCoverPaneGeometry() below. Call from QML via the same debounce
+    // timer as saveLayout(). screenName is also consulted on the next
+    // startup to pick which monitor to enter Window.FullScreen on when
+    // startFullscreen is set (see Main.qml).
+    Q_INVOKABLE void saveWindowPosition(int x, int y, const QString &screenName);
 
     Q_INVOKABLE void setStartFullscreen(bool enabled);
     Q_INVOKABLE void setDeleteCurrentRatingEnabled(bool enabled);
@@ -488,6 +518,10 @@ private:
 
     int m_windowWidth        = 1920;
     int m_windowHeight       = 1080;
+    bool    m_windowPositionConfigured = false;
+    int     m_windowX               = 0;
+    int     m_windowY               = 0;
+    QString m_windowScreenName;
     int m_libraryTreeWidth   = 286;
     int m_playbackQueueWidth = 374;
     int m_nowPlayingWidth    = 359;

@@ -251,6 +251,16 @@ void AppConfig::saveLayout(int windowWidth, int windowHeight,
     save();
 }
 
+void AppConfig::saveWindowPosition(int x, int y, const QString &screenName)
+{
+    m_windowPositionConfigured = true;
+    m_windowX          = x;
+    m_windowY          = y;
+    m_windowScreenName = screenName;
+    emit windowGeometryChanged();
+    save();
+}
+
 // ── Crossfade operations ──────────────────────────────────────────────────
 
 void AppConfig::setCrossfadeEnabled(bool enabled)
@@ -702,6 +712,10 @@ void AppConfig::applyJson(const QJsonObject &root)
     // Layout state — fall back to defaults when key is absent
     m_windowWidth        = root[QStringLiteral("windowWidth")].toInt(1920);
     m_windowHeight       = root[QStringLiteral("windowHeight")].toInt(1080);
+    m_windowPositionConfigured = root[QStringLiteral("windowPositionConfigured")].toBool(false);
+    m_windowX            = root[QStringLiteral("windowX")].toInt(0);
+    m_windowY            = root[QStringLiteral("windowY")].toInt(0);
+    m_windowScreenName   = root[QStringLiteral("windowScreenName")].toString();
     m_libraryTreeWidth   = root[QStringLiteral("libraryTreeWidth")].toInt(286);
     m_playbackQueueWidth = root[QStringLiteral("playbackQueueWidth")].toInt(374);
     m_nowPlayingWidth    = root[QStringLiteral("nowPlayingWidth")].toInt(359);
@@ -884,6 +898,10 @@ void AppConfig::save()
 
     root[QStringLiteral("windowWidth")]        = m_windowWidth;
     root[QStringLiteral("windowHeight")]       = m_windowHeight;
+    root[QStringLiteral("windowPositionConfigured")] = m_windowPositionConfigured;
+    root[QStringLiteral("windowX")]            = m_windowX;
+    root[QStringLiteral("windowY")]            = m_windowY;
+    root[QStringLiteral("windowScreenName")]   = m_windowScreenName;
     root[QStringLiteral("libraryTreeWidth")]   = m_libraryTreeWidth;
     root[QStringLiteral("playbackQueueWidth")] = m_playbackQueueWidth;
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;

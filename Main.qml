@@ -63,6 +63,21 @@ ApplicationWindow {
         return false
     }
 
+    // Resolves a saved Screen.name (e.g. from appConfig.windowScreenName) back
+    // to a live Screen object among the currently connected monitors — used to
+    // restore which monitor the main window (re-)enters Window.FullScreen on
+    // at startup. Returns null for an empty/unmatched name (monitor unplugged
+    // or renamed since last save), same "fall back to platform default"
+    // philosophy as rectIntersectsAnyScreen above.
+    function screenByName(name) {
+        if (!name) return null
+        const screens = Qt.application.screens
+        for (let i = 0; i < screens.length; i++) {
+            if (screens[i].name === name) return screens[i]
+        }
+        return null
+    }
+
     Loader {
         id: bigCoverLoader
         active: root.bigCoverPaneOpen
@@ -392,14 +407,39 @@ ApplicationWindow {
         id: missingTracksDialog
     }
 
-    // Kick off cache load + background stat-check once QML engine is ready
-    Component.onCompleted: libraryModel.loadCacheAndStartStatCheck()
+    // Restore the main window's last windowed position + monitor (see
+    // AppConfig.windowX/Y/windowScreenName), then kick off cache load +
+    // background stat-check once QML engine is ready. Runs synchronously
+    // during engine.load(), before main.cpp's app.exec() starts the event
+    // loop that actually maps the native window to the OS — so this still
+    // takes effect before the user sees anything, even though `visibility`
+    // above was already assigned during the same construction pass. Setting
+    // root.screen explicitly (not just x/y) is what lets Window.FullScreen
+    // (see `visibility` above) land on the correct monitor — x/y alone only
+    // reliably determines the screen for windowed placement.
+    Component.onCompleted: {
+        if (appConfig.windowPositionConfigured) {
+            const target = root.screenByName(appConfig.windowScreenName)
+            if (target) root.screen = target
+            if (root.rectIntersectsAnyScreen(appConfig.windowX, appConfig.windowY, root.width, root.height)) {
+                root.x = appConfig.windowX
+                root.y = appConfig.windowY
+            }
+        }
+        libraryModel.loadCacheAndStartStatCheck()
+    }
 
-    // Persist layout (window size + panel widths) 500 ms after the last resize.
-    // Window dimensions are only saved when not in fullscreen to avoid
-    // overwriting the user's windowed size with the screen resolution.
+    // Persist layout (window size + panel widths + position/monitor) 500 ms
+    // after the last resize/move. Window dimensions and position are only
+    // saved when not in fullscreen to avoid overwriting the user's windowed
+    // geometry with the screen resolution/origin; screenName is always
+    // refreshed (meaningful in both modes, and is what fixes fullscreen
+    // opening on the wrong monitor on a multi-monitor machine).
     onWidthChanged:  saveLayoutTimer.restart()
     onHeightChanged: saveLayoutTimer.restart()
+    onXChanged:      saveLayoutTimer.restart()
+    onYChanged:      saveLayoutTimer.restart()
+    onScreenChanged: saveLayoutTimer.restart()
 
     Timer {
         id: saveLayoutTimer
@@ -414,6 +454,10 @@ ApplicationWindow {
                                  libraryTreePanel.width,
                                  playbackQueuePanel.width,
                                  nowPlayingPanel.width)
+
+            const posX = (root.visibility !== Window.FullScreen) ? root.x : appConfig.windowX
+            const posY = (root.visibility !== Window.FullScreen) ? root.y : appConfig.windowY
+            appConfig.saveWindowPosition(posX, posY, root.screen ? root.screen.name : "")
         }
     }
 

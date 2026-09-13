@@ -1159,6 +1159,8 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     ],
     "windowWidth":        1920,
     "windowHeight":       1080,
+    "windowX": 100, "windowY": 100, "windowScreenName": "DISPLAY1",
+    "windowPositionConfigured": true,
     "startFullscreen":    false,
     "deleteCurrentRatingEnabled": false,
     "libraryTreeWidth":   286,
@@ -1235,6 +1237,7 @@ what "configured" means — absent means that pane has never been positioned yet
 | `setFolderSubfolders(index, flag)` | Toggle the includeSubfolders flag; auto-saves. |
 | `setFolderActive(index, flag)` | Toggle whether this folder is scanned at all (default `true`); auto-saves. Takes effect on the next scan, not immediately — see UC-04/UC-05. |
 | `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. |
+| `windowX` / `windowY` / `windowScreenName` / `windowPositionConfigured` / `saveWindowPosition(x, y, screenName)` | Persist the main window's last windowed (non-fullscreen) position and which monitor it was on; same debounce timer and calling convention as `saveLayout` above (called alongside it). `windowPositionConfigured` distinguishes "never positioned yet" (fresh config) from "restore to this position", same convention as `bigCoverPaneConfigured` below. `windowScreenName` is also consulted on startup to pick which monitor `Window.FullScreen` lands on — see UC-28. |
 | `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s PLAYBACK tab toggle (see UC-15). |
 | `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 12.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s PLAYBACK tab slider. |
 | `audioBackend` / `setAudioBackend(mode)` | Playback backend, `"ffmpeg"` (default) or `"bass"`; ignored for any other value; auto-saves. Set from `SetupDialog`'s PLAYBACK tab radio group. Selecting `"bass"` is only honored once `bassLibraryAvailable()` is true — inert until `PlaybackEngine` gains a real dual-backend abstraction (see UC-15). |
@@ -1451,24 +1454,59 @@ itself rather than on whichever component it currently loads.
 
 ### Layout persistence
 
-The window size and the three resizable panel widths are persisted in
-`Topaz.config` so that the layout is restored exactly on the next startup.
+The window size, position/monitor, and the three resizable panel widths are
+persisted in `Topaz.config` so that the layout is restored exactly on the
+next startup.
 
-**Save mechanism** — `Main.qml` watches `onWidthChanged` on the
-`ApplicationWindow` (for window resizing) and on each resizable panel (for
-handle dragging). All of these restart a single 500 ms debounce `Timer`.
-When the timer fires it calls `appConfig.saveLayout(...)` which writes all five
-values (`windowWidth`, `windowHeight`, `libraryTreeWidth`, `playbackQueueWidth`,
-`nowPlayingWidth`) in one atomic JSON write. While in fullscreen mode the stored
-window dimensions are not overwritten.
+**Save mechanism** — `Main.qml` watches `onWidthChanged`/`onHeightChanged`
+on the `ApplicationWindow` (for window resizing), `onXChanged`/`onYChanged`/
+`onScreenChanged` (for window moves and monitor changes), and `onWidthChanged`
+on each resizable panel (for handle dragging). All of these restart a single
+500 ms debounce `Timer`. When the timer fires it calls `appConfig.saveLayout(...)`
+(writes `windowWidth`, `windowHeight`, `libraryTreeWidth`, `playbackQueueWidth`,
+`nowPlayingWidth` in one atomic JSON write) and `appConfig.saveWindowPosition(...)`
+(writes `windowX`, `windowY`, `windowScreenName`, `windowPositionConfigured`).
+While in fullscreen mode the stored window dimensions *and* position are not
+overwritten (fullscreen collapses `x`/`y` to the screen origin and `width`/
+`height` to the screen resolution, which must not clobber the last windowed
+geometry) — `windowScreenName` is the one exception, refreshed regardless of
+fullscreen state, since monitor identity is meaningful in both modes.
 
-**Restore mechanism** — On startup, `AppConfig::load()` reads the five values
-from JSON (falling back to the design-baseline defaults when absent). `Main.qml`
-binds `width: appConfig.windowWidth` and `height: appConfig.windowHeight`, and
-each resizable panel binds `SplitView.preferredWidth` to the corresponding
-appConfig property. `SplitView` breaks those QML bindings the first time the
-user drags a handle, taking over management of `preferredWidth` from that point
-onward.
+**Restore mechanism** — On startup, `AppConfig::load()` reads these values
+from JSON (falling back to the design-baseline defaults when absent, or to
+`windowPositionConfigured: false` on a fresh config — same "never positioned
+yet, let the platform place it" convention as `bigCoverPaneConfigured`, see
+below). `Main.qml` binds `width: appConfig.windowWidth` and
+`height: appConfig.windowHeight` declaratively, and each resizable panel
+binds `SplitView.preferredWidth` to the corresponding appConfig property.
+`SplitView` breaks those QML bindings the first time the user drags a handle,
+taking over management of `preferredWidth` from that point onward. Window
+*position* and *monitor* are restored imperatively instead, in the root
+`ApplicationWindow`'s `Component.onCompleted` (mirroring how the four
+detachable floating panes already restore their own geometry — see below):
+if `windowPositionConfigured` is true, the saved `windowScreenName` is
+resolved back to a live `Screen` object (`root.screenByName()`, a linear
+scan over `Qt.application.screens`, returns `null` if the monitor was
+unplugged/renamed since) and assigned to `root.screen` — this is what lets
+`Window.FullScreen` (see the `visibility` binding above) land on the correct
+monitor on a multi-monitor machine, since x/y alone only reliably determines
+the screen for *windowed* placement, not fullscreen. The saved `windowX`/
+`windowY` are then applied via `root.rectIntersectsAnyScreen()` (same helper
+the floating panes use) only if the saved rect still overlaps some connected
+screen. This restore logic runs synchronously during `engine.load()`, before
+`main.cpp`'s `app.exec()` starts the event loop that actually maps the
+native window to the OS, so it still takes effect even though `visibility`
+was already assigned earlier in the same construction pass via its own
+declarative binding — same ordering guarantee the floating panes already
+rely on.
+
+Before this was added, the main window had no position/monitor persistence
+at all (only the floating panes did) — every launch opened wherever the
+platform/WM defaulted a new top-level window, and a saved `startFullscreen`
+preference had no monitor to anchor to on a multi-monitor machine, so it
+could open fullscreen on the wrong display. Found via real-hardware testing
+(Windows and a dual-monitor Linux Mint machine) and fixed as an ordinary
+cross-platform Qt/QML gap — no platform gating involved.
 
 ## Performance Design
 
@@ -6011,6 +6049,20 @@ existing F11 `Shortcut` and the `saveLayoutTimer`'s fullscreen guard (skip
 persisting `windowWidth`/`windowHeight` while fullscreen) are both
 unchanged by this — F11 still imperatively reassigns `root.visibility` at
 runtime regardless of how the window started.
+
+**Multi-monitor fullscreen fix**: on a machine with more than one display,
+`Window.FullScreen` alone doesn't say *which* monitor to fill — without an
+explicit target, Qt falls back to whatever the platform picks as the
+default screen for a new window, which found a real bug on a dual-monitor
+Linux Mint test machine: Topaz opened fullscreen on the wrong monitor from
+the one it was last used on. Fixed by resolving the main window's last-used
+monitor (`AppConfig.windowScreenName`, captured whenever `root.screen`
+changes — see "Layout persistence" above) back to a live `Screen` object and
+assigning it to `root.screen` in `Component.onCompleted`, before the
+already-assigned `visibility` binding's `Window.FullScreen` is actually
+applied to the OS. See "Layout persistence" above for the full restore/save
+mechanism (shared with plain windowed-position restore, the fix for a
+related bug found in the same round of testing).
 
 ## UC-29 Delete Rating for the Currently Playing Track (NowPlaying + MISC Tab)
 
