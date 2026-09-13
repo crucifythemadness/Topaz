@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21)
 # CMAKE_PROJECT_VERSION_PATCH from the top-level project() call (us, once
 # FetchContent'd as a subdirectory), and an unset patch component makes that
 # substitution expand to nothing, breaking their generated version.h.
-project(Topaz VERSION 0.1.0 LANGUAGES CXX C RC)
+project(Topaz VERSION 1.0.0 LANGUAGES CXX C RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
