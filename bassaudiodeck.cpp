@@ -1,6 +1,7 @@
 #include "bassaudiodeck.h"
 
 #include <QAudioFormat>
+#include <QFile>
 #include <QMetaObject>
 #include <QTimer>
 
@@ -44,9 +45,16 @@ void BassAudioDeck::setSource(const QString &filePath)
         m_stream = 0;
     }
 
+#if defined(_WIN32)
     // BASS_UNICODE tells BASS the filename is UTF-16 (WCHAR*) rather than ANSI.
     const std::wstring wpath = filePath.toStdWString();
     m_stream = bass.BASS_StreamCreateFile(0, wpath.c_str(), 0, 0, BASS_UNICODE);
+#else
+    // Non-Windows BASS takes plain UTF-8 filenames, no BASS_UNICODE
+    // equivalent -- see basslibrary.cpp's plugin-loading code for the same pattern.
+    const QByteArray upath = QFile::encodeName(filePath);
+    m_stream = bass.BASS_StreamCreateFile(0, upath.constData(), 0, 0, 0);
+#endif
     if (!m_stream) {
         m_lastKnownDuration = 0;
         emit durationChanged();

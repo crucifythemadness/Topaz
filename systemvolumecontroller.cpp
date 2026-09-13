@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <QMetaObject>
 
+#ifdef Q_OS_WIN
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <endpointvolume.h>
@@ -189,3 +190,113 @@ void SystemVolumeController::setVolume(int v)
     }
     emit volumeChanged();
 }
+
+#else  // Linux
+
+#include <QProcess>
+#include <QRegularExpression>
+
+// Linux implementation -- controls the OS master volume via the `pactl`
+// CLI tool (ships with PulseAudio and with modern PipeWire's pulseaudio-
+// compatible layer, so this covers both) rather than linking libpulse
+// directly. A deliberate first-pass simplification -- see the
+// future_linux_port project memory: revisit with a native libpulse client
+// (real async live-sync, no text parsing, no external-binary dependency)
+// after the first successful test on an actual Linux machine.
+//
+// No live push notifications when something OUTSIDE Topaz changes the
+// volume (the Windows build's RegisterControlChangeNotify equivalent) --
+// refresh() re-queries on demand instead, which TopBar.qml already calls
+// right before the volume popup opens, so the displayed value is correct
+// at the point the user actually looks at it.
+struct SystemVolumeController::Impl {};
+
+namespace {
+
+QString defaultSinkName()
+{
+    QProcess proc;
+    proc.start(QStringLiteral("pactl"), { QStringLiteral("get-default-sink") });
+    if (!proc.waitForFinished(1000) || proc.exitCode() != 0)
+        return QString();
+    return QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+}
+
+// Parses the first "NN%" occurrence out of `pactl get-sink-volume`'s
+// output. Multi-channel volumes are reported per-channel, but Topaz's
+// slider (like Windows' master volume) treats it as a single scalar, so
+// the first channel's percentage stands in for all of them -- correct for
+// typical symmetric stereo output.
+bool queryVolumePercent(const QString &sinkName, int *outPercent)
+{
+    QProcess proc;
+    proc.start(QStringLiteral("pactl"),
+               { QStringLiteral("get-sink-volume"), sinkName });
+    if (!proc.waitForFinished(1000) || proc.exitCode() != 0)
+        return false;
+    const QString output = QString::fromUtf8(proc.readAllStandardOutput());
+    static const QRegularExpression re(QStringLiteral("(\\d+)%"));
+    const QRegularExpressionMatch m = re.match(output);
+    if (!m.hasMatch())
+        return false;
+    *outPercent = m.captured(1).toInt();
+    return true;
+}
+
+} // namespace
+
+SystemVolumeController::SystemVolumeController(QObject *parent)
+    : QObject(parent), m_impl(new Impl)
+{
+    refresh();
+}
+
+SystemVolumeController::~SystemVolumeController()
+{
+    delete m_impl;
+}
+
+void SystemVolumeController::applyLevel(float level)
+{
+    const int v = qBound(0, qRound(level * 100.0f), 100);
+    if (v == m_volume) return;
+    m_volume = v;
+    emit volumeChanged();
+}
+
+void SystemVolumeController::refresh()
+{
+    const QString sink = defaultSinkName();
+    if (sink.isEmpty()) {
+        qWarning() << "SystemVolumeController: pactl get-default-sink failed "
+                       "(pactl not installed, or no default sink) -- volume unavailable";
+        return;
+    }
+    int percent = 0;
+    if (!queryVolumePercent(sink, &percent)) {
+        qWarning() << "SystemVolumeController: pactl get-sink-volume failed for sink" << sink;
+        return;
+    }
+    applyLevel(float(percent) / 100.0f);
+}
+
+void SystemVolumeController::setVolume(int v)
+{
+    v = qBound(0, v, 100);
+    if (v == m_volume) return;
+    m_volume = v;
+    const QString sink = defaultSinkName();
+    if (sink.isEmpty()) {
+        qWarning() << "SystemVolumeController: setVolume() found no default sink -- OS volume not changed";
+        emit volumeChanged();
+        return;
+    }
+    // Fire-and-forget, matching the Windows build's own optimistic-UI
+    // behavior: m_volume/volumeChanged() are already updated above
+    // regardless of whether the OS call itself succeeds.
+    QProcess::startDetached(QStringLiteral("pactl"),
+        { QStringLiteral("set-sink-volume"), sink, QStringLiteral("%1%").arg(v) });
+    emit volumeChanged();
+}
+
+#endif

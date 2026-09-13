@@ -40,9 +40,13 @@
 // BigCoverWindow/TagInfoWindow, which are always fully opaque — an unused
 // alpha channel changes nothing visually for them).
 //
-// Windows-only, no #ifdef guard — same as SystemVolumeController; tracked
-// alongside it as something a future Linux port will need a platform switch
-// for (see the future_linux_port note in project memory).
+// Steps 1-2 (alpha surface format + create()) are plain cross-platform
+// QQuickWindow/QSurfaceFormat calls and run on every platform. Only step 3
+// (the actual DwmSetWindowAttribute() call) is guarded behind #ifdef
+// Q_OS_WIN in windowchrome.cpp -- a no-op on Linux, since most window
+// managers there don't draw this kind of per-window accent border anyway.
+// Same guarding approach as SystemVolumeController (see the
+// future_linux_port note in project memory) -- Linux port step 1.
 //
 // Used from FloatingPane.qml as:
 //   Component.onCompleted: WindowChrome.prepareWindow(pane)

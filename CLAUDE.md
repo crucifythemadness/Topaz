@@ -99,6 +99,113 @@ appears on stderr unless you set `QT_FORCE_STDERR_LOGGING=1` first. Only `qmldir
 
 Re-run all of this after each Release rebuild; nothing here is incremental.
 
+### Linux build / deploy (experimental, via Docker Desktop)
+
+Topaz also builds and runs on Linux — verified end-to-end (`cmake`/`ninja` build,
+`ldd`-clean link, and a runtime smoke test in a container with none of the build
+environment installed) via Docker Desktop on this same Windows machine. See the
+`future_linux_port` project memory for the full history; the working recipe:
+
+```sh
+# One-time: build the reusable environment image (Ubuntu 24.04 + official
+# Qt 6.10.2 via aqtinstall — Ubuntu's own apt Qt6 is 6.4.2, too old:
+# QQmlApplicationEngine::loadFromModule() needs 6.5+, QAudioBufferOutput needs 6.8+)
+docker build -f Dockerfile.linux -t topaz-linux-build .
+
+# One-time: a named volume for build output. Must NOT be a Windows bind
+# mount — NTFS's case-insensitivity leaks through Docker Desktop's file
+# sharing even inside the Linux container, which silently breaks the
+# case-sensitive Topaz/topaz distinction the build relies on (see below).
+docker volume create topaz-linux-build-vol
+
+# Configure + build (source bind-mounted from the host is fine; only the
+# build OUTPUT needs the real Linux-native volume)
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd):/src" -v topaz-linux-build-vol:/build -w /src \
+  topaz-linux-build bash -c "cmake -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build /build"
+```
+
+`MSYS_NO_PATHCONV=1` is required when running these `docker` commands from Git Bash
+on Windows, or container-side absolute paths like `-w /src` get silently mangled by
+MSYS's automatic path conversion.
+
+**Why the executable is named `topaz` (lowercase) on Linux, `Topaz.exe` on Windows**:
+`qt_add_qml_module(topaz URI Topaz ...)` generates a `Topaz/` companion directory
+right next to the built binary (see the deploy section above). On Windows this never
+collides with `Topaz.exe` (different name, `.exe` suffix). On a case-sensitive Linux
+filesystem, an executable literally named `Topaz` collides directly with that
+same-named directory (`ld: cannot open output file Topaz: Is a directory`) —
+`CMakeLists.txt` sets `OUTPUT_NAME Topaz` only under `if(WIN32)`; Linux keeps CMake's
+default (the target's own name, `topaz`).
+
+To assemble a self-contained `deploy-linux/` folder (gitignored, mirrors `/deploy/`
+above) from an already-built volume:
+
+```sh
+docker run --rm -v topaz-linux-build-vol:/build -v "$(pwd)/deploy-linux:/out" topaz-linux-build bash -c '
+QT=/opt/qt/6.10.2/gcc_64
+cp /build/topaz /out/topaz-bin && chmod +x /out/topaz-bin
+mkdir -p /out/Topaz && cp /build/Topaz/qmldir /build/Topaz/topaz.qmltypes /out/Topaz/
+mkdir -p /out/lib
+find "$QT/lib" -maxdepth 1 -name "*.so*" ! -name "*.debug" -exec cp -L {} /out/lib/ \;
+cp -L /build/_deps/projectm-build/src/libprojectM/libprojectM-4.so.4 /out/lib/
+cp -L /build/_deps/projectm-build/src/playlist/libprojectM-4-playlist.so.4 /out/lib/
+cp -L /build/lib/libGLEW.so.2.2 /out/lib/
+mkdir -p /out/plugins && cp -r "$QT/plugins/." /out/plugins/
+rm -rf /out/plugins/{designer,help,printsupport,sqldrivers,qmllint,qmlls,qmltooling}
+cp -r "$QT/qml" /out/qml
+'
+```
+**Every copy into `deploy-linux/lib/` uses `-L` (dereference), never `-P`/plain `cp -r`
+of a symlink** — confirmed the hard way, from an actual physical Linux machine: an
+earlier version of this recipe preserved Qt's `libFoo.so -> libFoo.so.6 ->
+libFoo.so.6.10.2` symlink chains, which looked fine on this Windows dev machine (Docker
+Desktop's bind-mount correctly materializes them as real NTFS symlinks here) but silently
+vanished when the user copied `deploy-linux/` onto a FAT32/exFAT-formatted USB drive to
+move it to their Linux box — neither filesystem has any concept of a Unix symlink. Result:
+`error while loading shared libraries: libQt6Multimedia.so.6: cannot open shared object
+file`. Dereferencing means the bundle is made entirely of real files, so it survives any
+transfer medium (USB stick of any filesystem, Explorer copy, zip, network share) — at the
+cost of some duplicated bytes (~210 MB → ~470 MB), an easy trade for a trial package.
+
+Plus, into `deploy-linux/lib/`: `libstdc++.so.6`/`libgcc_s.so.1` (cross-distro libstdc++
+version safety, the Linux analogue of `windeployqt6 --compiler-runtime` above) and the
+full transitive "system" library chain `ldd build/topaz` reports beyond Qt/projectM/GLEW
+(OpenGL/GLX vendor-dispatch — `libOpenGL.so.0`/`libGLX.so.0`/`libGLdispatch.so.0`, easy to
+miss since it's a separate package from `libgl1` — Kerberos/GSSAPI pulled in by Qt Network,
+and PulseAudio's own codec dependencies) — confirmed by trial against a genuinely bare
+`ubuntu:24.04` container with none of these installed, not guessed in advance.
+
+**`ldd` on the main executable alone is not enough** — Qt's platform/plugin `.so` files
+(loaded dynamically at runtime, never linked directly by `topaz-bin`) have their own further
+dependencies invisible to that check. Found by `ldd`-ing `deploy-linux/plugins/platforms/*.so`
+and `deploy-linux/plugins/wayland-*/*.so` directly: the **xcb** platform plugin
+(`libqxcb.so` — the one actually used on a real X11 desktop) needs 14 more libraries
+bundled into `lib/` — `libxcb-cursor.so.0` (named directly in Qt's own "xcb-cursor0 or
+libxcb-cursor0 is needed" startup error) plus `libxcb-icccm.so.4`/`image.so.0`/
+`keysyms.so.1`/`randr.so.0`/`render-util.so.0`/`render.so.0`/`shape.so.0`/`shm.so.0`/
+`sync.so.1`/`util.so.1`/`xfixes.so.0`/`xkb.so.1` and `libxkbcommon-x11.so.0`. The
+**wayland** plugin family similarly needs `libffi.so.8`/`libwayland-client.so.0` bundled
+(`libwayland-cursor.so.0`/`libwayland-egl.so.1` are needed too for full Wayland support but
+aren't installed in the build image as of this writing — a known gap, low priority since
+Topaz has only actually been tested under xcb).
+
+**Test the real platform plugin, not just `offscreen`** — every earlier verification round
+forced `QT_QPA_PLATFORM=offscreen`, which never loads `libqxcb.so` at all, so this whole
+class of missing-library gap went undetected until real hardware hit it. The clean-room
+verification now also installs `xvfb` (`apt-get install xvfb`) and forces
+`QT_QPA_PLATFORM=xcb` with `DISPLAY` pointed at a running `Xvfb :99 -screen 0 1024x768x24 &`
+— this actually exercises the same platform-plugin code path a real X11 desktop does.
+
+`deploy-linux/` also needs a small `qt.conf` (`[Paths]` / `Plugins = plugins` /
+`Qml2Imports = qml`) and a `run-topaz.sh` wrapper that sets `LD_LIBRARY_PATH` to `lib/`
+before `exec`-ing `topaz-bin` — the binary's own build-time RPATH points at `/opt/qt`/`/build`,
+which won't exist on a real
+target machine, but `LD_LIBRARY_PATH` takes precedence over it (modern CMake emits
+`DT_RUNPATH`, not old-style `DT_RPATH`).
+
+Like the Windows deploy, BASS (`libbass.so`/`libbassflac.so`/`libbassopus.so`) is never
+bundled — the user supplies their own licensed copies next to `topaz-bin` if wanted.
+
 There is no test suite in this repository.
 
 ## Architecture

@@ -778,6 +778,105 @@ targeting the old one. An `IMMNotificationClient`/`OnDefaultDeviceChanged`
 registration would handle that, but it's a distinct concern (device swap, not volume
 level) from what was asked for here.
 
+**Linux port, step 1**: the entire Windows COM implementation above (from the
+`<windows.h>`/`<mmdeviceapi.h>`/`<endpointvolume.h>` includes through the end of
+`setVolume()`) is now wrapped in `#ifdef Q_OS_WIN` in `systemvolumecontroller.cpp`,
+alongside a `#else` Linux branch with a differently-shaped `Impl` (empty struct,
+since only this one `.cpp` ever touches it).
+
+**Linux port, step 2**: the Linux `#else` branch is a real implementation, not a
+stub — it controls the OS master volume via the `pactl` CLI tool (`QProcess`),
+which ships with both PulseAudio and modern PipeWire's pulseaudio-compatible
+layer, rather than linking `libpulse` directly. `defaultSinkName()` runs `pactl
+get-default-sink`; `refresh()`/the constructor run `pactl get-sink-volume
+<sink>` and parse the first `NN%` match out of its text output (multi-channel
+output reports one percentage per channel — like the Windows master-volume
+scalar, only the first channel's value is used, correct for typical symmetric
+stereo output); `setVolume()` fires `pactl set-sink-volume <sink> <N>%` via
+`QProcess::startDetached` (fire-and-forget, matching the Windows build's own
+optimistic-UI pattern of updating `m_volume`/emitting `volumeChanged()`
+immediately regardless of whether the underlying OS call succeeds). Every call
+resolves the default sink fresh rather than caching it (slightly more correct
+than the Windows build's "resolved once at construction" behavior, at the cost
+of one extra process spawn per call — negligible given calls only happen at
+construction, popup-open, and slider drags), and every call has a short
+(1 second) `waitForFinished()` timeout plus a graceful `qWarning()`-and-return
+if `pactl` is missing or reports no default sink.
+
+**Deliberate first-pass simplifications** (both explicitly flagged for revisit
+once there's an actual Linux machine to test against, not permanent design):
+no live push-sync when something *outside* Topaz changes the volume — unlike
+Windows' `IAudioEndpointVolumeCallback`, `pactl` would need a long-running
+`pactl subscribe` child process and event-stream parsing to replicate that,
+judged too much complexity to get right without a way to compile/test it in
+this session. `refresh()` (already called by `TopBar.qml` right before the
+volume popup opens) covers the common case instead. The plan is to eventually
+replace this whole `pactl`-shelling-out approach with a native `libpulse`
+client (real async live-sync, no text parsing, no dependency on an external
+binary being on `PATH`) — see the `future_linux_port` project memory for the
+full roadmap.
+
+**Linux port, step 4 (final) — first real Linux build, via Docker Desktop**:
+steps 1-3 above were all written and reasoned about blind, with no Linux
+environment to actually compile against. Step 4 built a real one —
+`Dockerfile.linux` at the repo root (Ubuntu 24.04 base; an official prebuilt
+Qt 6.10.2 install via `aqtinstall`, matching the Windows build's own pinned
+version, since Ubuntu's own apt-packaged Qt6 is 6.4.2 and too old for
+`QQmlApplicationEngine::loadFromModule()` (needs 6.5+) and
+`QAudioBufferOutput` (needs 6.8+), both discovered the hard way on the first
+real attempt) — and used it to actually run `cmake`/`ninja` against Topaz's
+source inside a container for the first time. Every `#ifdef Q_OS_WIN`/
+`#else` branch from steps 1-3 (`CMakeLists.txt`'s platform gating,
+`SystemVolumeController`, `WindowChrome`, `BassLibrary`, `BassAudioDeck`,
+`AppConfig::bassLibraryAvailable()`) compiled and linked correctly on the
+first real try — no fixes needed to any of them. Two genuine, previously-
+unknown bugs surfaced instead, both now fixed and confirmed to also leave
+the Windows build unaffected (rebuilt and smoke-tested after each):
+
+1. **`Qt6::Concurrent` was linked but never `find_package`'d.**
+   `CMakeLists.txt`'s `target_link_libraries` included `Qt6::Concurrent`,
+   but the `find_package(Qt6 REQUIRED COMPONENTS ...)` call never listed
+   `Concurrent` — it happened to work on Windows/MinGW only because some
+   other requested component transitively pulled the `Qt6::Concurrent`
+   imported target in as a side effect there; Ubuntu's Qt6 packaging (and,
+   presumably, any other Qt6 distribution) doesn't guarantee that. Fixed by
+   adding `Concurrent` to the `COMPONENTS` list — a genuine cross-platform
+   correctness fix, not a platform-gated one.
+2. **The Linux executable can't be named `Topaz` (capitalized) like
+   Windows' `Topaz.exe` is.** `qt_add_qml_module(topaz URI Topaz ...)`
+   generates a companion `Topaz/` directory (matching the QML module URI)
+   next to the built executable in the build directory. On Windows this
+   never collides with `Topaz.exe` (different name, thanks to the `.exe`
+   suffix). On a case-sensitive Linux filesystem, an executable literally
+   named `Topaz` collides directly with that same-named directory — the
+   linker fails with "cannot open output file Topaz: Is a directory".
+   Fixed in `CMakeLists.txt`: `OUTPUT_NAME` is now `Topaz` only on Windows
+   (`if (WIN32)`); on Linux it's left as CMake's default, the target's own
+   name `topaz` (lowercase) — distinct from the `Topaz/` directory, and a
+   more idiomatic lowercase binary name for Linux besides. (This exact
+   collision was initially masked, not caught, when first tested through a
+   Windows-host bind-mounted directory inside the container — NTFS's
+   case-insensitivity leaks through Docker Desktop's file sharing even
+   into a Linux container, so `Topaz`/`topaz` looked identical there too.
+   Confirmed genuinely case-sensitive, and the fix genuinely verified, only
+   after moving the build directory to a Docker named volume — backed by
+   the Docker Desktop Linux VM's own real, case-sensitive filesystem, not
+   a bind-mounted Windows path.)
+
+With both fixed, a full `cmake -B ... -G Ninja -DCMAKE_BUILD_TYPE=Release &&
+cmake --build ...` succeeded end-to-end (249/249) against Qt 6.10.2 on real
+Linux/GCC 13.3.0, and the resulting `topaz` binary was smoke-tested via Qt's
+`offscreen` QPA platform plugin (no X server in the container) for 5 seconds
+with zero `TypeError`/`ReferenceError`/QML-type-loading errors — only
+already-known, pre-existing `SetupDialog.qml` layout warnings identical to
+every Windows smoke test this project has ever run, plus the *expected*
+`SystemVolumeController: pactl get-default-sink failed ... -- volume
+unavailable` message (step 2's graceful-degradation path, confirmed working
+exactly as designed, since no real PulseAudio/PipeWire server runs inside
+the minimal container). This is the first genuinely verified (not just
+statically reviewed) confirmation that the whole Linux port initiative
+actually works.
+
 ### TagReader — supported formats
 
 | Format | Tag standard | Fields read |
@@ -1139,7 +1238,7 @@ what "configured" means — absent means that pane has never been positioned yet
 | `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s PLAYBACK tab toggle (see UC-15). |
 | `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 12.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s PLAYBACK tab slider. |
 | `audioBackend` / `setAudioBackend(mode)` | Playback backend, `"ffmpeg"` (default) or `"bass"`; ignored for any other value; auto-saves. Set from `SetupDialog`'s PLAYBACK tab radio group. Selecting `"bass"` is only honored once `bassLibraryAvailable()` is true — inert until `PlaybackEngine` gains a real dual-backend abstraction (see UC-15). |
-| `bassLibraryAvailable()` | `true` only if `bass.dll`, `bassflac.dll`, and `bassopus.dll` are all present next to the running executable. Checked before `audioBackend` can be set to `"bass"` (see UC-15). |
+| `bassLibraryAvailable()` | `true` only if `bass.dll`, `bassflac.dll`, and `bassopus.dll` (Linux: `libbass.so`/`libbassflac.so`/`libbassopus.so`) are all present next to the running executable. Checked before `audioBackend` can be set to `"bass"` (see UC-15). |
 | `autoPlayQueueHorizon` / `setAutoPlayQueueHorizon(tracks)` | How many tracks the (still-unimplemented) AUTO PLAY feature should keep filled into `PlaybackQueue` as a lookahead (default `5`); clamped to `[1, 15]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Queue Horizon"); not yet consumed by any queue-filling logic (see UC-14). |
 | `autoPlayTitleAddingIntervalSeconds` / `setAutoPlayTitleAddingIntervalSeconds(seconds)` | Polling interval, in seconds, the (still-unimplemented) AUTO PLAY feature should use to add one new track at a time to the queue (default `30`); clamped to `[5, 90]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Title Adding"); not yet consumed by any poller (see UC-14). |
 | `autoPlayConsiderGenre` / `setAutoPlayConsiderGenre(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should factor genre into track selection (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Consider Genre"); not yet consumed by any selection logic (see UC-14). |
@@ -2594,8 +2693,9 @@ now that a real `BassAudioDeck` (Step 2b) exists. The Audio Visualizer
    directly.
 3. Clicking **BASS Audio Library** first calls
    `appConfig.bassLibraryAvailable()` — `true` only if `bass.dll`,
-   `bassflac.dll`, and `bassopus.dll` are all present next to `Topaz.exe`
-   (checked via `QCoreApplication::applicationDirPath()`). BASS's core
+   `bassflac.dll`, and `bassopus.dll` (Linux: `libbass.so`/`libbassflac.so`/
+   `libbassopus.so` — see "Linux port, step 3" below) are all present next
+   to `Topaz.exe` (checked via `QCoreApplication::applicationDirPath()`). BASS's core
    library natively decodes MP3/OGG/WAV only; FLAC and Opus (both of which
    Topaz already plays, see `TagReader`) each need their own official add-on
    for feature parity with today's FFmpeg playback, hence checking for all
@@ -2660,9 +2760,10 @@ audio-output object).
   - FLAC/Opus support comes from `BASS_PluginLoad()`-ing `bassflac.dll`/
     `bassopus.dll` once (in `BassLibrary::load()`, after `BASS_Init()`),
     not separate functions — `BASS_StreamCreateFile()` then transparently
-    handles those formats too. All file paths (the plugin filenames and
-    every track's path) are passed with the `BASS_UNICODE` flag, since
-    neither is guaranteed ASCII-safe.
+    handles those formats too. On Windows, all file paths (the plugin
+    filenames and every track's path) are passed with the `BASS_UNICODE`
+    flag, since neither is guaranteed ASCII-safe — see "Linux port, step 3"
+    below for the non-Windows equivalent (plain UTF-8, no such flag).
   - Volume ramping during crossfade uses the same plain
     `setVolume()`/`BASS_ChannelSetAttribute(BASS_ATTRIB_VOL, ...)` calls
     `onFadeTick()` already made for `FfmpegAudioDeck` — crossfade behavior
@@ -2681,6 +2782,20 @@ audio-output object).
   loaded/resolved or `BASS_Init()` fails — a plugin individually failing to
   load is only logged, not fatal, since losing one format shouldn't take
   down the other.
+- **Linux port, step 3**: `BassLibrary::load()`, `BassAudioDeck::setSource()`,
+  and `AppConfig::bassLibraryAvailable()` each gained an `#if defined(_WIN32)`
+  / `#else` split so the BASS backend actually works on Linux once the user
+  supplies their own licensed binaries there too (same never-bundled
+  redistribution situation as the Windows `.dll`s). The Linux branch looks
+  for `libbass.so`/`libbassflac.so`/`libbassopus.so` (the standard Unix
+  `lib<name>.so` naming BASS's own official Linux SDK distribution uses)
+  and passes every file path through `QFile::encodeName()` with flags `0`
+  instead of `std::wstring`/`BASS_UNICODE` — non-Windows BASS has no
+  UTF-16/ANSI distinction, it always takes plain UTF-8 `char*`. The
+  `BASSCALL` calling-convention macro (`basslibrary.h`) already handled
+  this correctly beforehand (`__stdcall` on Windows, plain cdecl
+  elsewhere) and needed no change. Not yet tested on an actual Linux
+  machine — see the `future_linux_port` project memory for the roadmap.
 - **Construction timing and backend selection**: decks are created by
   `createDecksIfNeeded()`, called once from `setAppConfig()` the first time
   a non-null `AppConfig` is bound — not in the constructor, since choosing
@@ -3369,8 +3484,14 @@ Applies to every pane in the family (`BigCoverWindow`/`TagInfoWindow`/
 `AudioVisualizerWindow`), not just the visualizer — harmless for the two always-opaque
 panes (an unused alpha channel changes nothing visually for them).
 
-Windows-only, no `#ifdef` guard — same as `SystemVolumeController`; both are tracked
-together as needing a platform switch for a future Linux port.
+**Linux port, step 1**: steps 1-2 above (`setFormat()`/`create()`) are plain
+cross-platform `QQuickWindow`/`QSurfaceFormat` calls and now run unconditionally on
+every platform. Only step 3 (the actual `DwmSetWindowAttribute()` call, plus the
+`<windows.h>`/`<dwmapi.h>` includes and the hardcoded constants) is wrapped in
+`#ifdef Q_OS_WIN` in `windowchrome.cpp` — a no-op on Linux, where most window
+managers don't draw this kind of per-window accent border in the first place. Same
+guarding approach as `SystemVolumeController`; see the `future_linux_port` project
+memory for the roadmap.
 
 ### Aspect-locked resize (`fixedAspectRatio`)
 

@@ -284,9 +284,15 @@ void AppConfig::setAudioBackend(const QString &mode)
 bool AppConfig::bassLibraryAvailable() const
 {
     const QString dir = QCoreApplication::applicationDirPath();
+#if defined(_WIN32)
     return QFile::exists(dir + QStringLiteral("/bass.dll"))
         && QFile::exists(dir + QStringLiteral("/bassflac.dll"))
         && QFile::exists(dir + QStringLiteral("/bassopus.dll"));
+#else
+    return QFile::exists(dir + QStringLiteral("/libbass.so"))
+        && QFile::exists(dir + QStringLiteral("/libbassflac.so"))
+        && QFile::exists(dir + QStringLiteral("/libbassopus.so"));
+#endif
 }
 
 // ── AUTO PLAY operations ──────────────────────────────────────────────────

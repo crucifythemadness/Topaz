@@ -4,15 +4,23 @@
 #include <QQmlEngine>
 
 // ── SystemVolumeController ────────────────────────────────────────────────
-// Controls the Windows OS master output volume (not Topaz's own playback
-// level — that's QAudioOutput::setVolume(), used only internally for
-// crossfade ramping). Qt has no cross-platform API for this, so this wraps
-// the Windows Core Audio IAudioEndpointVolume COM interface directly.
+// Controls the OS master output volume (not Topaz's own playback level —
+// that's QAudioOutput::setVolume(), used only internally for crossfade
+// ramping). Qt has no cross-platform API for this, so the .cpp implements
+// it per-platform behind an #ifdef Q_OS_WIN split: on Windows, the Core
+// Audio IAudioEndpointVolume COM interface directly (with live push-sync
+// via IAudioEndpointVolumeCallback — see below); on Linux, the `pactl` CLI
+// tool via QProcess (PulseAudio and modern PipeWire's pulseaudio-compatible
+// layer both ship it) — a deliberate first-pass simplification with no live
+// push-sync, refresh()-on-demand only; see the future_linux_port project
+// memory for the plan to revisit with a native libpulse client later.
 //
 // All Windows/COM headers (mmdeviceapi.h, endpointvolume.h) are kept out of
 // this header, behind a private PIMPL in the .cpp — <windows.h>-family
 // headers define macros (interface, min, max) that can clash with Qt/STL if
-// leaked into every file that includes this one.
+// leaked into every file that includes this one. Impl's shape differs
+// per-platform (empty on Linux) since only systemvolumecontroller.cpp
+// itself ever touches it.
 //
 // volume() is seeded from the OS's actual current volume at construction
 // time, so the first value a bound QML Slider sees already reflects "what

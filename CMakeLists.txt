@@ -4,12 +4,25 @@ cmake_minimum_required(VERSION 3.21)
 # CMAKE_PROJECT_VERSION_PATCH from the top-level project() call (us, once
 # FetchContent'd as a subdirectory), and an unset patch component makes that
 # substitution expand to nothing, breaking their generated version.h.
-project(Topaz VERSION 1.0.0 LANGUAGES CXX C RC)
+project(Topaz VERSION 1.0.0 LANGUAGES CXX C)
+
+# RC (Windows resource compiler, for app.rc's icon) is MinGW/MSVC-only --
+# Linux's cmake has no RC language support at all, so it can't be declared
+# unconditionally in the project() call above (evaluated before any
+# if(WIN32) guard could run) without breaking Linux configure entirely.
+if (WIN32)
+    enable_language(RC)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Quick QuickControls2 QuickDialogs2 Multimedia Widgets OpenGL)
+find_package(Qt6 REQUIRED COMPONENTS Core Quick QuickControls2 QuickDialogs2 Multimedia Widgets OpenGL Concurrent)
+# Separate from Qt6::OpenGL (Qt's own wrapper module, already required
+# above) -- this is CMake's own FindOpenGL module, needed for the raw
+# OpenGL::GL target MilkdropView's direct glViewport/glReadPixels calls
+# link against on non-Windows (see the target_link_libraries split below).
+find_package(OpenGL REQUIRED)
 
 qt_standard_project_setup()
 
@@ -122,8 +135,14 @@ qt_add_executable(topaz
     # for the BACKUP/RESTORE feature's *.zip files.
     third_party/miniz/miniz.h
     third_party/miniz/miniz.c
-    app.rc
 )
+
+# app.rc (the .ico embed) needs the Windows-only RC language enabled above --
+# not listed in the qt_add_executable() source list itself, since that's
+# evaluated unconditionally regardless of platform.
+if (WIN32)
+    target_sources(topaz PRIVATE app.rc)
+endif()
 
 # Mark Theme.qml as a QML singleton so the generated qmldir
 # includes the "singleton" keyword, enabling `Theme.primary` access
@@ -181,10 +200,28 @@ qt_add_qml_module(topaz
         TrashBin_Icon.svg
 )
 
-set_target_properties(topaz PROPERTIES
-    OUTPUT_NAME Topaz
-    WIN32_EXECUTABLE TRUE
-)
+if (WIN32)
+    # OUTPUT_NAME Topaz -> Topaz.exe -- capitalized to match the project name.
+    # Windows filenames are case-insensitive, so this never collides with
+    # anything. WIN32_EXECUTABLE suppresses the console window.
+    set_target_properties(topaz PROPERTIES
+        OUTPUT_NAME Topaz
+        WIN32_EXECUTABLE TRUE
+    )
+else()
+    # Deliberately NOT "Topaz" here (unlike Windows' Topaz.exe): on a
+    # case-sensitive filesystem, an executable literally named "Topaz"
+    # collides with qt_add_qml_module()'s own generated "Topaz/" companion
+    # directory (URI Topaz, see below) sitting right next to it in the same
+    # build directory -- the linker fails with "cannot open output file
+    # Topaz: Is a directory". Windows' ".exe" suffix never hits this, since
+    # "Topaz.exe" and "Topaz/" are different names there too, but even on
+    # case-INsensitive NTFS they'd already differ by that suffix regardless.
+    # Leaving OUTPUT_NAME unset keeps CMake's default (the target's own
+    # name, "topaz", lowercase) -- distinct from "Topaz/" on ext4, and a
+    # more idiomatic lowercase binary name for Linux besides.
+    set_target_properties(topaz PROPERTIES OUTPUT_NAME topaz)
+endif()
 
 # Exposes CMake's own project() version to BuildInfo (buildinfo.h/cpp) for
 # the About Topaz dialog, so the displayed version never drifts out of sync
@@ -205,15 +242,25 @@ endif()
 
 target_link_libraries(topaz
     PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Multimedia Qt6::Concurrent Qt6::Widgets Qt6::OpenGL
-    PRIVATE ole32 dwmapi
     PRIVATE libprojectM::projectM libprojectM::playlist
     # MilkdropView must call glewInit() itself before using projectM — see
     # UC-20's "glewInit()" note; libprojectM doesn't do this internally.
     PRIVATE GLEW::glew
-    # MilkdropView calls glViewport/glReadPixels directly (core OpenGL 1.1,
-    # not behind GLEW's loader) to read back projectM's rendered frame.
-    PRIVATE opengl32
 )
+if (WIN32)
+    target_link_libraries(topaz
+        PRIVATE ole32 dwmapi
+        # MilkdropView calls glViewport/glReadPixels directly (core OpenGL
+        # 1.1, not behind GLEW's loader) to read back projectM's rendered
+        # frame -- opengl32 is the Windows-only GL loader import lib name.
+        PRIVATE opengl32
+    )
+else()
+    # Same glViewport/glReadPixels readback need as opengl32 above, via
+    # CMake's own FindOpenGL module (find_package(OpenGL REQUIRED) near the
+    # top of this file) rather than a Windows-only literal lib name.
+    target_link_libraries(topaz PRIVATE OpenGL::GL)
+endif()
 
 include(GNUInstallDirs)
 install(TARGETS topaz

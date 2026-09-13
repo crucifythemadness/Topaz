@@ -4,6 +4,7 @@
 #include <QSurfaceFormat>
 #include <QDebug>
 
+#ifdef Q_OS_WIN
 #include <windows.h>
 #include <dwmapi.h>
 
@@ -18,6 +19,7 @@ namespace {
 constexpr DWORD    kDwmwaBorderColor = 34;
 constexpr COLORREF kDwmwaColorNone   = 0xFFFFFFFE;
 }
+#endif
 
 WindowChrome::WindowChrome(QObject *parent)
     : QObject(parent)
@@ -40,9 +42,12 @@ void WindowChrome::prepareWindow(QQuickWindow *window)
     // Step 2: create the native window now, with that format.
     window->create();
 
+#ifdef Q_OS_WIN
     // Step 3: only now does a real HWND exist to remove Windows 11's default
     // per-window DWM accent border, drawn around any top-level window since
-    // build 22000 regardless of content or frameless status.
+    // build 22000 regardless of content or frameless status. No Linux
+    // equivalent needed -- most Linux window managers don't add this kind
+    // of per-window accent border in the first place.
     const HWND hwnd = reinterpret_cast<HWND>(window->winId());
     if (!hwnd) return;
 
@@ -50,4 +55,5 @@ void WindowChrome::prepareWindow(QQuickWindow *window)
                                               &kDwmwaColorNone, sizeof(kDwmwaColorNone));
     if (FAILED(hr))
         qWarning() << "WindowChrome: DwmSetWindowAttribute(DWMWA_BORDER_COLOR) failed, hr =" << hr;
+#endif
 }

@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QFile>
 
 #include <string>
 
@@ -32,9 +33,14 @@ bool BassLibrary::load()
     if (m_loaded) return true;
 
     const QString dir = QCoreApplication::applicationDirPath();
+#if defined(_WIN32)
     m_bass.setFileName(dir + QStringLiteral("/bass.dll"));
+#else
+    m_bass.setFileName(dir + QStringLiteral("/libbass.so"));
+#endif
     if (!m_bass.load()) {
-        qWarning() << "BassLibrary: failed to load bass.dll:" << m_bass.errorString();
+        qWarning() << "BassLibrary: failed to load" << m_bass.fileName()
+                    << "-" << m_bass.errorString();
         return false;
     }
 
@@ -71,6 +77,7 @@ bool BassLibrary::load()
         return false;
     }
 
+#if defined(_WIN32)
     // BASS_UNICODE tells BASS_PluginLoad() the filename is UTF-16 (WCHAR*)
     // rather than ANSI -- applicationDirPath() isn't guaranteed ASCII-safe.
     const std::wstring flacPath = (dir + QStringLiteral("/bassflac.dll")).toStdWString();
@@ -79,6 +86,17 @@ bool BassLibrary::load()
         qWarning() << "BassLibrary: failed to load bassflac.dll plugin, error code" << BASS_ErrorGetCode();
     if (!BASS_PluginLoad(opusPath.c_str(), BASS_UNICODE))
         qWarning() << "BassLibrary: failed to load bassopus.dll plugin, error code" << BASS_ErrorGetCode();
+#else
+    // Non-Windows BASS takes plain UTF-8 filenames -- no BASS_UNICODE
+    // equivalent exists there. QFile::encodeName matches the platform's
+    // actual filesystem encoding.
+    const QByteArray flacPath = QFile::encodeName(dir + QStringLiteral("/libbassflac.so"));
+    const QByteArray opusPath = QFile::encodeName(dir + QStringLiteral("/libbassopus.so"));
+    if (!BASS_PluginLoad(flacPath.constData(), 0))
+        qWarning() << "BassLibrary: failed to load libbassflac.so plugin, error code" << BASS_ErrorGetCode();
+    if (!BASS_PluginLoad(opusPath.constData(), 0))
+        qWarning() << "BassLibrary: failed to load libbassopus.so plugin, error code" << BASS_ErrorGetCode();
+#endif
 
     m_loaded = true;
     return true;
