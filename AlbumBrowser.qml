@@ -83,7 +83,7 @@ Rectangle {
 
         Text {
             anchors { right: parent.right; rightMargin: 32; bottom: parent.bottom; bottomMargin: 20 }
-            text: lib ? (root.currentAlbums.length + " ITEMS  \u2014  " + lib.statusPath()) : ""
+            text: lib ? (root.currentAlbums.length + " ALBUMS  \u2014  " + lib.statusPath()) : ""
             font.family:        Theme.fontFamilyMono
             font.pixelSize:     Theme.monoSm
             font.letterSpacing: 1.5
