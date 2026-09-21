@@ -1,4 +1,7 @@
 import QtQuick
+// qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
+// qmllint disable unqualified
+// qmllint disable Quick.layout-positioning
 import QtQuick.Controls
 import QtQuick.Layouts
 

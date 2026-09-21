@@ -688,9 +688,9 @@ work), not just with track count.
 | `LibraryScanner` | `libraryscanner.h/cpp` | Worker: directory walk, parallel tag-reading (`QtConcurrent`/`QThreadPool`), genre filter, QFileSystemWatcher |
 | `LibraryModel` | `librarymodel.h/cpp` | QAbstractListModel + Q_INVOKABLE query helpers exposed to QML |
 | `PlaylistManager` | `playlistmanager.h/cpp` | XSPF playlist file creation; path-portability helpers; `listPlaylists()` for the PLAYLISTS tab (see UC-22) |
-| `SystemVolumeController` | `systemvolumecontroller.h/cpp` | Windows OS master-volume control via Core Audio COM |
+| `SystemVolumeController` | `systemvolumecontroller.h/cpp` | OS master-volume control with live sync: Core Audio COM on Windows, native libpulse (PulseAudio / PipeWire) on Linux |
 
-### SystemVolumeController — Windows OS master volume
+### SystemVolumeController — OS master volume (Windows: Core Audio, Linux: libpulse)
 
 Controls the Windows **system** output volume (not Topaz's own playback level —
 `QAudioOutput::setVolume()` is separate, used only internally for crossfade ramping).
@@ -780,41 +780,68 @@ level) from what was asked for here.
 
 **Linux port, step 1**: the entire Windows COM implementation above (from the
 `<windows.h>`/`<mmdeviceapi.h>`/`<endpointvolume.h>` includes through the end of
-`setVolume()`) is now wrapped in `#ifdef Q_OS_WIN` in `systemvolumecontroller.cpp`,
-alongside a `#else` Linux branch with a differently-shaped `Impl` (empty struct,
-since only this one `.cpp` ever touches it).
+`setVolume()`) is wrapped in `#ifdef Q_OS_WIN` in `systemvolumecontroller.cpp`,
+alongside a `#else` Linux branch with its own, differently-shaped `Impl` (only this
+one `.cpp` ever touches it, so the header stays free of both Windows and libpulse
+headers).
 
-**Linux port, step 2**: the Linux `#else` branch is a real implementation, not a
-stub — it controls the OS master volume via the `pactl` CLI tool (`QProcess`),
-which ships with both PulseAudio and modern PipeWire's pulseaudio-compatible
-layer, rather than linking `libpulse` directly. `defaultSinkName()` runs `pactl
-get-default-sink`; `refresh()`/the constructor run `pactl get-sink-volume
-<sink>` and parse the first `NN%` match out of its text output (multi-channel
-output reports one percentage per channel — like the Windows master-volume
-scalar, only the first channel's value is used, correct for typical symmetric
-stereo output); `setVolume()` fires `pactl set-sink-volume <sink> <N>%` via
-`QProcess::startDetached` (fire-and-forget, matching the Windows build's own
-optimistic-UI pattern of updating `m_volume`/emitting `volumeChanged()`
-immediately regardless of whether the underlying OS call succeeds). Every call
-resolves the default sink fresh rather than caching it (slightly more correct
-than the Windows build's "resolved once at construction" behavior, at the cost
-of one extra process spawn per call — negligible given calls only happen at
-construction, popup-open, and slider drags), and every call has a short
-(1 second) `waitForFinished()` timeout plus a graceful `qWarning()`-and-return
-if `pactl` is missing or reports no default sink.
+**Linux implementation — native libpulse client** (PulseAudio, and PipeWire through
+its pulseaudio-compatible server `pipewire-pulse`; links `libpulse` via
+`pkg_check_modules(PULSE ... libpulse)` in `CMakeLists.txt`, needs `libpulse-dev` in
+`Dockerfile.linux`, and `libpulse.so.0` + `libpulsecommon-*.so` are bundled into
+`deploy-linux/lib/`). It replaced a first version that shelled out to `pactl`
+(no live sync, a blocking process spawn per call on the GUI thread, a hard dependency
+on that binary, first-channel-only text parsing).
 
-**Deliberate first-pass simplifications** (both explicitly flagged for revisit
-once there's an actual Linux machine to test against, not permanent design):
-no live push-sync when something *outside* Topaz changes the volume — unlike
-Windows' `IAudioEndpointVolumeCallback`, `pactl` would need a long-running
-`pactl subscribe` child process and event-stream parsing to replicate that,
-judged too much complexity to get right without a way to compile/test it in
-this session. `refresh()` (already called by `TopBar.qml` right before the
-volume popup opens) covers the common case instead. The plan is to eventually
-replace this whole `pactl`-shelling-out approach with a native `libpulse`
-client (real async live-sync, no text parsing, no dependency on an external
-binary being on `PATH`) — see the `future_linux_port` project memory for the
-full roadmap.
+- **Threading.** A `pa_threaded_mainloop` runs libpulse on its own thread. Every
+  libpulse callback runs there with the mainloop lock held and therefore never touches
+  Qt state directly: like the Windows `IAudioEndpointVolumeCallback` it posts to the
+  owner with `QMetaObject::invokeMethod(owner, ..., Qt::QueuedConnection)` (dropped
+  safely if the owner is destroyed). The GUI thread takes `pa_threaded_mainloop_lock()`
+  before touching the context or the shared fields, and **never waits for a server
+  reply**: `setVolume()`/`refresh()` only send a request; the answer comes back through
+  the callback path. The static callbacks live in a class named `VolumeChangeCallback`
+  in the `.cpp` (the same name as the Windows COM class, because the header already
+  declares that name a `friend` to reach the private `applyLevel()`).
+- **Flow / live sync.** Connect with `PA_CONTEXT_NOFAIL | PA_CONTEXT_NOAUTOSPAWN`
+  (wait for a server that isn't up yet; Topaz never launches a sound server). On
+  `READY`: subscribe to SINK + SERVER events → server info → default sink name → that
+  sink's info (index + `pa_cvolume`). A SERVER event (default sink switched) repeats
+  the lookup, so Topaz **follows the default output device** (which the Windows branch
+  does not); a SINK event for the followed sink re-reads its volume — that is the push
+  sync for keyboard volume keys, the panel applet and other apps; a sink-removed event
+  re-resolves the default sink.
+- **Volume mapping.** The reported volume is the **loudest channel** (`pa_cvolume_max`
+  / `PA_VOLUME_NORM`), and `setVolume()` uses `pa_cvolume_scale()`, which also sets the
+  loudest channel: read and write agree and a left/right balance configured elsewhere
+  is preserved (an all-zero sink gets every channel set). Values above 100 % clamp to
+  100 in `applyLevel()`. Mute state is not mirrored (as on Windows).
+- **Echo suppression.** Server reports arriving < 250 ms after Topaz's own
+  `setVolume()` are ignored: they are the echoes of the slider drag itself
+  (38, 39, 40 … trailing behind a slider already at 41) and would make it jump back and
+  forth. Later changes go through `applyLevel()` normally. `setVolume()` is otherwise
+  optimistic (updates `m_volume` + `volumeChanged()` immediately), like Windows.
+- **Recovery.** If the connection fails or the server restarts (`FAILED`/`TERMINATED`),
+  the GUI thread rebuilds the context after 3 s and keeps retrying every 3 s; one
+  warning per outage, not per retry. Destruction clears the callbacks, disconnects, and
+  stops (joins) the mainloop thread before the object goes away.
+- **Startup value.** `volume()` is seeded asynchronously, a moment after construction
+  (Windows seeds synchronously); `refresh()` (called by `TopBar.qml` before the popup
+  opens) is now a non-blocking re-query.
+- **Diagnostics.** One `qInfo` line when a sink is followed (`SystemVolumeController:
+  following PulseAudio sink "<name>" (NN%)`) and a single warning when no server is
+  reachable / `setVolume()` finds no sink — useful in tester logs.
+
+**Verification (Linux, real server, no UI):** a throw-away test harness (not in the
+repo) built `systemvolumecontroller.cpp` into a tiny `QCoreApplication` against a real
+PulseAudio server with two null sinks in a container and confirmed: initial read;
+`setVolume` reaching the server; external `pactl` changes pushed live; multi-channel
+read + balance-preserving write; following a default-sink switch (and writing to the
+new sink only); a 60-step burst with no property bounce; recovery after killing and
+restarting the server; and — with an unreachable server — no hang, a single warning,
+and a clean destruction. The bundled `deploy-linux/` was also run in a bare
+`ubuntu:24.04` container (Xvfb, xcb platform plugin, PulseAudio): `ldd` clean and the
+sink volume read at startup.
 
 **Linux port, step 4 (final) — first real Linux build, via Docker Desktop**:
 steps 1-3 above were all written and reasoned about blind, with no Linux
@@ -871,9 +898,11 @@ with zero `TypeError`/`ReferenceError`/QML-type-loading errors — only
 already-known, pre-existing `SetupDialog.qml` layout warnings identical to
 every Windows smoke test this project has ever run, plus the *expected*
 `SystemVolumeController: pactl get-default-sink failed ... -- volume
-unavailable` message (step 2's graceful-degradation path, confirmed working
-exactly as designed, since no real PulseAudio/PipeWire server runs inside
-the minimal container). This is the first genuinely verified (not just
+unavailable` message (the graceful-degradation path of the original
+`pactl`-based Linux implementation, since replaced by the native libpulse
+client described above, which degrades the same way with its own warning,
+since no real PulseAudio/PipeWire server runs inside the minimal
+container). This is the first genuinely verified (not just
 statically reviewed) confirmation that the whole Linux port initiative
 actually works.
 

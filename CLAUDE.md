@@ -150,14 +150,28 @@ find "$QT/lib" -maxdepth 1 -name "*.so*" ! -name "*.debug" -exec cp -L {} /out/l
 cp -L /build/_deps/projectm-build/src/libprojectM/libprojectM-4.so.4 /out/lib/
 cp -L /build/_deps/projectm-build/src/playlist/libprojectM-4-playlist.so.4 /out/lib/
 cp -L /build/lib/libGLEW.so.2.2 /out/lib/
+# libpulse: a direct link dependency (SystemVolumeController), plus its own helper lib
+cp -L "$(ldd /build/topaz | awk "/libpulse\.so/{print \$3}")" /out/lib/
+cp -L "$(find /usr/lib -name "libpulsecommon-*.so" | head -1)" /out/lib/
 mkdir -p /out/plugins && cp -r "$QT/plugins/." /out/plugins/
 rm -rf /out/plugins/{designer,help,printsupport,sqldrivers,qmllint,qmlls,qmltooling}
-cp -r "$QT/qml" /out/qml
+mkdir -p /out/qml && cp -r "$QT/qml/." /out/qml/
 cp /src/packaging/linux/{topaz.png,install-topaz-launcher.sh,README-Linux.txt,qt.conf,run-topaz.sh} /out/
 chmod +x /out/run-topaz.sh
 '
 ```
 (That container also needs the repo mounted read-only at `/src`: add `-v "$(pwd):/src:ro"`.)
+Refresh `deploy-linux/` in place, never wipe it — the user's own `libbass*.so` live in its root.
+The `qml` line must be `cp -r "$QT/qml/." /out/qml/` (with the `/.`): plain `cp -r "$QT/qml" /out/qml`
+nests a second `qml/` inside an existing one.
+
+The Linux OS-volume control is a native **libpulse** client (PulseAudio, and PipeWire via
+`pipewire-pulse`), so the image needs `libpulse-dev` (in `Dockerfile.linux`; CMake finds it with
+`pkg_check_modules(PULSE ... libpulse)`) and the bundle needs `libpulse.so.0` + `libpulsecommon-*.so`
+(the two `cp -L` lines above). To test it without a desktop: run a throw-away PulseAudio server as a
+non-root user in a container (`pulseaudio -n -F test.pa --exit-idle-time=-1 -D`, null sinks) and drive
+it with `pactl` — see the "Verification" paragraph in the SystemVolumeController section of the
+architecture doc.
 `packaging/linux/` (tracked) holds everything in `deploy-linux/` that isn't build output:
 `qt.conf`, `run-topaz.sh`, `README-Linux.txt`, and the launcher assets — `topaz.png` (the
 256px image from `app.ico`) and `install-topaz-launcher.sh`, which writes
@@ -222,6 +236,36 @@ target machine, but `LD_LIBRARY_PATH` takes precedence over it (modern CMake emi
 
 Like the Windows deploy, BASS (`libbass.so`/`libbassflac.so`/`libbassopus.so`) is never
 bundled — the user supplies their own licensed copies next to `topaz-bin` if wanted.
+
+### Editor diagnostics (VS Code Problems tab)
+
+Kept at zero on purpose, so a new entry means something:
+- **Two noisy categories are switched off**: `unqualified` (implicit outer-scope ids/properties —
+  style only) and `Quick.layout-positioning` (literal width/height on layout children — the dialogs
+  are sized the way they're wanted, converting would change them). Everything else still reports.
+  The mechanism that actually works in the editor is a **file-level directive header** right after
+  the first `import` line of each affected QML file (`// qmllint disable unqualified` and/or
+  `// qmllint disable Quick.layout-positioning`, verified with `qmllint --ignore-settings`). The
+  `.qmllint.ini` at the repo root sets the same two levels for the `qmllint` command line, but the
+  VS Code Qt QML extension (qmlls) kept reporting them with only the ini in place, so don't rely on
+  it alone. A new QML file that triggers either category needs the same header line.
+- **`missing-property` false positives** (QML duck typing: `Qt.application.screens`, `screen.name`,
+  Loader `item.*`, `drop.source.trackData`) are wrapped in `// qmllint disable missing-property` …
+  `// qmllint enable missing-property` pairs. Qt 6.10's qmllint has no `next-line` form.
+- **CMake configure warnings**: `qt_policy(SET QTP0001 NEW)` + `RESOURCE_PREFIX /` on
+  `qt_add_qml_module` (keeps the `:/Topaz/...` resource paths — `OLD` would just trade the warning
+  for a deprecation one), and GLEW's ancient `cmake_minimum_required` notice is silenced around its
+  `FetchContent_MakeAvailable` only (needs the *cache* variable `CMAKE_WARN_DEPRECATED`).
+- `qmllint` from a shell resolves the module types only when run on the copies in `build/Topaz/`:
+  `cd build && qmllint --ignore-settings -I . -I C:/Qt/6.10.2/mingw_64/qml Topaz/*.qml`
+  (`--ignore-settings` = only the in-file directives count; expect 0). The extension only lints
+  files open in editor tabs, and its CMake entries stay until VS Code itself runs "CMake: Configure".
+- **Line endings are mixed per file** (some tracked files are LF, some CRLF — `git ls-files --eol`).
+  Never `sed -i` a tracked file from Git Bash: msys `sed`/`grep` strip `\r`, silently turning a
+  CRLF file into a whole-file diff (and `grep -c '\r$'` reports 0 for CRLF files). Use the Edit tool,
+  or a byte-level PowerShell rewrite, and check `git diff --stat` afterwards.
+- Running a `build-release/Topaz.exe` in place needs the Qt + MinGW `bin` dirs on `PATH` (no DLLs
+  beside it, unlike `deploy/`); without them it exits silently.
 
 There is no test suite in this repository.
 

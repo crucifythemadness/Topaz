@@ -126,7 +126,9 @@ Window {
     // did not follow the pane across displays -- F10 (Milkdrop fullscreen)
     // and the double-click placements always went to the main display.
     function currentScreenRect() {
+        // qmllint disable missing-property
         const screens = Qt.application.screens
+        // qmllint enable missing-property
         const cx = pane.x + pane.width  / 2
         const cy = pane.y + pane.height / 2
         let best = null
@@ -379,6 +381,8 @@ Window {
         interval: 500
         repeat: false
         onTriggered: pane.geometrySettled(pane.x, pane.y, pane.width, pane.height,
+                                           // qmllint disable missing-property
                                            pane.screen ? pane.screen.name : "")
+        // qmllint enable missing-property
     }
 }

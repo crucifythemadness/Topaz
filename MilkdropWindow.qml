@@ -1,4 +1,6 @@
 import QtQuick
+// qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
+// qmllint disable unqualified
 import QtQuick.Window
 
 // ── MilkdropWindow ───────────────────────────────────────────────────────
@@ -85,7 +87,9 @@ FloatingPane {
                 // Fill the display the pane is on right now (measured before
                 // it moves), not the main display. In kiosk mode the pane is
                 // topmost, so this covers the taskbar strip too.
+                // qmllint disable missing-property
                 const scr = mdWindow.currentScreenRect()
+                // qmllint enable missing-property
                 mdWindow._preFullscreenX      = mdWindow.x
                 mdWindow._preFullscreenY      = mdWindow.y
                 mdWindow._preFullscreenWidth  = mdWindow.width

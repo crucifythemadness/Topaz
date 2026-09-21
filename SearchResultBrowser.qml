@@ -1,4 +1,6 @@
 import QtQuick
+// qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
+// qmllint disable unqualified
 
 // Replaces AlbumBrowser in the same SplitView slot when TopBar's SEARCH tab
 // is active (see Main.qml's Loader). Same album-card grid/drag-to-queue

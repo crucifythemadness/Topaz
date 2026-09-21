@@ -1,4 +1,6 @@
 ﻿import QtQuick
+// qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
+// qmllint disable unqualified
 
 // 3 × 10 grid of genre toggle buttons.
 // Active genres are highlighted with secondaryContainer background.

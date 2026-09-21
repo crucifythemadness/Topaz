@@ -26,6 +26,14 @@ find_package(OpenGL REQUIRED)
 
 qt_standard_project_setup()
 
+# QTP0001: NEW changes the default QML resource prefix to ":/qt/qml/". Everything
+# here loads its assets from the classic ":/Topaz/..." (qrc:/Topaz/app.ico in
+# AboutDialog.qml, ":/Topaz/app.ico" in main.cpp / autoplaycontroller.cpp, the .svg
+# icons, ...), so qt_add_qml_module below passes RESOURCE_PREFIX / explicitly --
+# Qt's documented way to keep the old paths. (Leaving the policy unset, or setting
+# it to OLD, each make Qt print a configure warning.)
+qt_policy(SET QTP0001 NEW)
+
 # ── projectM (Milkdrop-compatible visualizer, see UC-20) ──────────────────
 # MilkdropView renders into an offscreen QOpenGLContext/QOpenGLFramebufferObject
 # (Qt6::OpenGL), fully independent of Qt Quick's own D3D11-by-default scenegraph.
@@ -44,7 +52,19 @@ FetchContent_Declare(
     SOURCE_SUBDIR build/cmake
     OVERRIDE_FIND_PACKAGE
 )
+# GLEW's own CMakeLists.txt still says cmake_minimum_required(VERSION 2.8.12), which
+# makes every configure print a "Compatibility with CMake < 3.5" deprecation warning
+# from third-party code we can't edit. Only the CACHE variable silences it (a normal
+# variable is ignored for this message), so it's switched off just around GLEW's
+# add_subdirectory and put back right after -- our own deprecation warnings stay on.
+set(_topaz_prev_warn_deprecated "${CMAKE_WARN_DEPRECATED}")
+set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(GLEW)
+if("${_topaz_prev_warn_deprecated}" STREQUAL "")
+    unset(CMAKE_WARN_DEPRECATED CACHE)
+else()
+    set(CMAKE_WARN_DEPRECATED "${_topaz_prev_warn_deprecated}" CACHE BOOL "" FORCE)
+endif()
 # GLEW's raw CMakeLists.txt only defines plain `glew`/`glew_s` targets, not the
 # namespaced `GLEW::glew` target projectM's CMakeLists checks for.
 if(TARGET glew AND NOT TARGET GLEW::glew)
@@ -154,6 +174,7 @@ set_source_files_properties(Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(topaz
     URI Topaz
     VERSION 1.0
+    RESOURCE_PREFIX /
     QML_FILES
         Main.qml
         Theme.qml
@@ -262,6 +283,13 @@ else()
     # CMake's own FindOpenGL module (find_package(OpenGL REQUIRED) near the
     # top of this file) rather than a Windows-only literal lib name.
     target_link_libraries(topaz PRIVATE OpenGL::GL)
+
+    # SystemVolumeController's Linux branch is a native libpulse client
+    # (PulseAudio, and PipeWire via pipewire-pulse) -- libpulse-dev provides
+    # the header + the pkg-config file.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse)
+    target_link_libraries(topaz PRIVATE PkgConfig::PULSE)
 endif()
 
 include(GNUInstallDirs)

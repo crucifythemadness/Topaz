@@ -1,4 +1,6 @@
 ﻿import QtQuick
+// qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
+// qmllint disable unqualified
 
 // Single album card used as a delegate inside AlbumBrowser.
 // Properties:

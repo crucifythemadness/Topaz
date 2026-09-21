@@ -9,18 +9,16 @@
 // ramping). Qt has no cross-platform API for this, so the .cpp implements
 // it per-platform behind an #ifdef Q_OS_WIN split: on Windows, the Core
 // Audio IAudioEndpointVolume COM interface directly (with live push-sync
-// via IAudioEndpointVolumeCallback — see below); on Linux, the `pactl` CLI
-// tool via QProcess (PulseAudio and modern PipeWire's pulseaudio-compatible
-// layer both ship it) — a deliberate first-pass simplification with no live
-// push-sync, refresh()-on-demand only; see the future_linux_port project
-// memory for the plan to revisit with a native libpulse client later.
+// via IAudioEndpointVolumeCallback — see below); on Linux, a native libpulse
+// client (PulseAudio, and PipeWire through its pulseaudio-compatible server)
+// on a pa_threaded_mainloop, with the same live push-sync via libpulse's
+// sink/server subscription events, and without any external tool.
 //
-// All Windows/COM headers (mmdeviceapi.h, endpointvolume.h) are kept out of
-// this header, behind a private PIMPL in the .cpp — <windows.h>-family
-// headers define macros (interface, min, max) that can clash with Qt/STL if
-// leaked into every file that includes this one. Impl's shape differs
-// per-platform (empty on Linux) since only systemvolumecontroller.cpp
-// itself ever touches it.
+// All Windows/COM and libpulse headers are kept out of this header, behind a
+// private PIMPL in the .cpp — <windows.h>-family headers define macros
+// (interface, min, max) that can clash with Qt/STL if leaked into every file
+// that includes this one. Impl's shape differs per-platform since only
+// systemvolumecontroller.cpp itself ever touches it.
 //
 // volume() is seeded from the OS's actual current volume at construction
 // time, so the first value a bound QML Slider sees already reflects "what
@@ -35,16 +33,19 @@
 // through the OS volume model at all is outside Windows' or Topaz's control —
 // some pro-audio interfaces do pure analog attenuation that never touches it.)
 //
-// The one simplification kept: the default audio endpoint is only resolved
-// once, at construction; a mid-session default-device change (e.g. the user
-// switches their default output device in Windows Settings) won't be picked
-// up. A IMMNotificationClient/OnDefaultDeviceChanged registration would
+// The one simplification kept on Windows: the default audio endpoint is only
+// resolved once, at construction; a mid-session default-device change (e.g.
+// the user switches their default output device in Windows Settings) won't be
+// picked up. A IMMNotificationClient/OnDefaultDeviceChanged registration would
 // handle that, but that's a distinct concern from volume-level sync and
-// wasn't asked for.
+// wasn't asked for. The Linux client does follow the default sink, and
+// reconnects if the sound server restarts. On Linux the initial volume arrives
+// asynchronously a moment after construction (nothing blocks the GUI thread);
+// mute state is not mirrored on either platform.
 //
 // Instantiated once in Main.qml:
 //   SystemVolumeController { id: systemVolume }
-class VolumeChangeCallback; // defined in the .cpp, alongside the other COM/Windows types
+class VolumeChangeCallback; // defined in the .cpp: the COM callback on Windows, the static libpulse callbacks on Linux
 
 class SystemVolumeController : public QObject
 {

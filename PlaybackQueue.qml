@@ -1,4 +1,6 @@
 ﻿import QtQuick
+// qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
+// qmllint disable unqualified
 import QtQuick.Controls
 
 // Playback queue panel - shows the ordered list of upcoming tracks.
@@ -641,8 +643,10 @@ Rectangle {
 
             onDropped: function(drop) {
                 var src = drop.source
+                // qmllint disable missing-property
                 if (root.engine && src && src.trackData !== undefined) {
                     root.engine.addTracks([src.trackData])
+                    // qmllint enable missing-property
                     drop.accept(Qt.CopyAction)
                 }
             }

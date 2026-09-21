@@ -1,4 +1,6 @@
 ﻿import QtQuick
+// qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
+// qmllint disable unqualified
 
 // Album card list — driven by lib.filteredAlbums().
 // Refreshes whenever lib.activeGenreNames, lib.selectedArtist, or

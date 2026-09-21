@@ -1,4 +1,6 @@
 ﻿import QtQuick
+// qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
+// qmllint disable unqualified
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
@@ -86,7 +88,9 @@ ApplicationWindow {
     // on the remaining one.
     function visibleFraction(x, y, w, h) {
         if (w <= 0 || h <= 0) return 0
+        // qmllint disable missing-property
         const screens = Qt.application.screens
+        // qmllint enable missing-property
         let area = 0
         for (let i = 0; i < screens.length; i++) {
             const s = screens[i]
@@ -105,7 +109,9 @@ ApplicationWindow {
     // unplugged or rearranged) and falls back to the default, centered on the
     // primary display.
     function restorePaneGeometry(win, configured, sx, sy, sw, sh, defaultW, defaultH) {
+        // qmllint disable missing-property
         const screens = Qt.application.screens
+        // qmllint enable missing-property
         if (configured && sw > 0 && sh > 0 && screens.length > 0) {
             const scr = root.screenAtPoint(sx + sw / 2, sy + sh / 2) || screens[0]
             let w = sw
@@ -143,7 +149,9 @@ ApplicationWindow {
     // philosophy as visibleFraction above.
     function screenByName(name) {
         if (!name) return null
+        // qmllint disable missing-property
         const screens = Qt.application.screens
+        // qmllint enable missing-property
         for (let i = 0; i < screens.length; i++) {
             if (screens[i].name === name) return screens[i]
         }
@@ -155,7 +163,9 @@ ApplicationWindow {
     // Unlike screenByName() this survives identical monitor models (same
     // name), renamed connectors and changed arrangements.
     function screenAtPoint(px, py) {
+        // qmllint disable missing-property
         const screens = Qt.application.screens
+        // qmllint enable missing-property
         for (let i = 0; i < screens.length; i++) {
             const s = screens[i]
             if (px >= s.virtualX && px < s.virtualX + s.width &&
@@ -524,7 +534,9 @@ ApplicationWindow {
             // remains) -- clamp down to the screen the window will be on, or
             // the primary screen if the saved monitor is gone entirely. Never
             // below the minimum window size.
+            // qmllint disable missing-property
             const clampScreen = target || Qt.application.screens[0]
+            // qmllint enable missing-property
             if (clampScreen) {
                 w = Math.max(root.minimumWidth,  Math.min(w, clampScreen.width))
                 h = Math.max(root.minimumHeight, Math.min(h, clampScreen.height))
@@ -586,6 +598,7 @@ ApplicationWindow {
         repeat:   false
         onTriggered: {
             const scr = root.screen
+            // qmllint disable missing-property
             console.info("Main: window after startup: visibility=" + root.visibility
                          + " screen=" + (scr ? scr.name : "?")
                          + " dpr=" + (scr ? scr.devicePixelRatio : "?")
@@ -595,6 +608,7 @@ ApplicationWindow {
                               ? (root.wantedX + "," + root.wantedY + " " + root.wantedWidth + "x" + root.wantedHeight)
                               : "(platform default)")
                          + " on screen=" + root.wantedScreenName)
+            // qmllint enable missing-property
 
             if (root.visibility !== Window.FullScreen && root.haveWanted && !root.selfCheckDone) {
                 root.selfCheckDone = true
@@ -668,7 +682,9 @@ ApplicationWindow {
 
             const posX = (root.visibility !== Window.FullScreen) ? root.x : appConfig.windowX
             const posY = (root.visibility !== Window.FullScreen) ? root.y : appConfig.windowY
+            // qmllint disable missing-property
             appConfig.saveWindowPosition(posX, posY, root.screen ? root.screen.name : "")
+            // qmllint enable missing-property
         }
     }
 
@@ -769,6 +785,10 @@ ApplicationWindow {
                         item.searchData = search
                     } else if (root.activeTab === "playlists") {
                         item.playlistsData = playlistsData
+                        // The loaded item's type is only known at run time (a Loader over
+                        // either the SEARCH or the PLAYLISTS panel), so qmllint can't see
+                        // its signals/properties.
+                        // qmllint disable missing-property
                         item.missingPlaylistTracks.connect(function(missing) {
                             missingTracksDialog.missingTracks = missing
                             missingTracksDialog.open()
@@ -780,6 +800,7 @@ ApplicationWindow {
                             // in the queue (see PlaylistViewer.qml).
                             exportPlaylistDialog.tracks = item.currentRawTracks
                             exportPlaylistDialog.open()
+                            // qmllint enable missing-property
                         })
                     } else {
                         item.lib = lib
