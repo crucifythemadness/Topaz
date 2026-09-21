@@ -54,8 +54,9 @@ FloatingPane {
     onDoubleClicked: {
         if (!_maximized) {
             _restoreX = x; _restoreY = y; _restoreWidth = width; _restoreHeight = height
-            width = Screen.width
-            x = Screen.virtualX
+            const scr = currentScreenRect()   // the display the pane is on, not the main one
+            width = scr.width
+            x = scr.x
             _maximized = true
         } else {
             x = _restoreX; y = _restoreY; width = _restoreWidth; height = _restoreHeight

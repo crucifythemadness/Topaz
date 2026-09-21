@@ -103,4 +103,12 @@ private:
 
     bool    m_dirty = false;         // true when m_barLevels changed since the last publish
     QTimer *m_updateTimer = nullptr; // ~30fps publish cadence
+
+    // One-shot terminal diagnostics (see appendSamples()/processBlock()), so a
+    // "pane opens but nothing moves" report can be split into "no audio ever
+    // arrived" vs "audio arrived but the format was skipped" vs "bars computed
+    // fine, so it's a drawing problem" without another debugging round-trip.
+    bool m_loggedFirstBuffer       = false;
+    bool m_loggedFirstNonZeroLevel = false;
+    bool m_warnedUnsupportedFormat = false;
 };

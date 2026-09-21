@@ -153,8 +153,25 @@ cp -L /build/lib/libGLEW.so.2.2 /out/lib/
 mkdir -p /out/plugins && cp -r "$QT/plugins/." /out/plugins/
 rm -rf /out/plugins/{designer,help,printsupport,sqldrivers,qmllint,qmlls,qmltooling}
 cp -r "$QT/qml" /out/qml
+cp /src/packaging/linux/{topaz.png,install-topaz-launcher.sh,README-Linux.txt,qt.conf,run-topaz.sh} /out/
+chmod +x /out/run-topaz.sh
 '
 ```
+(That container also needs the repo mounted read-only at `/src`: add `-v "$(pwd):/src:ro"`.)
+`packaging/linux/` (tracked) holds everything in `deploy-linux/` that isn't build output:
+`qt.conf`, `run-topaz.sh`, `README-Linux.txt`, and the launcher assets — `topaz.png` (the
+256px image from `app.ico`) and `install-topaz-launcher.sh`, which writes
+`~/.local/share/applications/topaz.desktop` so the app menu/panel/Wayland get an icon
+(`main.cpp` sets the X11 window icon itself, under `#ifndef Q_OS_WIN`). Edit those files
+there, not in the gitignored `deploy-linux/`.
+
+**Docker Desktop caveat**: an `image inspect`/`volume inspect` that "fails" does not mean the
+image/volume is gone — it also fails when the Docker engine simply isn't running (Docker
+Desktop can stop between sessions), and can even report "missing" for a minute after a
+restart while the engine is still loading its image store. Run `docker version` first; if the
+engine is down, start Docker Desktop (`%LOCALAPPDATA%\Programs\DockerDesktop\Docker Desktop.exe`),
+then just try the build/run rather than trusting an inspect — only rebuild the image if the
+build itself says the image doesn't exist.
 **Every copy into `deploy-linux/lib/` uses `-L` (dereference), never `-P`/plain `cp -r`
 of a symlink** — confirmed the hard way, from an actual physical Linux machine: an
 earlier version of this recipe preserved Qt's `libFoo.so -> libFoo.so.6 ->
@@ -276,7 +293,15 @@ first) → calls `LibraryModel.filteredAlbums()`. `LibraryModel.filteredAlbums()
 - `Topaz.library.json` — scanned track cache, same directory.
 - `<AppConfigLocation>/playlists/<name>.xml` — XSPF v1 playlists, drive letters stripped from `<location>` for portability across drive-letter reassignment.
 
-Config/cache directory on Windows: `%APPDATA%\Topaz\Topaz\`.
+Config/cache directory: `%LOCALAPPDATA%\Topaz\` on Windows, `~/.config/Topaz/` on Linux
+(`QStandardPaths::AppConfigLocation`). `main.cpp` pins `setApplicationName("Topaz")` so this
+doesn't depend on the executable's filename — without it, Linux derived `~/.config/topaz-bin/`
+from the renamed deploy binary.
+
+**Never strip `file:///` from a dialog URL by a fixed length** (`substring(8)`) — that
+yields a relative path on Linux (`file:///home/x` → `home/x`). Pass the URL to C++
+(`QUrl::toLocalFile()`), or use `s.replace(/^file:\/\/(\/(?=[A-Za-z]:))?/, "")`, which drops
+the third slash only before a Windows drive letter. This broke Backup/Restore/Export on Linux.
 
 ### Performance constraints to preserve
 

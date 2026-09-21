@@ -52,6 +52,63 @@ Window {
     // future FloatingPane subclass can opt in, not just square ones.
     property real fixedAspectRatio: 0
 
+    // Kiosk mode -- driven by the owner (Main.qml: true exactly while the main
+    // window is fullscreen), never set by the pane itself. While true the pane
+    // is topmost, so it can be placed over the OS taskbar (which is otherwise
+    // always above an ordinary window) and stays above the fullscreen main
+    // window. Visual only: nothing here blocks other applications. Leaving
+    // fullscreen removes the hint again.
+    property bool kiosk: false
+    onKioskChanged: { if (kiosk && visible) raise() }
+
+    // Topmost is not enough on Windows: the taskbar is topmost too, and the
+    // shell puts it back on top of that band whenever the foreground window
+    // changes (e.g. clicking the fullscreen main window on the other display),
+    // which covers a kiosk pane again. raise() puts the pane back on top without
+    // activating it. Three layers, because the shell re-sorts a moment AFTER a
+    // focus change and can also do it for reasons we never see:
+    //   1. kioskBurst(): raise now and three more times, 80 ms apart. Called when
+    //      this pane loses focus (below) and by Main.qml when the main window
+    //      is activated.
+    //   2. kioskRaiseTimer: a slow safety net (taskbar clicked, another app
+    //      popped up).
+    // Neither skips a focused pane: being the focused window does not keep a
+    // topmost pane above the taskbar (measured: the taskbar covered a focused
+    // pane).
+    //
+    // The trigger is activeFocusItem, NOT Window.active: the panes are
+    // transient children of the main window and Qt counts a window as active
+    // while any window in its transient chain has focus, so `active` was
+    // measured to stay true on BOTH windows however focus moved (it fires but
+    // never goes false). activeFocusItem follows the real OS focus window
+    // (measured: it alternates cleanly between the main window and a pane).
+    function kioskBurst() {
+        if (!kiosk || !visible) return
+        kioskBurstTimer.n = 0
+        kioskBurstTimer.restart()
+    }
+    onActiveFocusItemChanged: { if (activeFocusItem === null) kioskBurst() }
+
+    Timer {
+        id: kioskBurstTimer
+        interval: 80
+        repeat: true
+        triggeredOnStart: true
+        property int n: 0
+        onTriggered: {
+            pane.raise()
+            if (++n >= 4) stop()
+        }
+    }
+
+    Timer {
+        id: kioskRaiseTimer
+        interval: 400
+        repeat: true
+        running: pane.kiosk && pane.visible
+        onTriggered: pane.raise()
+    }
+
     // NoDropShadowWindowHint removes Qt's own drop shadow on the frameless
     // window; WindowChrome.prepareWindow() below (native, no QML equivalent
     // exists) requests an alpha-capable surface before the native window is
@@ -60,6 +117,33 @@ Window {
     // why a QML `color` binding alone isn't reliable here) and removes
     // Windows 11's default DWM window border on top of that.
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
+           | (kiosk ? Qt.WindowStaysOnTopHint : 0)
+
+    // The logical rect ({x, y, width, height}, same virtual-desktop
+    // coordinates as this pane's own x/y) of the screen the pane is on right
+    // now: the screen containing its center, else the one it overlaps most,
+    // else the first. Used instead of the `Screen` attached property, which
+    // did not follow the pane across displays -- F10 (Milkdrop fullscreen)
+    // and the double-click placements always went to the main display.
+    function currentScreenRect() {
+        const screens = Qt.application.screens
+        const cx = pane.x + pane.width  / 2
+        const cy = pane.y + pane.height / 2
+        let best = null
+        let bestArea = -1
+        for (let i = 0; i < screens.length; i++) {
+            const s = screens[i]
+            if (cx >= s.virtualX && cx < s.virtualX + s.width &&
+                cy >= s.virtualY && cy < s.virtualY + s.height)
+                return { x: s.virtualX, y: s.virtualY, width: s.width, height: s.height }
+            const ox = Math.max(0, Math.min(pane.x + pane.width,  s.virtualX + s.width)  - Math.max(pane.x, s.virtualX))
+            const oy = Math.max(0, Math.min(pane.y + pane.height, s.virtualY + s.height) - Math.max(pane.y, s.virtualY))
+            if (ox * oy > bestArea) { bestArea = ox * oy; best = s }
+        }
+        if (best)
+            return { x: best.virtualX, y: best.virtualY, width: best.width, height: best.height }
+        return { x: Screen.virtualX, y: Screen.virtualY, width: Screen.width, height: Screen.height }
+    }
     minimumWidth:  minPaneWidth
     minimumHeight: minPaneHeight
 

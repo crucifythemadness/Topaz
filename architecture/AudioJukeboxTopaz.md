@@ -660,7 +660,7 @@ Topaz module
 |                         Playlist row 1: NEW | LOAD (disabled whenever an AUTO PLAY session is active; when enabled, clears active playlist first if one is loaded, then opens file dialog)
 |                         Playlist row 2: EXPORT (permanently disabled — not yet implemented) | REMOVE (active only when playlist loaded AND queue-clear is allowed; routes through autoPlay.clearQueueAndHistory())
 │                         signal newPlaylistRequested()  ← “+ NEW” button click
-└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all; autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16)
+└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all (together with autoPlay.genreRequirementMet/ratingRequirementMet, but those only while no session is running); autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16)
                           signal tagInfoToggleRequested()  ← TAG INFORMATION button click; property tagInfoPaneOpen (bound from Main.qml) drives its on/off color — same "dumb button, owner decides" split as scanRequested()/scanning, see UC-18
                           signal audioVisualizerToggleRequested()  ← AUDIO VISUALIZER button click; property audioVisualizerPaneOpen (bound from Main.qml) drives its on/off color — same split, see UC-19
                           signal milkdropToggleRequested()  ← MILKDROP button click; property milkdropPaneOpen (bound from Main.qml) drives its on/off color — same split, see UC-20
@@ -877,6 +877,58 @@ the minimal container). This is the first genuinely verified (not just
 statically reviewed) confirmation that the whole Linux port initiative
 actually works.
 
+**Linux port, step 5 — real-hardware integration test (Linux Mint 22.2
+X11/NVIDIA, Ubuntu Studio Wayland)**: the first test on physical machines
+(via the self-contained `deploy-linux/` folder — see `CLAUDE.md`) found OS
+volume, library scan, BASS, AUTO PLAY, playlists and the Setup dialog all
+working, and four problems:
+
+- **Backup / Restore / Export Playlist could not write** — a real bug, not a
+  permissions problem. The three dialogs converted the `FolderDialog`/
+  `FileDialog` URL with `substring(8)` after `file:///`, right on Windows
+  (`file:///C:/x` → `C:/x`) but wrong on Linux (`file:///media/usb/x` →
+  `media/usb/x`, a *relative* path, so Topaz wrote relative to its own
+  working directory instead of the chosen folder). Library scanning had
+  worked because it hands the raw URL to C++ (`QUrl::toLocalFile()`).
+  Fixed in all three dialogs with
+  `s.replace(/^file:\/\/(\/(?=[A-Za-z]:))?/, "")`, which drops the third
+  slash only when a Windows drive letter follows; `NowPlaying.qml`'s
+  `"file:///" + playlistDirectory()` got the matching fix (four slashes on
+  Linux). **Rule for new code: never strip `file:///` by a fixed length —
+  pass the URL to C++ or use that regex.**
+- **No app icon on Linux** — nothing set a window icon (Windows gets it from
+  the `app.rc` resource only). `main.cpp` now calls
+  `setWindowIcon(QIcon(":/Topaz/app.ico"))` and
+  `setDesktopFileName("topaz")` under `#ifndef Q_OS_WIN` (Windows unchanged),
+  and `deploy-linux/` ships `topaz.png` + `install-topaz-launcher.sh`
+  (`packaging/linux/`), which writes `~/.local/share/applications/topaz.desktop`
+  so the app menu/panel/Wayland get an icon too.
+- **Config folder was `~/.config/topaz-bin/`** — Topaz never set an
+  application name, so Qt derived it from the executable's filename
+  (`Topaz.exe` → `Topaz` on Windows; the renamed `topaz-bin` on Linux, which
+  also fed `WM_CLASS`/the Wayland app id). `main.cpp` now calls
+  `setApplicationName("Topaz")` on every platform (a no-op on Windows, where
+  it already resolved to `Topaz`; config stays at `%LOCALAPPDATA%\Topaz\`).
+  Linux config/library cache is now `~/.config/Topaz/`; data from the earlier
+  test builds under `~/.config/topaz-bin/` is not migrated (`mv` it over).
+- **Milkdrop failed on Ubuntu Studio** — that machine's driver could not
+  provide the OpenGL 3.3 Core Profile Milkdrop needs (see UC-20 for the
+  requirement and the improved failure reporting).
+- **Audio Visualizer pane opened but drew nothing on Mint (X11/NVIDIA), while
+  working on Ubuntu Studio (Wayland)** — cause **not yet determined**. The
+  "Wayland-only" theory is unproven: the two machines also differ in GPU/
+  driver and audio server, and the visualizer's audio input
+  (`PlaybackEngine::audioBufferAvailable`, `Float`/`Int16` only) and pane
+  creation (`FloatingPane` → `WindowChrome::prepareWindow()`) are identical to
+  Milkdrop's, which does render on Mint. One-shot terminal diagnostics were
+  added to split the possibilities without another blind round-trip:
+  `WindowChrome::prepareWindow()` logs the platform, the alpha channel
+  requested vs *granted* by the native window, the scene graph's graphics API
+  and any scene graph error; `AudioVisualizerController` logs the first audio
+  buffer's format, the first non-zero bar level ("analysis works, so it is a
+  drawing problem") and — instead of silently skipping — a warning when a
+  sample format is unsupported.
+
 ### TagReader — supported formats
 
 | Format | Tag standard | Fields read |
@@ -957,7 +1009,9 @@ current track changes (see `PlaybackEngine::currentLargeCoverSource`).
 | `scanProgress` | 0–100 completion percentage |
 | `trackCount` | Number of tracks currently in the model |
 | `albumCount` | Number of distinct albums currently in the model (canonicalized by trimmed+lowercased `albumArtist\|album`, same normalization as `buildLibraryTree()`). Recomputed in one O(N_tracks) pass whenever `applyTracks()` replaces `m_tracks` (cache load / scan complete) — not recomputed per read. Shown on the About dialog's TOPAZ tab. |
-| `ratingCount` | Number of tracks in the model with a rating set (`rating > 0`). Recomputed alongside `albumCount` in the same `applyTracks()` pass. Shown on the About dialog's TOPAZ tab (red dot, `Theme.error` — same accent `PlaylistViewer`'s OFFLINE indicator uses). |
+| `ratingCount` | Number of tracks in the model with a rating set (`rating > 0`). Recomputed alongside `albumCount` in the same `applyTracks()` pass, and again by `applyRating()` whenever a rating changes at runtime (`updateRatingCount()`). Shown on the About dialog's TOPAZ tab (red dot, `Theme.error` — same accent `PlaylistViewer`'s OFFLINE indicator uses). |
+| `applyRating(ratingId, rating)` | invokable. Applies a rating just stored at runtime (a star click / rating deletion in `NowPlaying`, forwarded from `PlaybackEngine::ratingStored` by a `Connections` block in `Main.qml`) to every library track carrying that `ratingId`; `rating` 0 = removed. Updates `ratingCount` and emits `ratingsChanged()`. Before this, ratings reached `m_tracks` only through scan-time enrichment, so a rating given during a session was invisible to AUTO PLAY until the next scan. Does not touch `Topaz.library.json` (`Topaz.rating.json` stays authoritative; a scan re-applies it). |
+| `autoPlayCandidateCount(activeGenres, considerGenre, considerRating, minimumRating)` | C++-only. How many tracks `autoPlayCandidatePool()` would return for the same arguments, via the same shared `passesAutoPlayFilters()` helper (so the two can't disagree), without building per-track maps. Backs `AutoPlayController::ratingRequirementMet`. |
 | `ratingsReady` | `true` once a scan (full or stat-check) has completed at least once in this session with rating enrichment applied (see UC-14). Gates the AUTO PLAY button in `BottomBar`; never reset back to `false`. |
 | `loadCacheAndStartStatCheck()` | Load cache instantly, then dispatch stat-check |
 | `startFullScan()` | Trigger a full rescan on the worker thread |
@@ -1413,19 +1467,18 @@ sniffing has been replaced by an explicit `AppConfig.startFullscreen` bool
 (Setup → MISC → "Start Topaz in Full Screen", default **off**/Windowed — see
 UC-24's MISC tab and the Config file format section below).
 
-**Startup logic** (`Main.qml`):
-```qml
-visibility: appConfig.startFullscreen ? Window.FullScreen : Window.Windowed
-width:  1920
-height: 1080
-minimumWidth:  1280
-minimumHeight:  720
-```
+**Startup logic** (`Main.qml`): the root window starts hidden
+(`visibility: Window.Hidden`, `minimumWidth: 1280`, `minimumHeight: 720`, no
+`width`/`height`/`visible` bindings). Its `Component.onCompleted` restores the
+saved screen, size and position and only then shows it with
+`root.visibility = appConfig.startFullscreen ? Window.FullScreen : Window.Windowed`
+— see "Layout persistence" below for why the order matters.
 
-> Topaz starts Windowed at 1920×1080 by default, on every resolution. The
-> user opts into fullscreen startup via Setup → MISC; the toggle takes
-> effect on the next launch. AlbumBrowser absorbs surplus width as the user
-> resizes, regardless of startup mode.
+> Topaz starts Windowed at 1920×1080 by default (the `windowWidth`/
+> `windowHeight` defaults), on every resolution. The user opts into fullscreen
+> startup via Setup → MISC; the toggle takes effect on the next launch.
+> AlbumBrowser absorbs surplus width as the user resizes, regardless of
+> startup mode.
 
 ### Panel layout — `SplitView`
 
@@ -1471,42 +1524,80 @@ overwritten (fullscreen collapses `x`/`y` to the screen origin and `width`/
 `height` to the screen resolution, which must not clobber the last windowed
 geometry) — `windowScreenName` is the one exception, refreshed regardless of
 fullscreen state, since monitor identity is meaningful in both modes.
+Nothing is persisted at all until `settleTimer` (~1.2 s after the window is
+shown) has fired (`Main.layoutSettled`), so transient startup geometry — a DPI
+re-scale, a `SplitView` squeeze — can never overwrite what the user configured.
 
 **Restore mechanism** — On startup, `AppConfig::load()` reads these values
 from JSON (falling back to the design-baseline defaults when absent, or to
 `windowPositionConfigured: false` on a fresh config — same "never positioned
 yet, let the platform place it" convention as `bigCoverPaneConfigured`, see
-below). `Main.qml` binds `width: appConfig.windowWidth` and
-`height: appConfig.windowHeight` declaratively, and each resizable panel
-binds `SplitView.preferredWidth` to the corresponding appConfig property.
-`SplitView` breaks those QML bindings the first time the user drags a handle,
-taking over management of `preferredWidth` from that point onward. Window
-*position* and *monitor* are restored imperatively instead, in the root
-`ApplicationWindow`'s `Component.onCompleted` (mirroring how the four
-detachable floating panes already restore their own geometry — see below):
-if `windowPositionConfigured` is true, the saved `windowScreenName` is
-resolved back to a live `Screen` object (`root.screenByName()`, a linear
-scan over `Qt.application.screens`, returns `null` if the monitor was
-unplugged/renamed since) and assigned to `root.screen` — this is what lets
-`Window.FullScreen` (see the `visibility` binding above) land on the correct
-monitor on a multi-monitor machine, since x/y alone only reliably determines
-the screen for *windowed* placement, not fullscreen. The saved `windowX`/
-`windowY` are then applied via `root.rectIntersectsAnyScreen()` (same helper
-the floating panes use) only if the saved rect still overlaps some connected
-screen. This restore logic runs synchronously during `engine.load()`, before
-`main.cpp`'s `app.exec()` starts the event loop that actually maps the
-native window to the OS, so it still takes effect even though `visibility`
-was already assigned earlier in the same construction pass via its own
-declarative binding — same ordering guarantee the floating panes already
-rely on.
+below). Each resizable panel binds `SplitView.preferredWidth` to the
+corresponding appConfig property; `SplitView` breaks those QML bindings the
+first time the user drags a handle, taking over management of
+`preferredWidth` from that point onward.
 
-Before this was added, the main window had no position/monitor persistence
-at all (only the floating panes did) — every launch opened wherever the
-platform/WM defaulted a new top-level window, and a saved `startFullscreen`
-preference had no monitor to anchor to on a multi-monitor machine, so it
-could open fullscreen on the wrong display. Found via real-hardware testing
-(Windows and a dual-monitor Linux Mint machine) and fixed as an ordinary
-cross-platform Qt/QML gap — no platform gating involved.
+The **main window** is restored in the root `ApplicationWindow`'s
+`Component.onCompleted`, and the *order* is the point. A QML `Window` is
+created and shown in its own `componentComplete()`, which runs **before**
+`Component.onCompleted`, so a window declared `visible: true` (as this one
+used to be) already exists, on the platform-default screen, by the time any
+restore code in `onCompleted` runs. That was wrong three ways: `Window.screen`
+assigned after creation moves nothing (Qt docs), so a fullscreen start could
+never reach the saved monitor; a position for a display with a different
+scale factor was converted with the *primary's* origin/scale (Qt's logical→
+native mapping is per screen), so on an additional display — especially one
+left of the main display, with negative coordinates — the window landed in
+the wrong place and was then re-scaled by the OS; and the resulting squeezed
+window made `SplitView` shrink the panels, whose transient widths were saved.
+(An earlier version of this section claimed the opposite — that `onCompleted`
+ran before native window creation, "the same ordering the floating panes rely
+on". It does for the panes, which declare `visible: false` and show themselves
+after positioning; it did not for the root window.) So the root is now hidden
+until restored, exactly like the panes:
+
+1. **Target screen**: a fullscreen start goes by the saved `windowScreenName`
+   (`screenByName()`, then the screen containing the saved rect's center,
+   `screenAtPoint()`); a windowed start by the rect's center first, then the
+   name. Identical monitor models (same `name`), renamed connectors and a
+   changed arrangement therefore no longer silently pick the primary display.
+2. **Size**: the saved `windowWidth`/`windowHeight`, clamped *down* to the
+   target screen's logical size (the primary if the saved monitor is gone),
+   never below `minimumWidth`/`minimumHeight`.
+3. **Position**: the saved `windowX`/`windowY` if at least **half** of that rect
+   is visible on the connected screens (`visibleFraction() >= 0.5`, shared with
+   the panes — an "overlaps at all" test restored a window saved on an unplugged
+   left display as a barely reachable sliver on the remaining one); if less is
+   visible but the target screen is known, centered on it; if the monitor is
+   gone, the platform default.
+4. Assign `root.screen`, then `width`/`height`, then `x`/`y` (all still on the
+   hidden window — assigning `width`/`height` here also replaces the old
+   `width: appConfig.windowWidth` bindings, which were what shrank a
+   fullscreen window ~0.5 s after entering fullscreen: every
+   `saveWindowPosition()` emits `windowGeometryChanged`, the NOTIFY of
+   `windowWidth`/`windowHeight`, re-evaluating them), and only then show the
+   window with `root.visibility = startFullscreen ? FullScreen : Windowed`.
+   The whole block is `try/finally` so the window is always shown even if the
+   restore throws.
+
+The window is hidden through `visibility: Window.Hidden`, **not**
+`visible: false`: declaring `visible` and later assigning `visibility` makes Qt
+log "Conflicting properties 'visible' and 'visibility'" and the window came up
+minimized (found in testing).
+
+`settleTimer` then logs where the window actually landed versus where it was
+restored to (`Main: window after startup: ...` on stderr, for multi-display /
+mixed-DPI reports) and, for a windowed start that is off by more than 8 px,
+re-applies the wanted geometry once (the window now lives on the right screen,
+so the mapping is correct). The logged screen name and `dpr` say which
+display it landed on.
+
+Before the position/monitor persistence existed, the main window had none at
+all (only the floating panes did) — every launch opened wherever the
+platform/WM defaulted a new top-level window. Found via real-hardware testing
+(Windows and a dual-monitor Linux Mint machine); the restore *order* above was
+found in a later round of dual-display testing (additional display to the
+left, different scaling per display).
 
 ## Performance Design
 
@@ -1621,8 +1712,11 @@ configurable via the app JSON config) will be introduced at that point.
       +buildLibraryTree(activeGenres) QVariantList
       +searchLibrary(query, mode, activeGenres, considerGenre, matchWholeWord) QVariantList
       +autoPlayCandidatePool(activeGenres, considerGenre, considerRating, minimumRating) QVariantList
+      +autoPlayCandidateCount(activeGenres, considerGenre, considerRating, minimumRating) int
+      +applyRating(ratingId, rating)
       +buildStandaloneTrackCards(tracks) QVariantList
       ~libraryRefreshed()
+      ~ratingsChanged()
     }
 
     class SearchData {
@@ -1707,6 +1801,7 @@ configurable via the app JSON config) will be introduced at that point.
       +manualQueueEditingAllowed bool
       +queueClearAllowed bool
       +genreRequirementMet bool
+      +ratingRequirementMet bool
       +playPauseAllowed bool
       +trackNavigationAllowed bool
       +toggle()
@@ -1716,6 +1811,7 @@ configurable via the app JSON config) will be introduced at that point.
       ~manualQueueEditingAllowedChanged()
       ~queueClearAllowedChanged()
       ~genreRequirementMetChanged()
+      ~ratingRequirementMetChanged()
       ~playPauseAllowedChanged()
       ~trackNavigationAllowedChanged()
       ~starved()
@@ -2041,8 +2137,9 @@ abstraction that makes this backend-agnostic.
 | `loadPlaylistTracks(tracks)` | invokable | Replaces the entire queue with `tracks` — used exclusively by the "load a playlist" flows (`NowPlaying`/`PlaylistViewer` LOAD buttons). Behaves exactly like `clearQueue()`+`addTracks(tracks)` unless `crossfadeEnabled` is on and a track is currently playing (and both it and the new first track exceed `crossfadeSeconds`), in which case it crossfades directly into the new playlist's first track instead of a hard stop-then-restart — see UC-23. |
 | `setActivePlaylistName(name)` | invokable | Set the active playlist file name (e.g. `"GothicRock01.xml"`). Resets `playlistLocked` to `false`. Called from `NewPlaylistDialog` after successful creation, and from the load-playlist flow. |
 | `setPlaylistLocked(locked)` | invokable | Set the lock state. When unlocked (`false`), immediately calls `playlistManager.rewritePlaylist()` so the file reflects any changes made while locked. |
-| `setCurrentRating(rating)` | invokable | Set the current track's rating (1-10; no-op otherwise or if no track is loaded). Updates the queue entry and calls `RatingCache::setRating(genre, ratingId, rating)` to persist immediately. |
-| `deleteCurrentRating()` | invokable | Permanently remove the current track's rating (no-op if no track is loaded or it has no rating). Resets the queue entry's rating to 0 and calls `RatingCache::removeRating(ratingId)` to persist immediately. See UC-29. |
+| `setCurrentRating(rating)` | invokable | Set the current track's rating (1-10; no-op otherwise or if no track is loaded). Updates the queue entry and calls `RatingCache::setRating(genre, ratingId, rating)` to persist immediately, then emits `currentRatingChanged()` and `ratingStored(ratingId, rating)`. |
+| `deleteCurrentRating()` | invokable | Permanently remove the current track's rating (no-op if no track is loaded or it has no rating). Resets the queue entry's rating to 0 and calls `RatingCache::removeRating(ratingId)` to persist immediately, then emits `currentRatingChanged()` and `ratingStored(ratingId, 0)`. See UC-29. |
+| `ratingStored(ratingId, rating)` | signal | Emitted right after a rating was written to / removed from `Topaz.rating.json` (`rating` 0 = removed). `Main.qml` forwards it to `LibraryModel::applyRating()`; `PlaybackEngine` deliberately knows nothing about `LibraryModel`. |
 | `trackList()` | invokable | Return all queued tracks as `QVariantList` of maps (`filePath`, `title`, `artist`, `albumArtist`, `album`, `trackNumber`, `durationMs`) — used by `PlaylistManager.createPlaylist()` |
 | `beginDragCursor()` | invokable | Pushes a system-wide `Qt::ForbiddenCursor` override via `QGuiApplication::setOverrideCursor()` — the default "not over a valid drop target" cursor for a drag gesture. Called by `AlbumCard` the moment a drag starts (> 8 px threshold). |
 | `setDragCursorAllowed(allowed)` | invokable | Changes the *shape* of the already-pushed override cursor between `Qt::DragCopyCursor` (`allowed=true`) and `Qt::ForbiddenCursor` (`allowed=false`) via `QGuiApplication::changeOverrideCursor()` — not a second push, so one `restoreOverrideCursor()` at drag end still correctly pops it. Called by `PlaybackQueue`'s `DropArea.onEntered`/`onExited`. |
@@ -2612,7 +2709,13 @@ If the wait still times out (e.g. a single slow file read on unresponsive I/O), 
    untouched. This is distinct from `RatingCache::save()` (a full-list overwrite used
    only by the scan-time bulk enrichment pass above).
 4. `currentRatingChanged()` fires; the star row updates immediately to show exactly `n`
-   filled stars.
+   filled stars. `PlaybackEngine` then emits `ratingStored(ratingId, n)`; a
+   `Connections` block in `Main.qml` forwards it to `LibraryModel::applyRating()`,
+   which updates every library track with that `ratingId`, `ratingCount`, and emits
+   `ratingsChanged()`. Without this step the library's own tracks kept their
+   scan-time ratings for the whole session, so a rating given now was invisible to
+   AUTO PLAY (its candidate pool and the button's Consider Rating gate) until the
+   next scan or restart. `deleteCurrentRating()` (UC-29) does the same with rating 0.
 5. When `NowPlaying` starts a different track (`PlaybackEngine::loadTrack()`, triggered
    by `playAt()`/`togglePlay()`/`next()`/`previous()`/`advanceToNext()` — every playback
    path funnels through it), `ratingId` is computed if still null and `rating` is always
@@ -3020,16 +3123,37 @@ itself reads) and forwarded as `autoPlay` to `BottomBar`, `AlbumBrowser`→`Albu
 
 ### Normal Flow — Start a session
 
-1. User clicks AUTO PLAY. The button is only clickable/green once **both**
-   `autoPlayReady` (`libraryModel.ratingsReady`) is `true` **and**
-   `autoPlay.genreRequirementMet` is `true` — the latter is always `true` when
-   `autoPlayConsiderGenre` is off, otherwise it requires
-   `activeGenreNames` (bound from `lib.activeGenreNames`) to be non-empty, since with
-   Consider Genre on and zero active genres AUTO PLAY could never find a single
-   eligible candidate. `BottomBar` combines both into a local `autoPlayGated`
-   property for its color and click-handler. `start()` re-checks
-   `genreRequirementMet()` itself (defense in depth) before doing anything else, so
-   it refuses to start regardless of how `toggle()` was invoked.
+1. User clicks AUTO PLAY. The button is only clickable/green once
+   `autoPlayReady` (`libraryModel.ratingsReady`) is `true` **and** the criteria leave
+   something to play:
+   - `autoPlay.genreRequirementMet` — always `true` when `autoPlayConsiderGenre` is
+     off, otherwise it requires `activeGenreNames` (bound from `lib.activeGenreNames`)
+     to be non-empty, since with Consider Genre on and zero active genres AUTO PLAY
+     could never find a single eligible candidate.
+   - `autoPlay.ratingRequirementMet` — always `true` when `autoPlayConsiderRating` is
+     off, otherwise `LibraryModel::autoPlayCandidateCount(activeGenreNames,
+     considerGenre, true, minimumRating) > 0`: at least one library track must pass
+     the very filters `pickNextCandidate()` will apply (Consider Genre included, so a
+     rated track in a *non-active* genre doesn't count; a minimum rating above every
+     rating in the library leaves nothing either). Before this gate existed, Consider
+     Rating with no qualifying rating left the button green: `start()` silently did
+     nothing on an empty/finished queue, and with something playing it activated and
+     starved on the first poll tick. The value is recomputed live — it re-notifies on
+     changes to Consider Rating / Minimum Rating / Consider Genre, to the active genres,
+     and to the library (`libraryRefreshed`, and `ratingsChanged` from a star click or
+     rating deletion, see UC-14), so rating a track this session turns the button
+     green without a rescan.
+
+   `BottomBar` combines these into a local `autoPlayGated` property for its color and
+   click-handler: `autoPlayReady && (!autoPlay || autoPlay.active || (genreRequirementMet
+   && ratingRequirementMet))`. **The criteria only guard *starting* a session** — the
+   `autoPlay.active` term keeps a running session's button live (red, clickable) even if
+   the criteria stop being met mid-session (all genres untoggled, a rating deleted, the
+   minimum raised); before this the same gate also disabled the click, so such a
+   session could no longer be stopped from the button. It then starves on its own at
+   the next top-up (below). `start()` re-checks `genreRequirementMet()` and
+   `ratingRequirementMet()` itself (defense in depth) before doing anything else, so it
+   refuses to start regardless of how `toggle()` was invoked.
 2. `BottomBar` calls `autoPlay.toggle()` → `start()`.
 3. `start()` clears the in-memory play-history (`QHash<QString /*filePath*/, int>
    m_playCounts`) — a fresh history every session.
@@ -3602,7 +3726,8 @@ left in when closed is what's restored next time it opens.
 
 ```qml
 property bool bigCoverPaneOpen: false
-function rectIntersectsAnyScreen(x, y, w, h) { ... }  // checked against Qt.application.screens
+function visibleFraction(x, y, w, h) { ... }          // share of the rect on Qt.application.screens
+function restorePaneGeometry(win, configured, sx, sy, sw, sh, defaultW, defaultH) { ... }
 
 Loader {
     id: bigCoverLoader
@@ -3615,14 +3740,12 @@ Loader {
 
     sourceComponent: BigCoverWindow {
         Component.onCompleted: {
-            if (appConfig.bigCoverPaneConfigured && root.rectIntersectsAnyScreen(...)) {
-                x = appConfig.bigCoverPaneX; y = appConfig.bigCoverPaneY
-                width = appConfig.bigCoverPaneWidth; height = appConfig.bigCoverPaneHeight
-            } else {
-                width = 400; height = 400   // centered-on-primary-screen default
-                x = Screen.virtualX + (Screen.width - width) / 2
-                y = Screen.virtualY + (Screen.height - height) / 2
-            }
+            // saved geometry (size clamped to its screen, >= half visible) or the
+            // 400x400 centered-on-primary default -- shared by all four panes
+            root.restorePaneGeometry(bigCoverWindow, appConfig.bigCoverPaneConfigured,
+                                     appConfig.bigCoverPaneX, appConfig.bigCoverPaneY,
+                                     appConfig.bigCoverPaneWidth, appConfig.bigCoverPaneHeight,
+                                     400, 400)
             visible = true
             raise(); requestActivate()
         }
@@ -3654,13 +3777,19 @@ Loader {
   set a property via a declarative binding at the point a `Component`'s root object is
   declared if that property's name is also an outer id — set it imperatively via
   `Loader.onLoaded`/`item.<prop> = <value>` instead.
-- **Screen validation on restore**: `rectIntersectsAnyScreen()` checks the saved rect
-  against every connected screen's geometry (`Qt.application.screens[i].virtualX/Y` +
-  `width`/`height`, the same virtual-desktop coordinate space `Window.x/y` use) —
+- **Screen validation on restore**: `Main.qml`'s `restorePaneGeometry()` (one shared
+  helper for all four panes — the four copies of this logic used to drift apart)
   guards against a monitor having been unplugged or rearranged since the pane was
-  last positioned. If it doesn't intersect anything currently connected, the pane
-  falls back to a centered default on the primary screen instead of restoring to a
-  now-inaccessible position.
+  last positioned. `visibleFraction()` sums the saved rect's overlap with every
+  connected screen's geometry (`Qt.application.screens[i].virtualX/Y` +
+  `width`/`height`, the same virtual-desktop coordinate space `Window.x/y` use);
+  the saved spot is only used if **at least half** of it is visible — the earlier
+  "overlaps at all" test restored a pane saved on an unplugged display as a
+  barely reachable sliver. Otherwise the pane falls back to a centered default on
+  the primary screen. The saved size is also clamped to the screen the pane lands
+  on (the one containing the saved rect's center), never below the pane's minimum
+  size, and scaled *uniformly* for an aspect-locked pane (Big Cover) so it stays
+  square.
 - **`raise()`/`requestActivate()` after `visible = true`**: without this, a newly
   created sibling window can render *behind* the main window when it's in exclusive
   fullscreen (`Window.FullScreen`, auto-triggered for exact-match screen
@@ -3855,7 +3984,7 @@ Exact structural mirror of the `bigCoverLoader` block from UC-17 (`tagInfoLoader
 `tagInfoPaneOpen` / `TagInfoWindow` in place of `bigCoverLoader` / `bigCoverPaneOpen`
 / `BigCoverWindow`), including the same `Loader.onLoaded: { item.engine = engine }`
 pattern (required for the same Component-root scoping reason as UC-17), the same
-`rectIntersectsAnyScreen()` reuse for geometry restore/validation, and the same
+`restorePaneGeometry()` reuse for geometry restore/validation, and the same
 `raise()`/`requestActivate()` after `visible = true`. Default size on first-ever-open
 (no saved geometry yet) is 500×230, centered on the primary screen.
 
@@ -4313,6 +4442,23 @@ Pipeline:
    requirement for reliable core-profile detection). Only once `glewInit()`
    succeeds does this step call `projectm_create()` (requires an
    already-current GL context) and `projectm_playlist_create()`.
+
+   **Minimum OpenGL: 3.3 Core Profile (GLSL 3.30).** That is what this step
+   requests (`setProfile(CoreProfile)` + `setVersion(3, 3)`) and what
+   projectM's own shaders are written for (`#version 330`; projectM's only
+   alternative is an OpenGL ES 3 build, `ENABLE_GLES`, Linux-only, which Topaz
+   does not use). `glxinfo -B | grep "core profile version"` (Mesa's
+   `mesa-utils`) shows what a Linux machine offers. Found on an Ubuntu Studio
+   test machine whose driver could not provide it. Failure handling: a failed
+   `create()`/`makeCurrent()` **or** a granted `format().version()` below 3.3
+   (Qt does not guarantee the granted format matches the request; the
+   *profile* field is deliberately not checked, so a driver that renders fine
+   is never rejected on a metadata technicality) sets `initFailed`, and
+   `MilkdropWindow.qml` shows a placeholder naming the requirement. Both
+   paths also log — via `logDiagnostic()`, so into `milkdrop_debug.log` — what
+   the driver actually offers when asked for nothing in particular
+   (`GL_VERSION`/`GL_RENDERER` of a default-format probe context), so a "too
+   old" report says *how* old.
 2. **Surface sizing** (`resizeSurface()`): resizes the render `QWindow`
    itself to the item's pixel size × `devicePixelRatio` (no custom FBO to
    recreate); `projectm_set_window_size()` kept in sync — projectM's own
@@ -5584,6 +5730,14 @@ every other stateful controller in this app).
     drive) on non-Windows builds until a real Linux port adds an actual
     check (e.g. reading `/sys/block/<dev>/removable`) — tracked as a
     Windows-only-for-now gap alongside `VolumePath`'s own platform notes.
+  - **Destination path from the folder picker**: `ExportPlaylistDialog`
+    converts `FolderDialog.selectedFolder` to a plain path with
+    `s.replace(/^file:\/\/(\/(?=[A-Za-z]:))?/, "")` (drop the third slash only
+    before a Windows drive letter). It used to `substring(8)` unconditionally,
+    which turned `file:///media/usb/x` into the *relative* path
+    `media/usb/x` on Linux — `analyzeDestination()` then reported the
+    (nonexistent, working-directory-relative) folder as "not writable". See
+    the "Linux port, step 5" note above.
   - Accepts both plain paths and `file://` URLs, same convention as
     `AppConfig::addFolder()`/`addMilkdropPresetFolder()`.
 - `Q_INVOKABLE qint64 computeRequiredBytes(const QVariantList &filePaths)` —
@@ -5791,6 +5945,18 @@ even for a huge library) — the same scale of work `MilkdropCleanupController`
 already does synchronously. `BackupRestoreController` therefore has no
 progress properties or `*Finished` signals; every `Q_INVOKABLE` call *is*
 the entire operation, answered synchronously in the same statement.
+
+**Dialog URL → path conversion (Linux fix)**: `BackupDialog` (destination
+folder) and `RestoreDialog` (zip file) convert the `FolderDialog`/`FileDialog`
+URL with `s.replace(/^file:\/\/(\/(?=[A-Za-z]:))?/, "")` — drop the third
+slash only when a Windows drive letter follows (`file:///C:/x` → `C:/x`,
+`file:///home/x` → `/home/x`). They originally used `substring(8)`, which
+on Linux produced a *relative* path (`media/usb/x`), so backups were written
+relative to Topaz's working directory and failed with "Could not write to the
+destination folder" — found in the first real-hardware Linux test (see
+"Linux port, step 5"). The C++ controllers themselves always handled URLs
+correctly (`normalizePath()` → `QUrl::toLocalFile()`); only the QML-side
+pre-conversion was Windows-specific.
 
 ### The zip contract
 
@@ -6041,28 +6207,121 @@ tab gains a third toggle row (after Backup/Restore): label "Start Topaz in
 Full Screen" + the same 48×24/18×18 pill switch already used for the
 PLAYBACK tab's Crossfade on/off row (`SetupDialog.qml`).
 
-`Main.qml`'s `visibility` binding on the root `ApplicationWindow` — formerly
-`Screen.width`/`Screen.height` checks against four fixed resolutions (see
-the "Supported Resolutions" section above) — is now simply
-`appConfig.startFullscreen ? Window.FullScreen : Window.Windowed`. The
-existing F11 `Shortcut` and the `saveLayoutTimer`'s fullscreen guard (skip
-persisting `windowWidth`/`windowHeight` while fullscreen) are both
-unchanged by this — F11 still imperatively reassigns `root.visibility` at
-runtime regardless of how the window started.
+`Main.qml`'s root `ApplicationWindow` — formerly `Screen.width`/`Screen.height`
+checks against four fixed resolutions (see the "Supported Resolutions"
+section above) — now shows itself once restored, with
+`root.visibility = appConfig.startFullscreen ? Window.FullScreen : Window.Windowed`
+(see "Layout persistence" for the whole startup sequence). The existing F11
+`Shortcut` and the `saveLayoutTimer`'s fullscreen guard (skip persisting
+`windowWidth`/`windowHeight` while fullscreen) are unchanged — F11 still
+imperatively reassigns `root.visibility` at runtime.
 
-**Multi-monitor fullscreen fix**: on a machine with more than one display,
-`Window.FullScreen` alone doesn't say *which* monitor to fill — without an
-explicit target, Qt falls back to whatever the platform picks as the
-default screen for a new window, which found a real bug on a dual-monitor
-Linux Mint test machine: Topaz opened fullscreen on the wrong monitor from
-the one it was last used on. Fixed by resolving the main window's last-used
-monitor (`AppConfig.windowScreenName`, captured whenever `root.screen`
-changes — see "Layout persistence" above) back to a live `Screen` object and
-assigning it to `root.screen` in `Component.onCompleted`, before the
-already-assigned `visibility` binding's `Window.FullScreen` is actually
-applied to the OS. See "Layout persistence" above for the full restore/save
-mechanism (shared with plain windowed-position restore, the fix for a
-related bug found in the same round of testing).
+**The toggle takes effect on the next launch, as documented above.** It used
+to be a live `visibility:` binding, which also flipped a *running* window when
+the switch was toggled in Setup (as long as F11 had not been pressed, which
+severs such a binding) — an undocumented side effect. The startup sequence now
+applies it once.
+
+**Multi-monitor fullscreen**: `Window.FullScreen` alone doesn't say *which*
+monitor to fill. The saved monitor (`AppConfig.windowScreenName`, refreshed
+whenever `root.screen` changes, even while fullscreen) is resolved back to a
+live `Screen` and assigned to `root.screen` **before** the window is created
+(see "Layout persistence" — assigning it after creation, as the first version
+of this fix did, moves nothing). A fullscreen start prefers that name and falls
+back to the screen containing the saved windowed rect.
+
+**Fullscreen fall-back bug (fixed)**: entering fullscreen — via F11 or at
+startup — used to snap the window back to its windowed size ~0.5 s later while
+keeping the borderless fullscreen style, because every position save emitted
+`windowGeometryChanged` and re-evaluated the old `width: appConfig.windowWidth`
+bindings. Those bindings no longer exist.
+
+### Cursor auto-hide in fullscreen
+
+While Topaz is fullscreen — via F11 *or* "Start Topaz in Full Screen", it is the
+same `root.visibility === Window.FullScreen` state — the mouse cursor hides after
+5 seconds without mouse activity and comes back as soon as the mouse is used, so
+it doesn't sit over the artwork on a kiosk/party display. Leaving fullscreen
+restores it immediately.
+
+`Main.qml` instantiates one `CursorAutoHider` (`cursorautohider.h/.cpp`,
+`QML_ELEMENT`) with `enabled: root.visibility === Window.FullScreen`,
+`idleSeconds: 5` (hardcoded; no Setup option). It is C++ because QML has no
+global cursor override and a per-item `cursorShape` cannot work for the main
+window (dozens of items set their own, and an overlay `MouseArea` would swallow
+clicks). Hiding is `QGuiApplication::setOverrideCursor(Qt::BlankCursor)`, which
+covers every Topaz window (main window, all four panes, dialogs) and overrides
+every item's own `cursorShape`; a `m_hidden` flag keeps the override stack
+balanced (pushed once, always popped on disable/destruction).
+
+Idle detection is an application-wide event filter, installed only while
+`enabled`, watching `MouseMove`, `MouseButtonPress/Release/DblClick` and `Wheel`
+on any Topaz window; it never consumes an event. A `MouseMove` only counts if the
+*global position changed*, so Qt's synthesized hover re-deliveries on a stationary
+cursor don't keep re-showing it. Activity shows the cursor and restarts a
+single-shot timer; when it fires the cursor is hidden unless a mouse button is
+held (a long press or slow drag is mouse use, so it re-checks later).
+
+Independent of, and compatible with, Milkdrop's own F10 idle-hide (2 s, per item
+via `FloatingPane.cursorHidden`): both blank the cursor and both undo it on
+mouse movement; with the main window windowed only the F10 one exists. Limits:
+only Topaz's own windows are affected (the OS taskbar, other applications and a
+native file dialog keep their normal cursor), and a hidden cursor stays hidden
+until the mouse moves, clicks or wheels. Verified on Windows through the real
+cursor handle (`GetCursorInfo`): hides after ~5 s idle, returns on a 6 px move,
+hides again, never hides when windowed, and reappears at once when fullscreen ends.
+
+### Kiosk mode (fullscreen + panes over the taskbar)
+
+While Topaz is fullscreen it is effectively a kiosk display (e.g. a party setup
+with the additional display showing the panes). `FloatingPane.kiosk` is set by
+`Main.qml` to `root.visibility === Window.FullScreen` for all four detachable
+panes (Big Cover, Tag Info, Audio Visualizer, Milkdrop); while true the pane's
+`flags` include `Qt.WindowStaysOnTopHint`, so it can be placed over the OS
+taskbar and stays above the fullscreen main window, and Milkdrop's F10 fills the
+whole display including the taskbar strip. Leaving fullscreen removes the hint;
+panes are then ordinary windows again ("and ONLY then"). It is visual only —
+nothing blocks other applications.
+
+**Topmost alone does not keep a pane above the taskbar (found on a dual-display
+setup, and reproduced on a single display).** The Windows taskbar is topmost
+too, and the shell puts it back on top of the topmost band whenever the
+foreground window changes — clicking the fullscreen Jukebox covered a pane that
+was sitting over the additional display's taskbar again. Measured with a
+Z-order probe (`EnumWindows`, top to bottom): a focused topmost pane was *still*
+below the taskbar after the shell re-raised it. So kiosk panes actively
+re-assert their stacking with `raise()` (which puts a topmost window back on top
+of the band without activating it):
+- `FloatingPane.kioskBurst()`: raise now, then three more times 80 ms apart (the
+  shell re-sorts a moment *after* the focus change). Triggered when the pane
+  loses keyboard focus, and by `Main.qml` when the main window gains it.
+- `kioskRaiseTimer`: a 400 ms safety net while kiosk and visible (taskbar
+  clicked, another app popped up).
+
+Both key on **`activeFocusItem`, not `Window.active`**: the panes are transient
+children of the main window, and Qt counts a window as active while any window in
+its transient chain has focus — `active` was measured to fire but stay `true` on
+*both* windows however the focus moved, so it can't detect "focus left this
+pane". `activeFocusItem` follows the real OS focus window (measured: it
+alternates cleanly). Measured effect: with the pane's focus moving to the main
+window and the taskbar re-raised immediately after, the pane was back on top
+within 130 ms in 5 of 5 tries (1–2 of 5 with the slow timer alone). Windows
+offers no way to permanently outrank the taskbar without UIAccess signing, so
+this is "re-assert quickly" (a brief flash is possible), not "pin".
+
+Other known limits: topmost also means the panes stay above other apps while in
+kiosk; on Linux the hint is `_NET_WM_STATE_ABOVE`, which many window managers
+(Cinnamon's panel) still stack *below* docks, so covering a panel there is
+unverified and may need a per-pane fullscreen state.
+
+### Which display a pane's F10 / double-click uses
+
+`Milkdrop`'s F10 fullscreen and the double-click placements (Big Cover / Milkdrop
+center-right-left cycle, Tag Info maximize-width) used the `Screen` attached
+property, which did not follow a pane dragged to another display — F10 always
+filled the main display. `FloatingPane.currentScreenRect()` now returns the
+logical rect of the screen containing the pane's center (fallback: largest
+overlap, then the first screen), and all of them use it.
 
 ## UC-29 Delete Rating for the Currently Playing Track (NowPlaying + MISC Tab)
 

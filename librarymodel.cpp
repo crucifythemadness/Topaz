@@ -437,6 +437,13 @@ void LibraryModel::applyTracks(QList<TrackInfo> &&tracks)
         emit albumCountChanged();
     }
 
+    updateRatingCount();
+
+    emit libraryRefreshed();
+}
+
+void LibraryModel::updateRatingCount()
+{
     int ratedCount = 0;
     for (const TrackInfo &t : std::as_const(m_tracks))
         if (t.rating > 0) ++ratedCount;
@@ -444,8 +451,24 @@ void LibraryModel::applyTracks(QList<TrackInfo> &&tracks)
         m_ratingCount = ratedCount;
         emit ratingCountChanged();
     }
+}
 
-    emit libraryRefreshed();
+void LibraryModel::applyRating(const QString &ratingId, int rating)
+{
+    const QUuid id = QUuid::fromString(ratingId);
+    if (id.isNull() || rating < 0 || rating > 10) return;
+
+    bool changed = false;
+    for (TrackInfo &t : m_tracks) {
+        if (t.ratingId == id && t.rating != rating) {
+            t.rating = rating;
+            changed = true;
+        }
+    }
+    if (!changed) return;
+
+    updateRatingCount();
+    emit ratingsChanged();
 }
 
 QStringList LibraryModel::genres() const
@@ -649,17 +672,55 @@ QVariantList LibraryModel::searchLibrary(const QString &query,
                                 albumBrowserSortByYear());
 }
 
+namespace {
+
+// The genre+rating filter shared by autoPlayCandidatePool() and
+// autoPlayCandidateCount(), so the AUTO PLAY button's "is there anything to
+// play" gate and the actual candidate selection can never disagree.
+QSet<QString> lowerCaseGenreSet(const QStringList &genres)
+{
+    QSet<QString> set;
+    set.reserve(genres.size());
+    for (const QString &g : genres)
+        set.insert(g.trimmed().toLower());
+    return set;
+}
+
+bool passesAutoPlayFilters(const TrackInfo &t,
+                           bool considerGenre, const QSet<QString> &activeGenresLower,
+                           bool considerRating, int minimumRating)
+{
+    if (considerGenre && !activeGenresLower.contains(t.genre.trimmed().toLower()))
+        return false;
+    if (considerRating && t.rating < minimumRating)
+        return false;
+    return true;
+}
+
+} // namespace
+
+int LibraryModel::autoPlayCandidateCount(const QStringList &activeGenres,
+                                          bool considerGenre,
+                                          bool considerRating,
+                                          int  minimumRating) const
+{
+    const QSet<QString> activeGenresLower =
+        considerGenre ? lowerCaseGenreSet(activeGenres) : QSet<QString>();
+
+    int count = 0;
+    for (const TrackInfo &t : std::as_const(m_tracks))
+        if (passesAutoPlayFilters(t, considerGenre, activeGenresLower, considerRating, minimumRating))
+            ++count;
+    return count;
+}
+
 QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres,
                                                   bool considerGenre,
                                                   bool considerRating,
                                                   int  minimumRating) const
 {
-    QSet<QString> activeGenresLower;
-    if (considerGenre) {
-        activeGenresLower.reserve(activeGenres.size());
-        for (const QString &g : activeGenres)
-            activeGenresLower.insert(g.trimmed().toLower());
-    }
+    const QSet<QString> activeGenresLower =
+        considerGenre ? lowerCaseGenreSet(activeGenres) : QSet<QString>();
 
     // Cover thumbnails are only stored on one representative track per album
     // (see TrackInfo comment) — build the per-album lookup once, same
@@ -677,9 +738,7 @@ QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres
 
     QVariantList result;
     for (const TrackInfo &t : std::as_const(m_tracks)) {
-        if (considerGenre && !activeGenresLower.contains(t.genre.trimmed().toLower()))
-            continue;
-        if (considerRating && t.rating < minimumRating)
+        if (!passesAutoPlayFilters(t, considerGenre, activeGenresLower, considerRating, minimumRating))
             continue;
 
         const QString key = t.genre.trimmed().toLower() + QChar('|')

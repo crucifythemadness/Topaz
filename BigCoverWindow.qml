@@ -39,11 +39,12 @@ FloatingPane {
             _restoreXCaptured = true
         }
         _hPositionState = (_hPositionState + 1) % 4
+        const scr = currentScreenRect()   // the display the pane is on, not the main one
         switch (_hPositionState) {
-        case 1: x = Screen.virtualX + (Screen.width - width) / 2; break  // center
-        case 2: x = Screen.virtualX + Screen.width - width;        break  // right edge
-        case 3: x = Screen.virtualX;                                break  // left edge
-        case 0: x = _restoreX;                                      break  // original
+        case 1: x = scr.x + (scr.width - width) / 2; break  // center
+        case 2: x = scr.x + scr.width - width;       break  // right edge
+        case 3: x = scr.x;                           break  // left edge
+        case 0: x = _restoreX;                       break  // original
         }
     }
 

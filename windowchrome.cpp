@@ -1,6 +1,8 @@
 #include "windowchrome.h"
 
+#include <QGuiApplication>
 #include <QQuickWindow>
+#include <QSGRendererInterface>
 #include <QSurfaceFormat>
 #include <QDebug>
 
@@ -41,6 +43,34 @@ void WindowChrome::prepareWindow(QQuickWindow *window)
 
     // Step 2: create the native window now, with that format.
     window->create();
+
+    // One-shot terminal diagnostics for "the pane opens but nothing is drawn"
+    // reports (seen on X11/NVIDIA): what platform this is, whether the native
+    // window actually got the alpha channel requested above, which graphics API
+    // the scene graph ended up on, and any scene graph failure. window->format()
+    // after create() is the format actually granted, not the one requested.
+    qInfo() << "WindowChrome: platform" << QGuiApplication::platformName()
+            << "| alpha buffer requested 8, granted" << window->format().alphaBufferSize();
+    QObject::connect(window, &QQuickWindow::sceneGraphInitialized, window, [window]() {
+        const QSGRendererInterface *ri = window->rendererInterface();
+        const char *api = "unknown";
+        if (ri) {
+            switch (ri->graphicsApi()) {
+            case QSGRendererInterface::Software:    api = "Software";    break;
+            case QSGRendererInterface::OpenGL:      api = "OpenGL";      break;
+            case QSGRendererInterface::Direct3D11:  api = "Direct3D11";  break;
+            case QSGRendererInterface::Vulkan:      api = "Vulkan";      break;
+            case QSGRendererInterface::Metal:       api = "Metal";       break;
+            case QSGRendererInterface::Null:        api = "Null";        break;
+            default: break;
+            }
+        }
+        qInfo() << "WindowChrome: scene graph initialized, graphics API" << api;
+    });
+    QObject::connect(window, &QQuickWindow::sceneGraphError, window,
+                     [](QQuickWindow::SceneGraphError, const QString &message) {
+        qWarning() << "WindowChrome: scene graph error:" << message;
+    });
 
 #ifdef Q_OS_WIN
     // Step 3: only now does a real HWND exist to remove Windows 11's default

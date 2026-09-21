@@ -64,6 +64,16 @@ class AutoPlayController : public QObject
     // genre. Gates BottomBar's AUTO PLAY button (grey when false) in addition
     // to the existing autoPlayReady/ratingsReady gate.
     Q_PROPERTY(bool genreRequirementMet READ genreRequirementMet NOTIFY genreRequirementMetChanged)
+    // Whether the rating criterion for starting a session is satisfied: always
+    // true when Consider Rating is off; otherwise at least one library track
+    // must pass the current genre+rating filters (the same ones
+    // pickNextCandidate() uses -- so it is also false when a minimum rating
+    // above every rating in the library, or a genre/rating combination, leaves
+    // nothing to play). Recomputed live from the library, so a rating given
+    // this session counts at once. Gates BottomBar's AUTO PLAY button (grey
+    // when false) alongside genreRequirementMet, and only while no session is
+    // active -- see BottomBar.qml.
+    Q_PROPERTY(bool ratingRequirementMet READ ratingRequirementMet NOTIFY ratingRequirementMetChanged)
     // Whether NowPlaying's Play/Pause button may be used. Always true outside
     // an active session or when Allow Manual Modification is on; during a
     // restricted session, follows AppConfig::autoPlayTransportAccess (true
@@ -88,6 +98,7 @@ public:
     bool manualQueueEditingAllowed() const;
     bool queueClearAllowed() const { return !m_active; }
     bool genreRequirementMet() const;
+    bool ratingRequirementMet() const;
     bool playPauseAllowed() const;
     bool trackNavigationAllowed() const;
 
@@ -119,6 +130,7 @@ signals:
     void manualQueueEditingAllowedChanged();
     void queueClearAllowedChanged();
     void genreRequirementMetChanged();
+    void ratingRequirementMetChanged();
     void playPauseAllowedChanged();
     void trackNavigationAllowedChanged();
     // Emitted only when a session stops because no eligible track could be

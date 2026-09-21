@@ -98,8 +98,9 @@ Popup {
         fileMode: FileDialog.OpenFile
         onAccepted: {
             let s = zipFileDialog.selectedFile.toString()
-            if (s.indexOf("file:///") === 0)      s = s.substring(8)
-            else if (s.indexOf("file://") === 0)  s = s.substring(7)
+            // file:///C:/x -> C:/x (Windows); file:///home/x -> /home/x (Linux) --
+            // only drop the third slash when a drive letter follows it.
+            s = s.replace(/^file:\/\/(\/(?=[A-Za-z]:))?/, "")
             root.zipPath = decodeURIComponent(s)
         }
     }

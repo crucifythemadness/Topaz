@@ -52,6 +52,17 @@ bool AutoPlayController::genreRequirementMet() const
     return !m_activeGenreNames.isEmpty();
 }
 
+bool AutoPlayController::ratingRequirementMet() const
+{
+    if (!m_appConfig || !m_appConfig->autoPlayConsiderRating()) return true;
+    // No library to look at means nothing can qualify.
+    if (!m_libraryModel) return false;
+    return m_libraryModel->autoPlayCandidateCount(m_activeGenreNames,
+                                                  m_appConfig->autoPlayConsiderGenre(),
+                                                  true,
+                                                  m_appConfig->autoPlayMinimumRating()) > 0;
+}
+
 bool AutoPlayController::playPauseAllowed() const
 {
     if (!m_active || manualQueueEditingAllowed()) return true;
@@ -86,8 +97,19 @@ void AutoPlayController::setEngine(PlaybackEngine *engine)
 void AutoPlayController::setLibraryModel(LibraryModel *model)
 {
     if (m_libraryModel == model) return;
+    if (m_libraryModel) m_libraryModel->disconnect(this);
     m_libraryModel = model;
+    if (m_libraryModel) {
+        // ratingRequirementMet depends on the library's rating distribution:
+        // a scan/cache load (libraryRefreshed) or a live star click / rating
+        // deletion (ratingsChanged) can each flip it.
+        connect(m_libraryModel, &LibraryModel::libraryRefreshed,
+                this, &AutoPlayController::ratingRequirementMetChanged);
+        connect(m_libraryModel, &LibraryModel::ratingsChanged,
+                this, &AutoPlayController::ratingRequirementMetChanged);
+    }
     emit libraryModelChanged();
+    emit ratingRequirementMetChanged();
 }
 
 void AutoPlayController::setAppConfig(AppConfig *cfg)
@@ -109,6 +131,14 @@ void AutoPlayController::setAppConfig(AppConfig *cfg)
                 this, &AutoPlayController::trackNavigationAllowedChanged);
         connect(m_appConfig, &AppConfig::autoPlayConsiderGenreChanged,
                 this, &AutoPlayController::genreRequirementMetChanged);
+        // The rating gate also depends on Consider Rating, the minimum rating,
+        // and (via the genre filter) Consider Genre.
+        connect(m_appConfig, &AppConfig::autoPlayConsiderGenreChanged,
+                this, &AutoPlayController::ratingRequirementMetChanged);
+        connect(m_appConfig, &AppConfig::autoPlayConsiderRatingChanged,
+                this, &AutoPlayController::ratingRequirementMetChanged);
+        connect(m_appConfig, &AppConfig::autoPlayMinimumRatingChanged,
+                this, &AutoPlayController::ratingRequirementMetChanged);
         connect(m_appConfig, &AppConfig::autoPlayTransportAccessChanged,
                 this, &AutoPlayController::playPauseAllowedChanged);
         connect(m_appConfig, &AppConfig::autoPlayTransportAccessChanged,
@@ -117,6 +147,7 @@ void AutoPlayController::setAppConfig(AppConfig *cfg)
     emit appConfigChanged();
     emit manualQueueEditingAllowedChanged();
     emit genreRequirementMetChanged();
+    emit ratingRequirementMetChanged();
     emit playPauseAllowedChanged();
     emit trackNavigationAllowedChanged();
 }
@@ -127,6 +158,7 @@ void AutoPlayController::setActiveGenreNames(const QStringList &names)
     m_activeGenreNames = names;
     emit activeGenreNamesChanged();
     emit genreRequirementMetChanged();
+    emit ratingRequirementMetChanged();
 }
 
 void AutoPlayController::toggle()
@@ -150,6 +182,7 @@ void AutoPlayController::start()
 {
     if (m_active || !m_engine || !m_appConfig || !m_libraryModel) return;
     if (!genreRequirementMet()) return;
+    if (!ratingRequirementMet()) return;
 
     m_playCounts.clear();   // fresh history for this session
 

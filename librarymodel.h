@@ -195,6 +195,27 @@ public:
                                                     bool considerRating,
                                                     int  minimumRating) const;
 
+    // How many tracks autoPlayCandidatePool() would return for the same
+    // arguments (same shared filter), without building the per-track maps.
+    // Gates the AUTO PLAY button -- see AutoPlayController::
+    // ratingRequirementMet(). Ignores the repeat-mode cap, which is
+    // per-session state, not a property of the library.
+    int autoPlayCandidateCount(const QStringList &activeGenres,
+                               bool considerGenre,
+                               bool considerRating,
+                               int  minimumRating) const;
+
+    // Applies a rating that was just stored at runtime (a star click or a
+    // rating deletion in NowPlaying) to the library's own tracks, so
+    // ratingCount and the AUTO PLAY candidate pool see it immediately instead
+    // of only after the next scan (ratings reach m_tracks otherwise only via
+    // scan-time enrichment, see UC-14). ratingId is a QUuid string (with or
+    // without braces); rating 0 means "rating removed". Every track sharing
+    // that ratingId is updated (duplicate pressings share one rating). Does
+    // not touch Topaz.library.json -- Topaz.rating.json stays authoritative
+    // and a scan re-applies it, exactly as before.
+    Q_INVOKABLE void applyRating(const QString &ratingId, int rating);
+
     // ── MISC tab: Remove Abandoned Ratings (see UC-24) ────────────────────
     // Removes every Topaz.rating.json entry whose ratingId matches no track
     // currently in the library (existence alone decides removal -- no
@@ -217,6 +238,12 @@ signals:
     void trackCountChanged();
     void albumCountChanged();
     void ratingCountChanged();
+    // Emitted by applyRating() whenever a track's rating actually changed in
+    // the library -- the trigger for anything derived from the rating
+    // distribution (AutoPlayController::ratingRequirementMet), which
+    // ratingCountChanged alone doesn't cover (a rating edit that keeps the
+    // count the same can still change which tracks pass a minimum rating).
+    void ratingsChanged();
     void ratingsReadyChanged();
     void removingAbandonedRatingsChanged();
     void abandonedRatingsProgressChanged();
@@ -255,6 +282,10 @@ private slots:
 
 private:
     void applyTracks(QList<TrackInfo> &&tracks);
+    // Recounts tracks with rating > 0 into m_ratingCount, emitting
+    // ratingCountChanged() only if it changed. Shared by applyTracks() and
+    // applyRating().
+    void updateRatingCount();
     void startWorkerThread();
     // m_appConfig->folders() filtered down to entries whose "active" key
     // (default true, see AppConfig::load()) is truthy -- used instead of

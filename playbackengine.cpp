@@ -637,6 +637,7 @@ void PlaybackEngine::setCurrentRating(int rating)
 
     RatingCache::setRating(t.genre, t.ratingId, t.rating);
     emit currentRatingChanged();
+    emit ratingStored(t.ratingId.toString(QUuid::WithoutBraces), t.rating);
 }
 
 void PlaybackEngine::deleteCurrentRating()
@@ -649,6 +650,7 @@ void PlaybackEngine::deleteCurrentRating()
     RatingCache::removeRating(t.ratingId);
     t.rating = 0;
     emit currentRatingChanged();
+    emit ratingStored(t.ratingId.toString(QUuid::WithoutBraces), 0);
 }
 
 QVariantList PlaybackEngine::trackList() const

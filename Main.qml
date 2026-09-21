@@ -5,24 +5,53 @@ import QtQuick.Window
 
 ApplicationWindow {
     id: root
-    width:  appConfig.windowWidth
-    height: appConfig.windowHeight
     minimumWidth:  1280
     minimumHeight:  720
-    visible: true
     title: qsTr("Topaz")
     color: Theme.surface
 
-    // Startup fullscreen/windowed is a user preference (Setup > MISC), not
-    // resolution-driven -- see AudioJukeboxTopaz.md's "Supported Resolutions"
-    // section.
-    visibility: appConfig.startFullscreen ? Window.FullScreen : Window.Windowed
+    // Deliberately hidden for now, and no width/height bindings: a QML Window
+    // is created and shown in its own componentComplete(), which runs BEFORE
+    // Component.onCompleted. Restoring the saved screen/position/size from
+    // there was therefore too late -- the native window already existed on the
+    // primary display, Window.screen assigned after creation moves nothing, and
+    // a position for a display with a different scale factor was converted with
+    // the primary's (wrong position and size after reopening on the additional
+    // display). The restore in Component.onCompleted below now runs first and
+    // then shows the window by assigning `visibility`, the same idea as the
+    // detachable panes (FloatingPane.qml), which start hidden and show
+    // themselves once positioned.
+    //
+    // Hidden via `visibility`, NOT `visible: false`: declaring both `visible`
+    // and (later) assigning `visibility` makes Qt log "Conflicting properties
+    // 'visible' and 'visibility'" and the window came up minimized.
+    //
+    // Startup fullscreen/windowed is a user preference (Setup > MISC, takes
+    // effect on the next launch -- UC-28), not resolution-driven.
+    visibility: Window.Hidden
+
+    // True once the startup geometry has settled (see settleTimer below) --
+    // until then saveLayoutTimer must not persist anything, so transient
+    // startup geometry (DPI re-scale, layout squeeze) never overwrites what
+    // the user configured.
+    property bool layoutSettled: false
 
     // F11 toggles between fullscreen and windowed.
     Shortcut {
         sequence: "F11"
         onActivated: root.visibility = (root.visibility === Window.FullScreen)
                      ? Window.Windowed : Window.FullScreen
+    }
+
+    // While fullscreen (F11 or "Start Topaz in Full Screen") the mouse cursor
+    // hides after 5 s without mouse activity and comes back as soon as the
+    // mouse is used, so it doesn't sit over the artwork on a kiosk display.
+    // Off (and the cursor restored at once) when leaving fullscreen. See
+    // cursorautohider.h.
+    CursorAutoHider {
+        id: cursorAutoHider
+        enabled: root.visibility === Window.FullScreen
+        idleSeconds: 5
     }
 
     // Vetoes closing while MilkdropCleanupController is mid-scan (see UC-25) --
@@ -48,19 +77,62 @@ ApplicationWindow {
     // FloatingPane.qml / BigCoverWindow.qml for the pane itself.
     property bool bigCoverPaneOpen: false
 
-    // True if rect (x,y,w,h), in virtual-desktop coordinates, overlaps at
-    // least one currently connected screen — used to validate a saved
-    // position before restoring it (a monitor may have been unplugged or
-    // rearranged since it was last saved).
-    function rectIntersectsAnyScreen(x, y, w, h) {
+    // Fraction (0..1) of rect (x, y, w, h), in virtual-desktop coordinates, that
+    // lies on the currently connected screens. A saved position only counts as
+    // usable when at least half of it is visible (see restorePaneGeometry() and
+    // the main window's restore): a monitor may have been unplugged or
+    // rearranged since it was last saved, and an "overlaps at all" test restored
+    // a window saved on an unplugged left display as a barely reachable sliver
+    // on the remaining one.
+    function visibleFraction(x, y, w, h) {
+        if (w <= 0 || h <= 0) return 0
         const screens = Qt.application.screens
+        let area = 0
         for (let i = 0; i < screens.length; i++) {
             const s = screens[i]
-            if (x < s.virtualX + s.width && x + w > s.virtualX &&
-                y < s.virtualY + s.height && y + h > s.virtualY)
-                return true
+            const ox = Math.max(0, Math.min(x + w, s.virtualX + s.width)  - Math.max(x, s.virtualX))
+            const oy = Math.max(0, Math.min(y + h, s.virtualY + s.height) - Math.max(y, s.virtualY))
+            area += ox * oy
         }
-        return false
+        return area / (w * h)
+    }
+
+    // Restores a detachable pane's saved geometry (or its centered default) onto
+    // `win` while it is still hidden. The saved size is clamped to the screen the
+    // pane lands on (never below its minimum; scaled uniformly for an
+    // aspect-locked pane so it stays square), and a saved spot that is less than
+    // half visible on the connected screens is treated as unusable (monitor
+    // unplugged or rearranged) and falls back to the default, centered on the
+    // primary display.
+    function restorePaneGeometry(win, configured, sx, sy, sw, sh, defaultW, defaultH) {
+        const screens = Qt.application.screens
+        if (configured && sw > 0 && sh > 0 && screens.length > 0) {
+            const scr = root.screenAtPoint(sx + sw / 2, sy + sh / 2) || screens[0]
+            let w = sw
+            let h = sh
+            if (win.fixedAspectRatio > 0) {
+                const k = Math.min(1, scr.width / sw, scr.height / sh)
+                w = sw * k
+                h = sh * k
+            } else {
+                w = Math.min(sw, scr.width)
+                h = Math.min(sh, scr.height)
+            }
+            w = Math.max(win.minPaneWidth,  w)
+            h = Math.max(win.minPaneHeight, h)
+            if (root.visibleFraction(sx, sy, w, h) >= 0.5) {
+                win.width  = w
+                win.height = h
+                win.x      = sx
+                win.y      = sy
+                return
+            }
+        }
+        const primary = screens[0]
+        win.width  = defaultW
+        win.height = defaultH
+        win.x = primary.virtualX + (primary.width  - defaultW) / 2
+        win.y = primary.virtualY + (primary.height - defaultH) / 2
     }
 
     // Resolves a saved Screen.name (e.g. from appConfig.windowScreenName) back
@@ -68,7 +140,7 @@ ApplicationWindow {
     // restore which monitor the main window (re-)enters Window.FullScreen on
     // at startup. Returns null for an empty/unmatched name (monitor unplugged
     // or renamed since last save), same "fall back to platform default"
-    // philosophy as rectIntersectsAnyScreen above.
+    // philosophy as visibleFraction above.
     function screenByName(name) {
         if (!name) return null
         const screens = Qt.application.screens
@@ -77,6 +149,31 @@ ApplicationWindow {
         }
         return null
     }
+
+    // The connected screen containing the point (px, py) in the same logical
+    // virtual-desktop coordinates visibleFraction() uses, or null.
+    // Unlike screenByName() this survives identical monitor models (same
+    // name), renamed connectors and changed arrangements.
+    function screenAtPoint(px, py) {
+        const screens = Qt.application.screens
+        for (let i = 0; i < screens.length; i++) {
+            const s = screens[i]
+            if (px >= s.virtualX && px < s.virtualX + s.width &&
+                py >= s.virtualY && py < s.virtualY + s.height)
+                return s
+        }
+        return null
+    }
+
+    // Geometry the startup restore wants, kept for settleTimer's self-check.
+    property bool   haveWanted:     false
+    property real   wantedX:        0
+    property real   wantedY:        0
+    property real   wantedWidth:    0
+    property real   wantedHeight:   0
+    property string wantedScreenName: ""
+    property bool   wantedFullscreen: false
+    property bool   selfCheckDone:  false
 
     Loader {
         id: bigCoverLoader
@@ -98,20 +195,15 @@ ApplicationWindow {
         sourceComponent: BigCoverWindow {
             id: bigCoverWindow
 
+            // Kiosk: only while Topaz itself is fullscreen may panes cover the
+            // OS taskbar (topmost) -- see FloatingPane.qml.
+            kiosk: root.visibility === Window.FullScreen
+
             Component.onCompleted: {
-                if (appConfig.bigCoverPaneConfigured &&
-                    root.rectIntersectsAnyScreen(appConfig.bigCoverPaneX, appConfig.bigCoverPaneY,
-                                                  appConfig.bigCoverPaneWidth, appConfig.bigCoverPaneHeight)) {
-                    width  = appConfig.bigCoverPaneWidth
-                    height = appConfig.bigCoverPaneHeight
-                    x      = appConfig.bigCoverPaneX
-                    y      = appConfig.bigCoverPaneY
-                } else {
-                    width  = 400
-                    height = 400
-                    x = Screen.virtualX + (Screen.width  - width)  / 2
-                    y = Screen.virtualY + (Screen.height - height) / 2
-                }
+                root.restorePaneGeometry(bigCoverWindow, appConfig.bigCoverPaneConfigured,
+                                         appConfig.bigCoverPaneX, appConfig.bigCoverPaneY,
+                                         appConfig.bigCoverPaneWidth, appConfig.bigCoverPaneHeight,
+                                         400, 400)
                 visible = true
                 // Without this, a newly created sibling window can end up
                 // hidden behind the main window when it's in exclusive
@@ -142,20 +234,13 @@ ApplicationWindow {
         sourceComponent: TagInfoWindow {
             id: tagInfoWindow
 
+            kiosk: root.visibility === Window.FullScreen
+
             Component.onCompleted: {
-                if (appConfig.tagInfoPaneConfigured &&
-                    root.rectIntersectsAnyScreen(appConfig.tagInfoPaneX, appConfig.tagInfoPaneY,
-                                                  appConfig.tagInfoPaneWidth, appConfig.tagInfoPaneHeight)) {
-                    width  = appConfig.tagInfoPaneWidth
-                    height = appConfig.tagInfoPaneHeight
-                    x      = appConfig.tagInfoPaneX
-                    y      = appConfig.tagInfoPaneY
-                } else {
-                    width  = 500
-                    height = 230
-                    x = Screen.virtualX + (Screen.width  - width)  / 2
-                    y = Screen.virtualY + (Screen.height - height) / 2
-                }
+                root.restorePaneGeometry(tagInfoWindow, appConfig.tagInfoPaneConfigured,
+                                         appConfig.tagInfoPaneX, appConfig.tagInfoPaneY,
+                                         appConfig.tagInfoPaneWidth, appConfig.tagInfoPaneHeight,
+                                         500, 230)
                 visible = true
                 raise()
                 requestActivate()
@@ -190,20 +275,13 @@ ApplicationWindow {
         sourceComponent: AudioVisualizerWindow {
             id: audioVisualizerWindow
 
+            kiosk: root.visibility === Window.FullScreen
+
             Component.onCompleted: {
-                if (appConfig.audioVisualizerPaneConfigured &&
-                    root.rectIntersectsAnyScreen(appConfig.audioVisualizerPaneX, appConfig.audioVisualizerPaneY,
-                                                  appConfig.audioVisualizerPaneWidth, appConfig.audioVisualizerPaneHeight)) {
-                    width  = appConfig.audioVisualizerPaneWidth
-                    height = appConfig.audioVisualizerPaneHeight
-                    x      = appConfig.audioVisualizerPaneX
-                    y      = appConfig.audioVisualizerPaneY
-                } else {
-                    width  = 500
-                    height = 260
-                    x = Screen.virtualX + (Screen.width  - width)  / 2
-                    y = Screen.virtualY + (Screen.height - height) / 2
-                }
+                root.restorePaneGeometry(audioVisualizerWindow, appConfig.audioVisualizerPaneConfigured,
+                                         appConfig.audioVisualizerPaneX, appConfig.audioVisualizerPaneY,
+                                         appConfig.audioVisualizerPaneWidth, appConfig.audioVisualizerPaneHeight,
+                                         500, 260)
                 visible = true
                 raise()
                 requestActivate()
@@ -237,20 +315,13 @@ ApplicationWindow {
         sourceComponent: MilkdropWindow {
             id: milkdropWindow
 
+            kiosk: root.visibility === Window.FullScreen
+
             Component.onCompleted: {
-                if (appConfig.milkdropPaneConfigured &&
-                    root.rectIntersectsAnyScreen(appConfig.milkdropPaneX, appConfig.milkdropPaneY,
-                                                  appConfig.milkdropPaneWidth, appConfig.milkdropPaneHeight)) {
-                    width  = appConfig.milkdropPaneWidth
-                    height = appConfig.milkdropPaneHeight
-                    x      = appConfig.milkdropPaneX
-                    y      = appConfig.milkdropPaneY
-                } else {
-                    width  = 560
-                    height = 360
-                    x = Screen.virtualX + (Screen.width  - width)  / 2
-                    y = Screen.virtualY + (Screen.height - height) / 2
-                }
+                root.restorePaneGeometry(milkdropWindow, appConfig.milkdropPaneConfigured,
+                                         appConfig.milkdropPaneX, appConfig.milkdropPaneY,
+                                         appConfig.milkdropPaneWidth, appConfig.milkdropPaneHeight,
+                                         560, 360)
                 visible = true
                 raise()
                 requestActivate()
@@ -299,6 +370,17 @@ ApplicationWindow {
     Connections {
         target: engine
         function onBassUnavailableFallback() { bassFallbackNoticeBox.open() }
+    }
+
+    // A rating just stored by NowPlaying (a star click or a rating deletion)
+    // reaches the library's own tracks right away, so ratingCount and the AUTO
+    // PLAY candidate pool -- and with them the AUTO PLAY button's "Consider
+    // Rating" gate -- don't have to wait for the next scan. Wired here, in the
+    // composition root, so PlaybackEngine and LibraryModel stay unaware of each
+    // other. See LibraryModel::applyRating() / UC-14.
+    Connections {
+        target: engine
+        function onRatingStored(ratingId, rating) { libraryModel.applyRating(ratingId, rating) }
     }
 
     // "MISSING TRACK" alert -- see UC-31. Genuine always-on-top top-level
@@ -407,26 +489,151 @@ ApplicationWindow {
         id: missingTracksDialog
     }
 
-    // Restore the main window's last windowed position + monitor (see
-    // AppConfig.windowX/Y/windowScreenName), then kick off cache load +
-    // background stat-check once QML engine is ready. Runs synchronously
-    // during engine.load(), before main.cpp's app.exec() starts the event
-    // loop that actually maps the native window to the OS — so this still
-    // takes effect before the user sees anything, even though `visibility`
-    // above was already assigned during the same construction pass. Setting
-    // root.screen explicitly (not just x/y) is what lets Window.FullScreen
-    // (see `visibility` above) land on the correct monitor — x/y alone only
-    // reliably determines the screen for windowed placement.
+    // Restore the main window's screen, size and position (see
+    // AppConfig.windowX/Y/windowScreenName/windowWidth/windowHeight), THEN show
+    // it -- the window is still hidden here (see `visible: false` at the top),
+    // so the native window is created on the right screen with the right
+    // geometry. Then kick off the cache load + background stat-check.
+    //
+    // Target screen: a fullscreen start goes by the saved screen name (the
+    // monitor it was fullscreen on), a windowed start by the screen the saved
+    // rect lies on; each falls back to the other. That way identical monitor
+    // models (same name), renamed connectors or a changed arrangement don't
+    // silently pick the primary display.
+    //
+    // try/finally: the window must ALWAYS end up shown, even if restoring
+    // throws -- an invisible app is the one outcome that can't be tolerated.
     Component.onCompleted: {
-        if (appConfig.windowPositionConfigured) {
-            const target = root.screenByName(appConfig.windowScreenName)
+        const wantFullscreen = appConfig.startFullscreen
+        let w = appConfig.windowWidth
+        let h = appConfig.windowHeight
+        let target = null
+        let haveXY = false
+        let px = 0
+        let py = 0
+
+        try {
+            if (appConfig.windowPositionConfigured) {
+                const byName = root.screenByName(appConfig.windowScreenName)
+                const byRect = root.screenAtPoint(appConfig.windowX + w / 2, appConfig.windowY + h / 2)
+                target = wantFullscreen ? (byName || byRect) : (byRect || byName)
+            }
+
+            // A saved size may no longer fit the monitor that's actually
+            // connected (e.g. last used on a 4K display, only a 1080p one
+            // remains) -- clamp down to the screen the window will be on, or
+            // the primary screen if the saved monitor is gone entirely. Never
+            // below the minimum window size.
+            const clampScreen = target || Qt.application.screens[0]
+            if (clampScreen) {
+                w = Math.max(root.minimumWidth,  Math.min(w, clampScreen.width))
+                h = Math.max(root.minimumHeight, Math.min(h, clampScreen.height))
+            }
+
+            if (appConfig.windowPositionConfigured) {
+                if (root.visibleFraction(appConfig.windowX, appConfig.windowY, w, h) >= 0.5) {
+                    px = appConfig.windowX
+                    py = appConfig.windowY
+                    haveXY = true
+                } else if (target) {
+                    // The saved spot is off every connected screen but the
+                    // screen itself is known: center on it. (If the saved
+                    // monitor is gone, the platform default position stands.)
+                    px = target.virtualX + (target.width  - w) / 2
+                    py = target.virtualY + (target.height - h) / 2
+                    haveXY = true
+                }
+            }
+
+            // Screen first (only meaningful before the native window exists),
+            // then size, then position -- all still on the hidden window.
             if (target) root.screen = target
-            if (root.rectIntersectsAnyScreen(appConfig.windowX, appConfig.windowY, root.width, root.height)) {
-                root.x = appConfig.windowX
-                root.y = appConfig.windowY
+            root.width  = w
+            root.height = h
+            if (haveXY) {
+                root.x = px
+                root.y = py
+            }
+
+            root.wantedX          = px
+            root.wantedY          = py
+            root.wantedWidth      = w
+            root.wantedHeight     = h
+            root.haveWanted       = haveXY
+            root.wantedScreenName = target ? target.name : ""
+            root.wantedFullscreen = wantFullscreen
+        } catch (e) {
+            console.warn("Main: restoring the window geometry failed, using platform defaults:", e)
+        } finally {
+            root.visibility = wantFullscreen ? Window.FullScreen : Window.Windowed
+            settleTimer.start()
+        }
+
+        libraryModel.loadCacheAndStartStatCheck()
+    }
+
+    // ~1.2s after the window is shown: the startup geometry has settled. Logs
+    // where the window actually ended up versus where the restore wanted it
+    // (terminal output, for multi-display/mixed-DPI reports), corrects it once
+    // if a windowed start didn't land where it was restored to (the window now
+    // lives on the right screen, so a second assignment maps correctly), and
+    // only then lets saveLayoutTimer persist anything -- so transient startup
+    // geometry (DPI re-scale, SplitView squeeze) can never overwrite what the
+    // user configured.
+    Timer {
+        id: settleTimer
+        interval: 1200
+        repeat:   false
+        onTriggered: {
+            const scr = root.screen
+            console.info("Main: window after startup: visibility=" + root.visibility
+                         + " screen=" + (scr ? scr.name : "?")
+                         + " dpr=" + (scr ? scr.devicePixelRatio : "?")
+                         + " pos=" + root.x + "," + root.y
+                         + " size=" + root.width + "x" + root.height
+                         + " | restored to: " + (root.haveWanted
+                              ? (root.wantedX + "," + root.wantedY + " " + root.wantedWidth + "x" + root.wantedHeight)
+                              : "(platform default)")
+                         + " on screen=" + root.wantedScreenName)
+
+            if (root.visibility !== Window.FullScreen && root.haveWanted && !root.selfCheckDone) {
+                root.selfCheckDone = true
+                if (Math.abs(root.x - root.wantedX) > 8 || Math.abs(root.y - root.wantedY) > 8
+                    || Math.abs(root.width - root.wantedWidth) > 8
+                    || Math.abs(root.height - root.wantedHeight) > 8) {
+                    console.info("Main: window is not where it was restored to, re-applying once")
+                    root.width  = root.wantedWidth
+                    root.height = root.wantedHeight
+                    root.x      = root.wantedX
+                    root.y      = root.wantedY
+                }
+            }
+            root.layoutSettled = true
+        }
+    }
+
+    // ── Kiosk: keep the panes above the taskbar ──────────────────────────
+    // While Topaz is fullscreen the panes are topmost (FloatingPane.kiosk), but
+    // the taskbar is topmost too, and Windows puts it back on top of that band
+    // whenever the foreground window changes -- e.g. clicking the fullscreen
+    // main window on the other display would cover a pane sitting over the
+    // additional display's taskbar again. Each pane re-raises itself (a short
+    // burst plus a slow safety timer, see FloatingPane.kioskBurst()); this is
+    // the trigger for the main window GAINING keyboard focus -- from a pane or
+    // from another application. It keys on activeFocusItem (none -> some), not on
+    // `active`: the panes are transient children of this window and `active`
+    // stays true on both windows however the focus moves (measured), whereas
+    // activeFocusItem follows the real OS focus window.
+    property bool mainHadFocus: false
+    onActiveFocusItemChanged: {
+        const hasFocus = root.activeFocusItem !== null
+        if (hasFocus && !root.mainHadFocus && root.visibility === Window.FullScreen) {
+            const loaders = [bigCoverLoader, tagInfoLoader, audioVisualizerLoader, milkdropLoader]
+            for (let i = 0; i < loaders.length; i++) {
+                if (loaders[i].item) loaders[i].item.kioskBurst()
             }
         }
-        libraryModel.loadCacheAndStartStatCheck()
+        root.mainHadFocus = hasFocus
     }
 
     // Persist layout (window size + panel widths + position/monitor) 500 ms
@@ -446,6 +653,10 @@ ApplicationWindow {
         interval: 500
         repeat:   false
         onTriggered: {
+            // Nothing is persisted until the startup geometry has settled --
+            // see settleTimer.
+            if (!root.layoutSettled) return
+
             const winW = (root.visibility !== Window.FullScreen)
                          ? root.width  : appConfig.windowWidth
             const winH = (root.visibility !== Window.FullScreen)

@@ -104,6 +104,8 @@ qt_add_executable(topaz
     systemvolumecontroller.cpp
     windowchrome.h
     windowchrome.cpp
+    cursorautohider.h
+    cursorautohider.cpp
     hiresaudiologo.h
     hiresaudiologo.cpp
     audiovisualizercontroller.h

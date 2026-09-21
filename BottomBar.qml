@@ -75,11 +75,18 @@ Rectangle {
                 readonly property bool isMilkdropBtn: modelData.label === "MILKDROP"
 
                 // AUTO PLAY is only ready once the library scan has completed
-                // AND (when Consider Genre is on) at least one genre is active
-                // — with Consider Genre on and zero active genres, AUTO PLAY
-                // could never find a single eligible candidate.
+                // AND its criteria leave something to play: (when Consider
+                // Genre is on) at least one genre is active, and (when Consider
+                // Rating is on) at least one track passes the rating filter --
+                // otherwise AUTO PLAY could never find a single eligible
+                // candidate. The two criteria only guard STARTING a session: a
+                // running session always keeps its button live, so it can
+                // still be stopped if the criteria stop being met mid-session
+                // (all genres untoggled, a rating deleted, the minimum raised);
+                // the session then starves by itself at the next top-up.
                 readonly property bool autoPlayGated:
-                    root.autoPlayReady && (!root.autoPlay || root.autoPlay.genreRequirementMet)
+                    root.autoPlayReady && (!root.autoPlay || root.autoPlay.active
+                        || (root.autoPlay.genreRequirementMet && root.autoPlay.ratingRequirementMet))
 
                 // Traffic-light color for AUTO PLAY (grey/green/red); every other
                 // button keeps its existing scanning/active/inactive coloring.

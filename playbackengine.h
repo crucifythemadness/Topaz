@@ -244,6 +244,14 @@ signals:
     void durationChanged();
     void currentTrackChanged();
     void currentRatingChanged();
+    // Emitted right after a rating was written to (or removed from)
+    // Topaz.rating.json by setCurrentRating()/deleteCurrentRating(), carrying
+    // the track's ratingId (QUuid string) and the new rating (0 = removed).
+    // Main.qml forwards it to LibraryModel::applyRating() so the library's
+    // own tracks -- and with them the AUTO PLAY candidate pool -- see the
+    // change without waiting for the next scan. PlaybackEngine deliberately
+    // knows nothing about LibraryModel.
+    void ratingStored(const QString &ratingId, int rating);
     void currentLargeCoverSourceChanged();
     void queueCountChanged();
     void activePlaylistNameChanged();

@@ -57,11 +57,12 @@ FloatingPane {
             _restoreXCaptured = true
         }
         _hPositionState = (_hPositionState + 1) % 4
+        const scr = currentScreenRect()   // the display the pane is on, not the main one
         switch (_hPositionState) {
-        case 1: x = Screen.virtualX + (Screen.width - width) / 2; break  // center
-        case 2: x = Screen.virtualX + Screen.width - width;        break  // right edge
-        case 3: x = Screen.virtualX;                                break  // left edge
-        case 0: x = _restoreX;                                      break  // original
+        case 1: x = scr.x + (scr.width - width) / 2; break  // center
+        case 2: x = scr.x + scr.width - width;       break  // right edge
+        case 3: x = scr.x;                           break  // left edge
+        case 0: x = _restoreX;                       break  // original
         }
     }
 
@@ -81,14 +82,18 @@ FloatingPane {
         sequence: "F10"
         onActivated: {
             if (!mdWindow._isFullscreen) {
+                // Fill the display the pane is on right now (measured before
+                // it moves), not the main display. In kiosk mode the pane is
+                // topmost, so this covers the taskbar strip too.
+                const scr = mdWindow.currentScreenRect()
                 mdWindow._preFullscreenX      = mdWindow.x
                 mdWindow._preFullscreenY      = mdWindow.y
                 mdWindow._preFullscreenWidth  = mdWindow.width
                 mdWindow._preFullscreenHeight = mdWindow.height
-                mdWindow.x      = Screen.virtualX
-                mdWindow.y      = Screen.virtualY
-                mdWindow.width  = Screen.width
-                mdWindow.height = Screen.height
+                mdWindow.x      = scr.x
+                mdWindow.y      = scr.y
+                mdWindow.width  = scr.width
+                mdWindow.height = scr.height
                 mdWindow._isFullscreen = true
                 mdWindow.cursorHidden = false
                 cursorIdleTimer.restart()
@@ -201,7 +206,7 @@ FloatingPane {
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: qsTr("This system's graphics driver doesn't support the required OpenGL version")
+                text: qsTr("This system's graphics driver doesn't support the required OpenGL version (OpenGL 3.3 Core Profile)")
                 font.family:    Theme.fontFamilyBody
                 font.pixelSize: Theme.labelSm
                 color: Theme.fgSurfaceVariant

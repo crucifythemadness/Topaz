@@ -7,6 +7,7 @@
 
 #include <QSGSimpleTextureNode>
 #include <QQuickWindow>
+#include <QWindow>
 #include <QAudioFormat>
 #include <QDebug>
 #include <QDir>
@@ -16,6 +17,40 @@
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QtMath>
+
+namespace {
+
+// Describes what this system's OpenGL driver actually offers when asked for
+// nothing in particular (no version/profile request), for the failure log --
+// so a "graphics driver too old" report says *how* old instead of just that
+// the 3.3 Core request failed. Raw glGetString() rather than
+// QOpenGLFunctions, which must not be included after glew.h (see the top of
+// this file).
+QString describeOfferedOpenGL()
+{
+    QSurfaceFormat probeFormat;
+    probeFormat.setRenderableType(QSurfaceFormat::OpenGL);
+
+    QWindow probeWindow;
+    probeWindow.setSurfaceType(QWindow::OpenGLSurface);
+    probeWindow.setFormat(probeFormat);
+    probeWindow.create();
+
+    QOpenGLContext probeContext;
+    probeContext.setFormat(probeFormat);
+    if (!probeContext.create() || !probeContext.makeCurrent(&probeWindow))
+        return QStringLiteral("no OpenGL context of any version could be created");
+
+    const char *version  = reinterpret_cast<const char *>(glGetString(GL_VERSION));
+    const char *renderer = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
+    const QString description = QStringLiteral("this system offers OpenGL %1 (renderer: %2)")
+                                    .arg(version  ? QString::fromLatin1(version)  : QStringLiteral("?"),
+                                         renderer ? QString::fromLatin1(renderer) : QStringLiteral("?"));
+    probeContext.doneCurrent();
+    return description;
+}
+
+} // namespace
 
 // ── Constructor / Destructor ──────────────────────────────────────────────
 
@@ -146,7 +181,9 @@ void MilkdropView::ensureInitialized()
     m_glContext = new QOpenGLContext(this);
     m_glContext->setFormat(format);
     if (!m_glContext->create() || !m_glContext->makeCurrent(m_renderWindow)) {
-        logDiagnostic(QStringLiteral("failed to create the offscreen OpenGL context"));
+        m_glContext->doneCurrent();
+        logDiagnostic(QStringLiteral("failed to create the offscreen OpenGL context "
+                                     "(Milkdrop needs OpenGL 3.3 Core); ") + describeOfferedOpenGL());
         m_initFailed = true;
         emit initFailedChanged();
         return;
@@ -155,6 +192,23 @@ void MilkdropView::ensureInitialized()
                        .arg(m_glContext->format().majorVersion())
                        .arg(m_glContext->format().minorVersion())
                        .arg(m_glContext->format().profile()));
+
+    // format() after create() is what was actually granted, which Qt does not
+    // guarantee matches the request. projectM's shaders are all #version 330,
+    // so anything below 3.3 would otherwise only fail later, deep inside
+    // projectM. Checks the version only, not the profile: the profile field is
+    // driver-reported metadata, and rejecting on it could break a setup that
+    // renders fine.
+    if (m_glContext->format().version() < qMakePair(3, 3)) {
+        m_glContext->doneCurrent();
+        logDiagnostic(QStringLiteral("granted OpenGL %1.%2 is below the required 3.3; ")
+                           .arg(m_glContext->format().majorVersion())
+                           .arg(m_glContext->format().minorVersion())
+                      + describeOfferedOpenGL());
+        m_initFailed = true;
+        emit initFailedChanged();
+        return;
+    }
 
     // libprojectM's own renderer resolves every extended OpenGL call (FBOs,
     // shaders, textures) through GLEW's global function-pointer table, but

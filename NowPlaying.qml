@@ -756,9 +756,13 @@ Rectangle {
                                 // UC-23) -- clearing here, before the file is
                                 // even picked, meant canceling the dialog
                                 // used to leave the queue emptied for nothing.
-                                if (root.playlistManager)
+                                if (root.playlistManager) {
+                                    // "file:///" + "C:/x" (Windows) but "file://" + "/home/x"
+                                    // (Linux) -- a blind "file:///" prefix yields four slashes there.
+                                    const plDir = root.playlistManager.playlistDirectory()
                                     loadPlaylistDialog.currentFolder =
-                                        "file:///" + root.playlistManager.playlistDirectory()
+                                        "file://" + (plDir.startsWith("/") ? "" : "/") + plDir
+                                }
                                 loadPlaylistDialog.open()
                             }
 

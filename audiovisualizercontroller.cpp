@@ -3,6 +3,7 @@
 #include "third_party/kissfft/kiss_fftr.h"
 
 #include <QAudioFormat>
+#include <QDebug>
 #include <cmath>
 
 namespace {
@@ -62,6 +63,12 @@ void AudioVisualizerController::appendSamples(const QAudioBuffer &buffer)
     const int frames   = int(buffer.frameCount());
     if (channels <= 0 || frames <= 0) return;
 
+    if (!m_loggedFirstBuffer) {
+        m_loggedFirstBuffer = true;
+        qInfo() << "AudioVisualizerController: first audio buffer:" << fmt.sampleRate() << "Hz,"
+                << channels << "channels, sample format" << fmt.sampleFormat() << "," << frames << "frames";
+    }
+
     m_sampleBuffer.reserve(m_sampleBuffer.size() + frames);
 
     // Deliberate simplification for a first version: only the two sample
@@ -86,6 +93,11 @@ void AudioVisualizerController::appendSamples(const QAudioBuffer &buffer)
             m_sampleBuffer.append((float(sum) / float(channels)) / 32768.0f);
         }
     } else {
+        if (!m_warnedUnsupportedFormat) {
+            m_warnedUnsupportedFormat = true;
+            qWarning() << "AudioVisualizerController: unsupported sample format" << fmt.sampleFormat()
+                       << "-- audio in this format is skipped, so no bars will move";
+        }
         return;
     }
 
@@ -162,6 +174,13 @@ void AudioVisualizerController::processBlock(const float *samples, int sampleRat
 
         float &peak = m_peakLevels[b];
         peak = (level > peak) ? level : qMax(0.0f, peak - peakDecayRate);
+
+        if (!m_loggedFirstNonZeroLevel && level > 0.0f) {
+            m_loggedFirstNonZeroLevel = true;
+            qInfo() << "AudioVisualizerController: first non-zero bar level computed (bar" << b
+                    << "=" << level << ") -- audio analysis is working; if the pane is still blank, "
+                       "the problem is on the drawing side";
+        }
     }
 
     m_dirty = true;
