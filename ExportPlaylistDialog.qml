@@ -35,11 +35,20 @@ Popup {
     property var tracks: []
     property var exportController: null
 
+    // UC-26 Replay Gain Normalization: only these two facts are needed here
+    // (not the whole PlaybackEngine/AppConfig), both read fresh whenever the
+    // dialog opens. bassAudioActive gates the checkbox (BASS Audio Library
+    // must be the active backend -- the reference lookup's fallback measure
+    // step needs BASS); appConfig supplies audiophileTrimDb at export time.
+    property bool      bassAudioActive: false
+    property AppConfig appConfig: null
+
     // Ephemeral UI state, reset every time the dialog opens -- never persisted.
     property string destFolder: ""   // "" = none chosen yet
     property var    destInfo: ({})   // last analyzeDestination() result
     property real   requiredBytes: 0
     property string prefixText: ""
+    property bool   replayGainNormalization: false
     property bool   showResults: false
     property var    lastResults: []
 
@@ -136,6 +145,7 @@ Popup {
         destFolder   = ""
         destInfo     = {}
         prefixText   = ""
+        replayGainNormalization = false
         showResults  = false
         lastResults  = []
         if (root.exportController && root.tracks.length > 0) {
@@ -540,6 +550,52 @@ Popup {
                             color: Theme.secondary
                         }
                     }
+
+                    // ── Replay Gain Normalization (UC-26) ────────────────
+                    // Same checkbox visual idiom as SetupDialog.qml's Auto
+                    // Loudness Correction checkbox. Only usable while the
+                    // BASS Audio Library is the active backend -- the
+                    // reference-value lookup's fallback (a fresh measurement
+                    // for a track never analyzed before) needs BASS.
+                    RowLayout {
+                        spacing: 10
+                        opacity: root.bassAudioActive ? 1.0 : 0.35
+
+                        Rectangle {
+                            width: 18; height: 18
+                            radius: 3
+                            color: root.replayGainNormalization ? Theme.secondaryContainer : "transparent"
+                            border.width: root.replayGainNormalization ? 0 : 1
+                            border.color: Theme.outlineVariant
+
+                            Text {
+                                anchors.centerIn: parent
+                                visible: root.replayGainNormalization
+                                text: "✓"
+                                font.pixelSize: 11
+                                font.weight: Font.Bold
+                                color: Theme.fgSecondaryContainer
+                            }
+                        }
+
+                        Text {
+                            text: qsTr("Replay Gain Normalization")
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.labelLg
+                            color: Theme.fgSurface
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: root.bassAudioActive
+                            hoverEnabled: true
+                            cursorShape: root.bassAudioActive ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            ToolTip.visible: containsMouse
+                            ToolTip.delay:   600
+                            ToolTip.text:    qsTr("Set Replay Gain Normalization according to the Reference Value and the Actual Trim (Audiophile/Critical Listening)")
+                            onClicked: root.replayGainNormalization = !root.replayGainNormalization
+                        }
+                    }
                 }
             }
 
@@ -775,9 +831,18 @@ Popup {
 
     function tryExport() {
         if (!root.canExport || !root.exportController) return
+        // albumArtist/artist/album are only needed for Replay Gain
+        // Normalization (TrackInfo::computeNormalizationId), but always
+        // included -- both track-map sources (PlaybackEngine.trackList(),
+        // PlaylistManager.loadPlaylist()) already carry them.
         const tracks = root.tracks.map(function (t) {
-            return { filePath: t.filePath, title: t.title }
+            return { filePath: t.filePath, title: t.title,
+                      albumArtist: t.albumArtist || "", artist: t.artist || "",
+                      album: t.album || "" }
         })
-        root.exportController.startExport(tracks, root.destFolder, root.prefixText)
+        const trim = (root.replayGainNormalization && root.appConfig)
+                     ? root.appConfig.audiophileTrimDb : 0.0
+        root.exportController.startExport(tracks, root.destFolder, root.prefixText,
+                                           root.replayGainNormalization, trim)
     }
 }

@@ -132,6 +132,30 @@ public:
     // the calling thread; the worker uses it, and so do the tests.
     static MeasureResult measureFile(const QString &path, const ProgressFn &progress = {});
 
+    struct ReferenceResult {
+        bool    ok      = false;  // a usable gain was determined
+        bool    aborted = false;  // shouldContinue() returned false before a result was reached
+        double  gainDb  = 0.0;    // clamped + peak-limited, same as loudnessReady()
+        double  peak    = 0.0;    // linear, 0 = unknown
+        QString source;           // "cache" | "tag" | "measured"
+    };
+    // Called during the (possibly slow) measurement tier only; return false to
+    // abort early (ReferenceResult::aborted = true, no result).
+    using ContinueFn = std::function<bool()>;
+    // The same cache -> tag -> measure fallback process() uses, extracted as
+    // a pure, stateless function so it can be called synchronously from any
+    // thread without the worker-thread machinery (used by PlaylistExportWorker
+    // for UC-26's Replay Gain Normalization export option, so the two features
+    // can never disagree about what "the reference" means for a file). `cache`
+    // is read-only here -- the caller decides whether/when to persist a
+    // freshly-measured entry (see storeEntry()/VolumeNormalizationCache::save()).
+    // shouldContinue defaults to always-continue (the export use case has no
+    // preemption concept, unlike the worker's urgent-queue).
+    static ReferenceResult determineReferenceGain(
+        const QString &filePath, const QUuid &id, qint64 fileSize,
+        const QHash<QUuid, VolumeNormalizationCache::Entry> &cache,
+        const ContinueFn &shouldContinue = {});
+
 signals:
     // Emitted from the worker thread (queued to receivers on the GUI thread).
     // gainDb is final: clamped and peak-limited, dB to add.

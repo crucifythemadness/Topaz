@@ -1163,7 +1163,10 @@ created once the feature has actually analysed a track (never for a user who doe
 `"tag"` or `"measured"`, `peak` the linear sample peak (0 = unknown). `fileSize` is what makes
 an entry "still this file": a replaced or re-tagged file (e.g. an external tool added a
 ReplayGain tag) has a different size, so its entry is ignored and re-determined. Not part of
-Backup/Restore (UC-27): it is a recomputable cache.
+Backup/Restore (UC-27): it is a recomputable cache. `PlaylistExportWorker` (UC-26's Replay Gain
+Normalization) also reads and writes this file — loading it once per export run and merging back
+any newly discovered/measured entries at the end — via the same `LoudnessAnalyzer::
+determineReferenceGain()` fallback normal playback uses, so export usefully warms the same cache.
 
 ### Data Flow: Library Scan
 
@@ -1899,6 +1902,8 @@ configurable via the app JSON config) will be introduced at that point.
     LoudnessAnalyzer --> VolumeNormalizationCache : Topaz.volumeNormalization.json
     PlaybackEngine --> CompressorMeter : owns (live estimate for "Consistent Background Music", UC-35)
     LoudnessAnalyzer ..> TagReader   : readReplayGain()
+    PlaylistExportWorker ..> LoudnessAnalyzer : determineReferenceGain() (UC-26 Replay Gain Normalization)
+    PlaylistExportWorker ..> TagWriter : writeReplayGain() (export copy only, never the source file)
     PlaybackEngine --> AppConfig     : reads crossfadeEnabled/crossfadeSeconds live
     AutoPlayController --> PlaybackEngine : addTrack/playAt/trackList/clearQueue; listens trackPlayedToCompletion + queueExhausted (see UC-16)
     AutoPlayController --> LibraryModel   : calls autoPlayCandidatePool() (see UC-16)
@@ -5830,8 +5835,11 @@ every other stateful controller in this app).
   `TrackInfo::fileSize`, which the in-memory queue never actually populates
   (`PlaybackEngine::trackFromMap()` doesn't set it, and `trackList()`
   doesn't emit it) — making it unreliable as a source for this calculation.
-- `Q_INVOKABLE void startExport(tracks, destFolder, prefix)` /
-  `Q_INVOKABLE void cancelExport()` — delegate to the worker thread below.
+- `Q_INVOKABLE void startExport(tracks, destFolder, prefix, replayGainNormalization = false,
+  audiophileTrimDb = 0.0)` / `Q_INVOKABLE void cancelExport()` — delegate to the worker thread
+  below. The last two parameters back Replay Gain Normalization (see its own subsection below);
+  both are captured once at click time, not live-bound, the same convention `destFolder`/`prefix`
+  already use.
 - `Q_PROPERTY`s `exporting`/`exportProgress`/`currentFileName` and signal
   `exportFinished(QVariantList results)` mirror the exact shape
   `MilkdropCleanupController` already established for its own
@@ -5851,20 +5859,79 @@ call can't be chunked with periodic `processEvents()` calls the way
 per-file stat/delete checks could, so a big enough playlist would otherwise
 visibly freeze the whole window for the duration of that one file.
 
-`runExport(tracks, destFolder, prefix)`: for each `{filePath, title}` entry
-in queue order, builds the zero-padded index width as
-`qMax(2, digits in tracks.size())` (2 digits for ≤99 tracks, 3 for
-100-999 tracks, etc.), strips Windows-reserved characters
-(`\/:*?"<>|`) from the title, and copies to
+`runExport(tracks, destFolder, prefix, replayGainNormalization, audiophileTrimDb)`: for each
+`{filePath, title, albumArtist, artist, album}` entry in queue order, builds the zero-padded index
+width as `qMax(2, digits in tracks.size())` (2 digits for ≤99 tracks, 3 for 100-999 tracks, etc.),
+strips Windows-reserved characters (`\/:*?"<>|`) from the title, and copies to
 `prefix + paddedIndex + "_" + sanitizedTitle + "." + originalExtension`,
 removing any leftover file of the same name from a previous export attempt
 first (`QFile::copy()` refuses to overwrite). Emits `progress(done, total,
 currentFileName)` after every file and `finished(results)` at the end,
-where each result is `{sourcePath, destPath, success, errorString}`.
+where each result is `{sourcePath, destPath, success, errorString, replayGainTagged}`.
 Cancellation (`cancelExport()`) is the same cooperative
 `std::atomic<bool>`-checked-between-iterations shape as
 `LibraryScanner::cancelScan()` — the loop simply stops before its next
 file and emits `finished()` with whatever partial results it already has.
+
+### Replay Gain Normalization — writing a tag into the exported copy
+
+An opt-in checkbox in `ExportPlaylistDialog.qml` (default unchecked, reset every time the dialog
+opens), enabled only while the BASS Audio Library is the active backend
+(`engine.activeBackendName === "BASS Audio Library"` — the reference-lookup's measurement fallback,
+below, needs BASS). When checked, `PlaylistExportWorker` writes a `REPLAYGAIN_TRACK_GAIN` (+
+`REPLAYGAIN_TRACK_PEAK` when known) tag into each **copy** right after it's made — never into the
+source library file. This is a deliberate, narrow exception to "Topaz never changes an audio
+track": that rule is about the library original, and the export copy is a file the export itself
+just created, not the user's existing library file.
+
+**The value.** The same number UC-35's Audiophile/Critical Listening strategy already computes and
+applies live during playback: the track's reference loudness (`Topaz.volumeNormalization.json` →
+an existing tag → a fresh BASS measurement, the same three-tier fallback `LoudnessAnalyzer` always
+uses) plus the Audiophile **Trim** slider — always Audiophile's Trim, regardless of which strategy
+is actually selected for playback, since Background's trim is a live compressor makeup gain with no
+fixed per-track number, while Replay Gain is inherently a fixed value. Both are captured once when
+EXPORT is clicked (`ExportPlaylistDialog::tryExport()` reads `appConfig.audiophileTrimDb()` there),
+not re-read live during the run.
+
+**Reference determination, shared with playback.** `LoudnessAnalyzer::determineReferenceGain()`
+is the cache → tag → measure fallback extracted out of the worker-thread-bound `process()` method
+into a pure, stateless static function, so `PlaylistExportWorker` (its own separate thread) can call
+it synchronously with zero duplicated logic — the two features can never disagree about what "the
+reference" for a file is. `VolumeNormalizationCache::load()` runs once at the start of the whole
+export (not per track); any newly discovered/measured entries are merged in and saved once at the
+end, so exporting also usefully warms the same cache normal playback reads from. A track with no
+determinable reference (decode failure, corrupt file) is still copied successfully, just left
+untagged — not treated as an export failure.
+
+**`TagWriter` (`tagwriter.h`/`.cpp`)** — a new, dependency-free writer mirroring `TagReader`'s
+per-format parsing, `static bool writeReplayGain(filePath, gainDb, peakLinear)`. Only the
+`REPLAYGAIN_TRACK_GAIN`/`_PEAK` tag is added/replaced; every other byte of existing tag/comment/
+cover data is preserved unchanged. Atomic write (`.tmp` + rename), same convention as
+`VolumeNormalizationCache::save()`. Returns `false` (file left completely untouched) for anything
+it can't safely rewrite — e.g. an ID3v2.2 tag, an unsynchronized ID3v2 tag (`TagReader` doesn't
+decode that either), or an Opus file whose `OpusTags` packet shares a page with another packet.
+- **MP3**: rebuilds the ID3v2 frame chain (dropping any existing `TXXX:REPLAYGAIN_TRACK_GAIN`/
+  `_PEAK`), appending a fresh Latin-1 `TXXX` frame; synthesizes a minimal new ID3v2.3 tag when none
+  existed. Audio data after the tag is copied verbatim.
+- **FLAC**: rebuilds the `VORBIS_COMMENT` metadata block (adding it, right after `STREAMINFO`, if
+  absent) with the gain/peak comments replaced; always a full simple rebuild of the metadata-block
+  region (no attempt to reuse an existing `PADDING` block's space in place) followed by the exact
+  original audio-frame bytes.
+- **Opus**: the one format needing a real container remux, and the highest-risk piece of this
+  change. `OpusHead` (page 0) is copied verbatim, untouched. The `OpusTags` packet is reassembled
+  from page 1 onward (declining — file left untouched — the moment anything doesn't match the shape
+  every real encoder produces: a second logical stream, a gap in page sequence numbers, or a page
+  that mixes `OpusTags` with another packet), its comment list rebuilt (also dropping any existing
+  Opus-native `R128_TRACK_GAIN` comment — `TagReader::readReplayGain()` *prefers* R128 over
+  `REPLAYGAIN_TRACK_GAIN` for `.opus` files, so a stale one left in place would silently shadow the
+  freshly-written value; found by the verification harness against a real file that had one), and
+  re-paged (255-byte lacing). Because a size change there can grow or shrink the tags packet's page
+  count, **every following page's `page_sequence_number` — and therefore its CRC, which covers the
+  whole page header — is recomputed**, using the standard Ogg CRC32 (poly `0x04c11db7`, table-driven,
+  unreflected). Verified against two real Opus files (6.3-6.8 MB, 400+ pages each): re-tagged, then
+  independently re-walked page-by-page (a from-scratch CRC/sequence verifier, deliberately separate
+  code from `TagWriter`'s own table) confirming every page's CRC and every page's sequence number,
+  not just that `TagReader` was happy with what `TagWriter` produced.
 
 ### `ExportPlaylistDialog.qml` — UI
 
@@ -5908,6 +5975,9 @@ mockup's literal styling:
 - EXPORT (inside the dialog) is enabled once destination chosen AND
   writable AND enough free space AND not already exporting — no longer
   requires a non-empty prefix.
+- Replay Gain Normalization checkbox (same visual idiom as `SetupDialog.qml`'s Auto Loudness
+  Correction checkbox) — see its own subsection above. Greyed out (opacity 0.35, `MouseArea`
+  disabled) unless BASS is the active backend; reset to unchecked every time the dialog opens.
 - The dialog is draggable by its header (`x`/`y` bindings instead of
   `anchors.centerIn`, recomputed in `onOpened`, plus a header `MouseArea`),
   same technique and same reason `SetupDialog.qml` already uses it (see

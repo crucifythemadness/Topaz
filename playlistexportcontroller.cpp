@@ -149,7 +149,8 @@ qint64 PlaylistExportController::computeRequiredBytes(const QVariantList &filePa
 // ── Export ─────────────────────────────────────────────────────────────────
 
 void PlaylistExportController::startExport(const QVariantList &tracks, const QString &destFolder,
-                                            const QString &prefix)
+                                            const QString &prefix, bool replayGainNormalization,
+                                            double audiophileTrimDb)
 {
     if (m_exporting) return;
 
@@ -160,7 +161,7 @@ void PlaylistExportController::startExport(const QVariantList &tracks, const QSt
     m_currentFileName.clear();
     emit currentFileNameChanged();
 
-    emit _requestExport(tracks, destFolder, prefix);
+    emit _requestExport(tracks, destFolder, prefix, replayGainNormalization, audiophileTrimDb);
 }
 
 void PlaylistExportController::cancelExport()

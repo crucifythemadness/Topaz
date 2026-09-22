@@ -27,18 +27,31 @@ public:
     void cancelExport() { m_cancelRequested.store(true, std::memory_order_relaxed); }
 
 public slots:
-    // tracks: [{filePath, title}, ...] in queue order. Builds
-    // "<prefix><index>_<title>.<ext>" per track (index zero-padded to
-    // qMax(2, digits in tracks.size())) and copies each source file to
-    // destFolder under that name, overwriting any leftover file from a
-    // previous export attempt with the same name.
-    void runExport(QVariantList tracks, QString destFolder, QString prefix);
+    // tracks: [{filePath, title, albumArtist, artist, album}, ...] in queue
+    // order (the last three are only needed when replayGainNormalization is
+    // true -- see below). Builds "<prefix><index>_<title>.<ext>" per track
+    // (index zero-padded to qMax(2, digits in tracks.size())) and copies each
+    // source file to destFolder under that name, overwriting any leftover
+    // file from a previous export attempt with the same name.
+    //
+    // replayGainNormalization (UC-26): when true, after each successful copy
+    // a REPLAYGAIN_TRACK_GAIN tag is written into the COPY (never the source)
+    // via TagWriter, using the same reference-determination fallback UC-35's
+    // Audiophile strategy uses (Topaz.volumeNormalization.json -> an existing
+    // tag -> a fresh BASS measurement) plus audiophileTrimDb, captured once
+    // here rather than live-read per track. A track whose reference can't be
+    // determined is still copied successfully, just left untagged. Any newly
+    // discovered/measured entries are merged back into
+    // Topaz.volumeNormalization.json once, at the end of the whole export.
+    void runExport(QVariantList tracks, QString destFolder, QString prefix,
+                    bool replayGainNormalization, double audiophileTrimDb);
 
 signals:
     void progress(int done, int total, QString currentFileName);
-    // results: [{sourcePath, destPath, success, errorString}, ...] --
-    // truncated (not padded with skipped entries) if cancelExport() cut the
-    // loop short.
+    // results: [{sourcePath, destPath, success, errorString, replayGainTagged}, ...]
+    // -- truncated (not padded with skipped entries) if cancelExport() cut the
+    // loop short. replayGainTagged is always false when replayGainNormalization
+    // was off.
     void finished(QVariantList results);
 
 private:

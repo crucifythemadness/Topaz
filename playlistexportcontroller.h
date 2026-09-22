@@ -62,10 +62,14 @@ public:
     // never actually populates.
     Q_INVOKABLE qint64 computeRequiredBytes(const QVariantList &filePaths) const;
 
-    // tracks: [{filePath, title}, ...] in queue order (see
-    // PlaybackEngine::trackList()). No-op if an export is already running.
+    // tracks: [{filePath, title, albumArtist, artist, album}, ...] in queue
+    // order (see PlaybackEngine::trackList()). No-op if an export is already
+    // running. replayGainNormalization/audiophileTrimDb: see
+    // PlaylistExportWorker::runExport()'s doc comment (UC-26) -- both are
+    // captured once here, at click time, not live-bound.
     Q_INVOKABLE void startExport(const QVariantList &tracks, const QString &destFolder,
-                                  const QString &prefix);
+                                  const QString &prefix, bool replayGainNormalization = false,
+                                  double audiophileTrimDb = 0.0);
 
     // Cooperative cancel -- see PlaylistExportWorker::cancelExport().
     Q_INVOKABLE void cancelExport();
@@ -79,7 +83,8 @@ signals:
     void exportFinished(const QVariantList &results);
 
     // Commands → worker thread (queued so they execute on the worker's event loop).
-    void _requestExport(QVariantList tracks, QString destFolder, QString prefix);
+    void _requestExport(QVariantList tracks, QString destFolder, QString prefix,
+                         bool replayGainNormalization, double audiophileTrimDb);
 
 private slots:
     void onWorkerProgress(int done, int total, const QString &currentFileName);

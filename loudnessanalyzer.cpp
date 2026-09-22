@@ -269,56 +269,77 @@ void LoudnessAnalyzer::process(const Job &job)
     if (r.fileSize <= 0) r.fileSize = QFileInfo(r.filePath).size();
     QElapsedTimer timer;
     timer.start();
-    bool requeue = false;
 
-    do {
-        // 1. Cached value -- valid only for the same file (size).
-        const auto it = m_cache.constFind(r.id);
-        if (it != m_cache.constEnd() && it->fileSize == r.fileSize) {
-            qCInfo(lcLoudness, "%s: cached %.2f dB (%s)", qPrintable(r.filePath), it->dB, qPrintable(it->source));
-            emit loudnessReady(r.filePath, it->dB);
-            break;
-        }
+    const ReferenceResult result = determineReferenceGain(r.filePath, r.id, r.fileSize, m_cache,
+        [&]() {
+            if (m_quit) return false;
+            // A normal job yields to an urgent one that arrived meanwhile
+            // (its progress is discarded; it goes back to the queue).
+            if (!job.urgent && hasUrgentPending()) return false;
+            return true;
+        });
 
-        // 2. ReplayGain / R128 tag.
-        const TagReader::ReplayGain rg = TagReader::readReplayGain(r.filePath);
-        if (rg.valid) {
-            const double gain = limitGain(rg.trackGainDb, rg.trackPeak);
-            storeEntry(r, gain, QStringLiteral("tag"), rg.trackPeak);
-            qCInfo(lcLoudness, "%s: tag %.2f dB -> %.2f dB", qPrintable(r.filePath), rg.trackGainDb, gain);
-            emit loudnessReady(r.filePath, gain);
-            break;
-        }
-
-        // 3. Own measurement.
-        const MeasureResult m = measureFile(r.filePath,
-            [&](const LoudnessMeter &, double) {
-                if (m_quit) return false;
-                // A normal job yields to an urgent one that arrived meanwhile
-                // (its progress is discarded; it goes back to the queue).
-                if (!job.urgent && hasUrgentPending()) { requeue = true; return false; }
-                return true;
-            });
-
-        if (requeue) break;
-        if (m.aborted || !m.ok) {
-            qCInfo(lcLoudness, "%s: no usable measurement (ok=%d aborted=%d)",
-                   qPrintable(r.filePath), int(m.ok), int(m.aborted));
-            break;
-        }
-        const double gain = limitGain(kTargetLufs - m.lufs, m.peak);
-        storeEntry(r, gain, QStringLiteral("measured"), m.peak);
-        qCInfo(lcLoudness, "%s: measured %.2f LUFS peak %.3f -> %.2f dB (%.1f s audio in %lld ms)",
-               qPrintable(r.filePath), m.lufs, m.peak, gain, m.seconds, timer.elapsed());
-        emit loudnessReady(r.filePath, gain);
-    } while (false);
+    if (result.aborted) {
+        // fall through: neither stored nor emitted, requeued below.
+    } else if (result.ok) {
+        storeEntry(r, result.gainDb, result.source, result.peak);
+        qCInfo(lcLoudness, "%s: %s %.2f dB (%.0f ms)", qPrintable(r.filePath),
+               qPrintable(result.source), result.gainDb, double(timer.elapsed()));
+        emit loudnessReady(r.filePath, result.gainDb);
+    } else {
+        qCInfo(lcLoudness, "%s: no usable reference", qPrintable(r.filePath));
+    }
 
     QMutexLocker l(&m_mutex);
-    if (requeue && !m_quit) {
+    if (result.aborted && !m_quit) {
         m_normalQueue.push_front(job);   // still in m_queued
     } else {
         m_queued.remove(r.id);
     }
+}
+
+LoudnessAnalyzer::ReferenceResult LoudnessAnalyzer::determineReferenceGain(
+    const QString &filePath, const QUuid &id, qint64 fileSize,
+    const QHash<QUuid, VolumeNormalizationCache::Entry> &cache,
+    const ContinueFn &shouldContinue)
+{
+    ReferenceResult result;
+
+    // 1. Cached value -- valid only for the same file (size).
+    const auto it = cache.constFind(id);
+    if (it != cache.constEnd() && it->fileSize == fileSize) {
+        result.ok     = true;
+        result.gainDb = it->dB;
+        result.peak   = it->peak;
+        result.source = QStringLiteral("cache");
+        return result;
+    }
+
+    // 2. ReplayGain / R128 tag.
+    const TagReader::ReplayGain rg = TagReader::readReplayGain(filePath);
+    if (rg.valid) {
+        result.ok     = true;
+        result.gainDb = limitGain(rg.trackGainDb, rg.trackPeak);
+        result.peak   = rg.trackPeak;
+        result.source = QStringLiteral("tag");
+        return result;
+    }
+
+    // 3. Own measurement.
+    bool aborted = false;
+    const MeasureResult m = measureFile(filePath,
+        [&](const LoudnessMeter &, double) {
+            if (shouldContinue && !shouldContinue()) { aborted = true; return false; }
+            return true;
+        });
+    if (aborted) { result.aborted = true; return result; }
+    if (m.aborted || !m.ok) return result;   // ok == false: no usable measurement
+
+    result.ok     = true;
+    result.gainDb = limitGain(kTargetLufs - m.lufs, m.peak);
+    result.peak   = m.peak;
+    result.source = QStringLiteral("measured");
+    return result;
 }
 
 // ── One BASS decode pass ──────────────────────────────────────────────────

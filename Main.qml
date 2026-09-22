@@ -491,6 +491,10 @@ ApplicationWindow {
     ExportPlaylistDialog {
         id:               exportPlaylistDialog
         exportController: exportController
+        // UC-26 Replay Gain Normalization -- see ExportPlaylistDialog.qml's
+        // property doc comments.
+        bassAudioActive:  engine.activeBackendName === "BASS Audio Library"
+        appConfig:        appConfig
     }
 
     // Missing-playlist-tracks notice — opened after a LOAD (NowPlaying or
