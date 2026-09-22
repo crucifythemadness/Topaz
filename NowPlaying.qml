@@ -127,10 +127,11 @@ Rectangle {
             // loadPlaylistTracks() always replaces the queue -- it
             // crossfades into the new playlist when CROSSFADE is on and
             // something is currently playing, otherwise it's an instant
-            // replace (see UC-23).
+            // replace (see UC-23). The playlist name is applied internally
+            // at the right moment for each case -- see loadPlaylistTracks()'s
+            // doc comment.
             if (root.autoPlay) root.autoPlay.clearHistory()
-            root.engine.loadPlaylistTracks(tracks)
-            root.engine.setActivePlaylistName(result.fileName)
+            root.engine.loadPlaylistTracks(tracks, result.fileName)
         }
         if (missing && missing.length > 0) root.missingPlaylistTracks(missing)
     }

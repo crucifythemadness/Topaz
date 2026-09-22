@@ -312,7 +312,7 @@ void AppConfig::setLoudnessStrategy(const QString &strategy)
 void AppConfig::setAudiophileTrimDb(double db)
 {
     db = qBound(-15.0, db, 15.0);
-    db = std::round(db * 2.0) / 2.0;
+    db = std::round(db * 10.0) / 10.0;   // nearest 0.1 dB -- matches the slider's stepSize
     if (qFuzzyCompare(m_audiophileTrimDb, db)) return;
     m_audiophileTrimDb = db;
     emit loudnessSettingsChanged();
@@ -322,7 +322,7 @@ void AppConfig::setAudiophileTrimDb(double db)
 void AppConfig::setBackgroundTrimDb(double db)
 {
     db = qBound(-15.0, db, 15.0);
-    db = std::round(db * 2.0) / 2.0;
+    db = std::round(db * 10.0) / 10.0;   // nearest 0.1 dB -- matches the slider's stepSize
     if (qFuzzyCompare(m_backgroundTrimDb, db)) return;
     m_backgroundTrimDb = db;
     emit loudnessSettingsChanged();
@@ -445,6 +445,14 @@ void AppConfig::setStartFullscreen(bool enabled)
     if (m_startFullscreen == enabled) return;
     m_startFullscreen = enabled;
     emit startFullscreenChanged();
+    save();
+}
+
+void AppConfig::setVisualFolderScanning(bool enabled)
+{
+    if (m_visualFolderScanning == enabled) return;
+    m_visualFolderScanning = enabled;
+    emit visualFolderScanningChanged();
     save();
 }
 
@@ -768,6 +776,7 @@ void AppConfig::applyJson(const QJsonObject &root)
     m_playbackQueueWidth = root[QStringLiteral("playbackQueueWidth")].toInt(374);
     m_nowPlayingWidth    = root[QStringLiteral("nowPlayingWidth")].toInt(359);
     m_startFullscreen    = root[QStringLiteral("startFullscreen")].toBool(false);
+    m_visualFolderScanning = root[QStringLiteral("visualFolderScanning")].toBool(false);
     m_deleteCurrentRatingEnabled =
         root[QStringLiteral("deleteCurrentRatingEnabled")].toBool(false);
     m_albumBrowserSortOrder =
@@ -904,6 +913,7 @@ QVariantMap AppConfig::restoreFromJson(const QByteArray &json)
     emit windowGeometryChanged();
     emit panelWidthsChanged();
     emit startFullscreenChanged();
+    emit visualFolderScanningChanged();
     emit deleteCurrentRatingEnabledChanged();
     emit albumBrowserSortOrderChanged();
     emit crossfadeChanged();
@@ -961,6 +971,7 @@ void AppConfig::save()
     root[QStringLiteral("playbackQueueWidth")] = m_playbackQueueWidth;
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;
     root[QStringLiteral("startFullscreen")]    = m_startFullscreen;
+    root[QStringLiteral("visualFolderScanning")] = m_visualFolderScanning;
     root[QStringLiteral("deleteCurrentRatingEnabled")] = m_deleteCurrentRatingEnabled;
     root[QStringLiteral("albumBrowserSortOrder")]      = m_albumBrowserSortOrder;
 

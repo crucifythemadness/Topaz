@@ -598,9 +598,16 @@ void PlaybackEngine::clearQueue()
 // See UC-23. Crossfades the currently-playing track directly into the first
 // track of `trackList` when eligible; otherwise behaves exactly like
 // clearQueue()+addTracks(trackList) (today's behavior, unchanged).
-void PlaybackEngine::loadPlaylistTracks(const QVariantList &trackList)
+void PlaybackEngine::loadPlaylistTracks(const QVariantList &trackList, const QString &playlistName)
 {
-    if (trackList.isEmpty()) return;
+    if (trackList.isEmpty()) {
+        // Genuinely empty playlist (UC-22/UC-09): still becomes the active
+        // playlist, just with nothing queued -- same as every other branch
+        // below, applied synchronously since there's no crossfade to wait for.
+        clearQueue();
+        setActivePlaylistName(playlistName);
+        return;
+    }
 
     const bool wantsCrossfade = m_appConfig && m_appConfig->crossfadeEnabled()
                                  && isPlaying() && m_currentIndex >= 0;
@@ -622,15 +629,19 @@ void PlaybackEngine::loadPlaylistTracks(const QVariantList &trackList)
     // which already checks via loadTrack(). Abort the replacement outright
     // (old queue/deck untouched) rather than trying a partial fallback for
     // what should be an exceedingly rare race with loadPlaylist()'s own
-    // pre-check. See UC-31.
+    // pre-check. See UC-31. Still renames the active playlist -- matches
+    // the unconditional rename the caller used to always do regardless of
+    // outcome, before this method took ownership of the timing.
     if (eligible && !QFileInfo::exists(firstNew.filePath)) {
         handleMissingTrack(firstNew);
+        setActivePlaylistName(playlistName);
         return;
     }
 
     if (!eligible) {
         clearQueue();
         addTracks(trackList);
+        setActivePlaylistName(playlistName);
         return;
     }
 
@@ -660,6 +671,10 @@ void PlaybackEngine::loadPlaylistTracks(const QVariantList &trackList)
     m_fadeMidpointFired      = false;
     m_fadeTargetIndex        = 0;   // new first track's index, once swapped in at the midpoint
     m_fadeElapsedMs          = 0;
+    // Applied at the same midpoint moment m_pendingQueue swaps into m_queue
+    // (see onFadeTick()) -- not here, which is exactly the race this whole
+    // parameter exists to close. See loadPlaylistTracks()'s doc comment.
+    m_pendingActivePlaylistName = playlistName;
 
     if (m_playlistLocked) {
         m_playlistLocked = false;
@@ -1172,6 +1187,14 @@ void PlaybackEngine::onFadeTick()
             m_queue = std::move(m_pendingQueue);
             endResetModel();
             emit queueCountChanged();
+            // Right here, not before: activePlaylistNameChanged() must fire
+            // in the same synchronous moment m_queue already holds the new
+            // content, or PlaylistViewer.qml's isSelectedActiveInQueue (a
+            // reactive binding on activePlaylistName) rebuilds its live-queue
+            // mirror from trackList() while it's still the OLD queue -- see
+            // loadPlaylistTracks()'s doc comment for the full bug this fixes.
+            setActivePlaylistName(m_pendingActivePlaylistName);
+            m_pendingActivePlaylistName.clear();
         }
 
         switchCurrentIndexTo(m_fadeTargetIndex);
@@ -1218,6 +1241,7 @@ void PlaybackEngine::cancelCrossfade()
     m_crossfadeReplacesQueue = false;
     m_pendingQueue.clear();
     m_fadeOutFilePath.clear();
+    m_pendingActivePlaylistName.clear();
 }
 
 QString PlaybackEngine::msToString(qint64 ms)

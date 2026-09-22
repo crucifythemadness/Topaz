@@ -507,6 +507,18 @@ ApplicationWindow {
         id: missingTracksDialog
     }
 
+    // Visual Folder Scanning (Setup > MISC, opt-in) — opens/closes itself by
+    // watching libraryModel.scanning; nothing else ever calls .open() on it.
+    // Both are real declared properties on ScanFoldersDialog.qml (qmllint
+    // --ignore-settings reports 0), but the editor's qmlls flags them
+    // anyway -- see CLAUDE.md's "Editor diagnostics" note.
+    // qmllint disable missing-property
+    ScanFoldersDialog {
+        libraryModel: libraryModel
+        appConfig:    appConfig
+    }
+    // qmllint enable missing-property
+
     // Restore the main window's screen, size and position (see
     // AppConfig.windowX/Y/windowScreenName/windowWidth/windowHeight), THEN show
     // it -- the window is still hidden here (see `visible: false` at the top),

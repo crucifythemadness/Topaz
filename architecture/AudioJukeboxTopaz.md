@@ -55,7 +55,7 @@ Topaz is an audio jukebox which is a desktop app that can play audio files (*.fl
 
 1. User clicks a genre button (e.g. "Techno").
 2. `GenreBar` calls `lib.toggleGenre(index)`.
-3. `LibraryData.toggleGenre()` flips the `active` flag in `genreModel` and rebuilds `activeGenreNames`. If the genre was just **activated**, it becomes the sole `selectedGenre` (replacing any prior selection). If it was just **deactivated**, the nearest remaining active genre is auto-selected instead — the one positionally after it, or if it was the last active genre, the one before it; if no active genres remain, `selectedGenre` is cleared. `selectedArtist`/`selectedAlbum` are cleared in both cases. When a genre is auto-selected this way, `LibraryData` emits `genreAutoSelected(genre)`, and `LibraryTree` scrolls that genre's header row into view via `positionViewAtIndex(..., ListView.Contain)`. This scroll-into-view only happens for auto-selection — manually clicking a genre, artist, or album row in the tree does not trigger it. **All of this auto-selection is suppressed while SEARCH is active** (`LibraryData.activeTab !== "library"`, one-way bound from `Main.qml`'s own `activeTab` — see UC-21): `activeGenreNames` still updates normally (so "Consider Genre" search stays correct), but the *entire* existing selection — `selectedGenre` **and** `selectedArtist`/`selectedAlbum` — is left completely untouched, since `LibraryTree`/`AlbumBrowser` aren't even loaded on that tab and disturbing any part of a stale selection would otherwise surprise the user the next time they switch back to LIBRARY (e.g. a previously drilled-down artist reverting to just its genre). Note `selectedArtist`/`selectedAlbum` are cleared by `_rebuildActiveNames()` itself (`LibraryData.qml`), not by `toggleGenre()` directly — both are gated on the same `activeTab === "library"` check.
+3. `LibraryData.toggleGenre()` flips the `active` flag in `genreModel` and rebuilds `activeGenreNames`. If the genre was just **activated**, it becomes the sole `selectedGenre` (replacing any prior selection). If it was just **deactivated**, the nearest remaining active genre is auto-selected instead — the one positionally after it, or if it was the last active genre, the one before it; if no active genres remain, `selectedGenre` is cleared. `selectedArtist`/`selectedAlbum` are cleared in both cases. When a genre is auto-selected this way, `LibraryData` emits `genreAutoSelected(genre)`, and `LibraryTree` scrolls that genre's header row into view via `positionViewAtIndex(..., ListView.Contain)`. This scroll-into-view only happens for auto-selection — manually clicking a genre, artist, or album row in the tree does not trigger it. **The drill-down auto-selection convenience above is suppressed while SEARCH/PLAYLISTS is active** (`LibraryData.activeTab !== "library"`, one-way bound from `Main.qml`'s own `activeTab` — see UC-21): `activeGenreNames` still updates normally (so "Consider Genre" search stays correct), and `selectedArtist`/`selectedAlbum` are left untouched, since `LibraryTree`/`AlbumBrowser` aren't even loaded on that tab and disturbing a drilled-down selection would otherwise surprise the user the next time they switch back. **`selectedGenre` itself is the one exception, validated unconditionally regardless of `activeTab`** (in `_rebuildActiveNames()`, the function both branches of `toggleGenre()` call): if it no longer names a still-active genre, it falls back to the first remaining active genre, or clears if none are active — the same reconciliation the LIBRARY-tab path already did, just no longer skipped off-tab. **Real bug fixed**: deactivating the currently-selected genre while on SEARCH/PLAYLISTS used to leave `selectedGenre` pointing at a genre `activeGenreNames` no longer contained at all — `GenreBar`/`LibraryTree` (which only ever reflect `activeGenreNames`/the per-genre `active` flag, never `selectedGenre` directly) correctly showed nothing selected, while `AlbumBrowser`'s `filteredAlbums()` (which narrows to `[selectedGenre]` whenever it's non-empty) kept silently querying the stale, deselected genre — so returning to LIBRARY showed albums with nothing visibly selected. `selectedArtist`/`selectedAlbum` are cleared alongside `selectedGenre` only when this reconciliation actually fires (they'd otherwise reference an entry under the now-gone genre), not on every ordinary toggle.
 4. `LibraryTree.onLibraryChanged` fires → tree renders only active-genre sections.
 5. `AlbumBrowser` receives `onActiveGenreNamesChanged` → schedules `_scheduleRefresh()` via `Qt.callLater` (deferred to the next event-loop tick so LibraryTree renders its frame first) → `currentAlbums = lib.filteredAlbums()` → `ListView` updates.
 6. `AlbumBrowser` subtitle updates to reflect the new filter path (e.g. `TECHNO`).
@@ -430,6 +430,55 @@ selection-index remapping).
   `scanStarted()` signal (`LibraryModel::onScanStarted()`) since that
   trigger runs entirely on the worker thread without `LibraryModel`
   ever having requested it itself.
+
+### Visual Folder Scanning (Setup > MISC, opt-in)
+
+An opt-in `ScanFoldersDialog.qml` gives real feedback for what a scan is actually doing —
+previously the only feedback anywhere was `BottomBar`'s SCAN FOLDERS button relabeling itself
+"SCANNING…"; `LibraryModel::scanProgress` (0-100%) was already computed but bound to no QML
+anywhere. Default off (`AppConfig::visualFolderScanning`, a MISC-tab pill toggle next to "Start
+Topaz in Full Screen"). The dialog never receives an explicit `.open()` call from anywhere —
+it watches `libraryModel.scanningChanged` itself and opens when `scanning` becomes `true` (only
+if the setting is on) and closes when it becomes `false`, which covers every trigger listed above
+uniformly (manual click, startup stat-check, watcher auto-rescan, UC-31's scoped rescan) with no
+per-trigger branching needed. Unlike `MilkdropCleanupDialog.qml`/`ExportPlaylistDialog.qml`, its
+✕ close button stays visible even while scanning — it's a passive viewer, not a controller
+(there's no cancel-scan path exposed to QML, and closing this dialog doesn't stop the scan, which
+just keeps running invisibly exactly as it did before this feature existed).
+
+**The cost question, and why the design avoids a naive per-file signal.** Tag-reading runs on up
+to 4 `QThreadPool` worker threads (`readTagsParallel()`'s `QtConcurrent::blockingMapped`), so a
+signal emitted per individual file would mean 12,000+ cross-thread queued-signal posts for a full
+library scan — real, avoidable overhead, and updating a label faster than anyone could read it
+anyway. `LibraryScanner::scanningFolder(path)` instead reuses a checkpoint that already existed:
+fires once per directory `discoverAudioFiles()` visits (every configured root AND every recursive
+subfolder) — folders are dominated by files roughly 6-12x in a typical Genre/Artist/Album layout,
+so this stays cheap regardless of library size. `discoverAudioFiles()` lost its `const` qualifier
+to emit this. (An earlier version of this feature also showed a live "recently scanned files"
+feed via a `scanningFiles(fileNames)` signal riding the same ~200-file chunk checkpoint
+`scanProgress` already used — removed on user feedback: they didn't want to see it. Deleted
+rather than left dormant, per the same no-dead-code discipline as everywhere else in this file.)
+
+`LibraryModel` exposes `currentScanFolder` (the latest folder path, replaced each time), cleared
+unconditionally at the top of `LibraryModel::onScanStarted()` — the one choke point every scan
+passes through first regardless of which trigger started it (see `LibraryScanner::scanStarted()`'s
+own doc comment) — placed *before* that method's existing early-return-if-already-scanning, since
+the two most common triggers (a manual click, the startup stat-check) already set
+`scanning = true` optimistically before the worker thread's `scanStarted()` signal arrives, and a
+reset placed after the early return would never run for them.
+
+**The progress bar used to finish early.** `scanProgress(done, total)` only ever measures the
+discover/classify/tag-read phase — `resolveCoverArt()` and `LibraryCache::save()` still follow,
+with zero progress signals of their own, and `save()` especially (writing the whole library, base64
+cover thumbnails included — 25+ MB isn't unusual) is real, otherwise-invisible time. The dialog
+used to sit at a literal 100% for a noticeable stretch with the scan still running. Fixed two ways:
+`LibraryModel::onScanProgress()` now caps the displayed percentage at 92
+(`qMin(92, done * 100 / total)`), reserving the top of the bar for that trailing phase, and a new
+`LibraryScanner::scanFinalizing()` signal fires once, right after tag-reading ends and before
+`resolveCoverArt()`/`save()` start — `LibraryModel::finalizingScan` (a plain bool `Q_PROPERTY`)
+turns that into a "Finalizing scan (resolving cover art, saving library)…" message in
+`ScanFoldersDialog.qml`, replacing the frozen "Now scanning: `<last folder>`" text for that
+stretch. A true 100% is only ever reached in `onScanCompleted()`, right as the dialog closes.
 
 ### Genre Matching Rule (Version 2)
 
@@ -2210,8 +2259,8 @@ abstraction that makes this backend-agnostic.
 | `moveDown(index)` | invokable | Swap track with successor (not allowed on playing track). Calls `playlistManager.rewritePlaylist()` when a playlist is active and not locked. |
 | `moveTrack(from, to)` | invokable | Move any non-playing track from one queue index to another in a single step. Updates `m_currentIndex` if the currently playing track falls in the shifted range. Uses `QAbstractItemModel::beginMoveRows` / `endMoveRows` so the bound `ListView` animates the reorder automatically. Calls `playlistManager.rewritePlaylist()` when a playlist is active and not locked. |
 | `clearQueue()` | invokable | Stop playback, empty the queue, clear `activePlaylistName`, and reset `playlistLocked` to `false`. |
-| `loadPlaylistTracks(tracks)` | invokable | Replaces the entire queue with `tracks` — used exclusively by the "load a playlist" flows (`NowPlaying`/`PlaylistViewer` LOAD buttons). Behaves exactly like `clearQueue()`+`addTracks(tracks)` unless `crossfadeEnabled` is on and a track is currently playing (and both it and the new first track exceed `crossfadeSeconds`), in which case it crossfades directly into the new playlist's first track instead of a hard stop-then-restart — see UC-23. |
-| `setActivePlaylistName(name)` | invokable | Set the active playlist file name (e.g. `"GothicRock01.xml"`). Resets `playlistLocked` to `false`. Called from `NewPlaylistDialog` after successful creation, and from the load-playlist flow. |
+| `loadPlaylistTracks(tracks, playlistName)` | invokable | Replaces the entire queue with `tracks` and sets `playlistName` as the active playlist — used exclusively by the "load a playlist" flows (`NowPlaying`/`PlaylistViewer` LOAD buttons). Behaves exactly like `clearQueue()`+`addTracks(tracks)`+`setActivePlaylistName(playlistName)` unless `crossfadeEnabled` is on and a track is currently playing (and both it and the new first track exceed `crossfadeSeconds`), in which case it crossfades directly into the new playlist's first track instead of a hard stop-then-restart, applying `playlistName` at the crossfade's midpoint alongside the actual queue swap rather than immediately — see UC-23. |
+| `setActivePlaylistName(name)` | invokable | Set the active playlist file name (e.g. `"GothicRock01.xml"`). Resets `playlistLocked` to `false`. Called from `NewPlaylistDialog` after successful creation, and internally by `loadPlaylistTracks()`. |
 | `setPlaylistLocked(locked)` | invokable | Set the lock state. When unlocked (`false`), immediately calls `playlistManager.rewritePlaylist()` so the file reflects any changes made while locked. |
 | `setCurrentRating(rating)` | invokable | Set the current track's rating (1-10; no-op otherwise or if no track is loaded). Updates the queue entry and calls `RatingCache::setRating(genre, ratingId, rating)` to persist immediately, then emits `currentRatingChanged()` and `ratingStored(ratingId, rating)`. |
 | `deleteCurrentRating()` | invokable | Permanently remove the current track's rating (no-op if no track is loaded or it has no rating). Resets the queue entry's rating to 0 and calls `RatingCache::removeRating(ratingId)` to persist immediately, then emits `currentRatingChanged()` and `ratingStored(ratingId, 0)`. See UC-29. |
@@ -2487,15 +2536,21 @@ This is valid XSPF and no special handling is required.
    b. If the resulting absolute path exists → included in the result.
    c. If not found on any volume → silently skipped.
 6. `autoPlay.clearHistory()` resets AUTO PLAY's play-count history (if
-   bound), then `engine.loadPlaylistTracks(result.tracks)` **always**
-   replaces the queue — crossfading into it if eligible, or an instant
-   replace otherwise (see UC-23 for the full decision) — regardless of
-   whether a playlist was already active. (An earlier version of this step
-   only replaced when `engine.activePlaylistName ≠ ""`, falling back to a
-   silent `addTracks()` append otherwise — appending behind whatever was
-   already playing, with no effect on playback at all. Fixed: LOAD should
-   always mean "load this playlist now.")
-7. `engine.setActivePlaylistName(result.fileName)` sets the display name in the `PlaybackQueue` header.
+   bound), then `engine.loadPlaylistTracks(result.tracks, result.fileName)`
+   **always** replaces the queue — crossfading into it if eligible, or an
+   instant replace otherwise (see UC-23 for the full decision) — regardless
+   of whether a playlist was already active. (An earlier version of this
+   step only replaced when `engine.activePlaylistName ≠ ""`, falling back
+   to a silent `addTracks()` append otherwise — appending behind whatever
+   was already playing, with no effect on playback at all. Fixed: LOAD
+   should always mean "load this playlist now.")
+7. `result.fileName` becomes the active playlist name, setting the display
+   name in the `PlaybackQueue` header — applied by `loadPlaylistTracks()`
+   itself (step 6), at the right internal moment for whichever path it
+   took, rather than a second, separate `setActivePlaylistName()` call
+   here. (Used to be exactly that separate call; moved inside
+   `loadPlaylistTracks()` after a real bug traced to the gap between the
+   two — see UC-23's "Real bug fixed" note.)
 
 ### Alternate: All or some tracks missing
 
@@ -2516,9 +2571,8 @@ purely an in-memory filter for this one load.
 ### Alternate: Load from PlaylistViewer (PLAYLISTS tab)
 
 `PlaylistViewer`'s own **LOAD** button (see UC-22) triggers the identical
-effect — same step-6/7 branch (`loadPlaylistTracks()` if a playlist was
-already active, else `addTracks()`), `setActivePlaylistName()` — but skips
-steps 1-5 entirely: the file was already selected via `PlaylistsPanel`, and
+effect — same step-6/7 `loadPlaylistTracks(tracks, fileName)` call — but
+skips steps 1-5 entirely: the file was already selected via `PlaylistsPanel`, and
 `PlaylistManager.loadPlaylist()` was already called once (to build the
 preview) by `PlaylistsData.selectPlaylist()`. The already-parsed track list
 is reused from `PlaylistsData.selectedRawTracks` rather than re-reading and
@@ -2532,7 +2586,7 @@ clicked, not at selection/preview time.
 
 See UC-23 for the full mechanism. In short: if `AppConfig.crossfadeEnabled`
 is on and a track is currently playing when step 6 runs,
-`engine.loadPlaylistTracks()` fades the currently-playing track directly
+`engine.loadPlaylistTracks(tracks, fileName)` fades the currently-playing track directly
 into the new playlist's first track instead of stopping and restarting —
 otherwise (setting off, nothing playing, or either track too short for the
 configured crossfade length) it behaves exactly like the original
@@ -5077,13 +5131,14 @@ on, so only the most recent switch's name ever actually reaches the screen.
      UC-10's LOAD button, except no `FileDialog` is shown (the file was
      already picked in step 4) and no `PlaylistManager.loadPlaylist()`
      re-parse happens — the already-cached `PlaylistsData.selectedRawTracks`
-     is handed straight to `PlaybackEngine.loadPlaylistTracks()`, which
-     **always** replaces the queue, crossfading into it if eligible (see
-     UC-23), followed by `engine.setActivePlaylistName(selectedFileName)`
+     is handed straight to `PlaybackEngine.loadPlaylistTracks(tracks,
+     selectedFileName)`, which **always** replaces the queue, crossfading
+     into it if eligible (see UC-23) and applying `selectedFileName` as the
+     active playlist name at the correct moment for either case internally
      — exactly the same step-6 flow UC-10 uses.
    - **Genuinely empty** (0 tracks, 0 missing): still calls
-     `loadPlaylistTracks([])` + `setActivePlaylistName(selectedFileName)`
-     — the playlist becomes active with an empty queue, so
+     `loadPlaylistTracks([], selectedFileName)` — the playlist becomes
+     active with an empty queue, so
      LIBRARY/SEARCH additions start syncing to it (`PlaybackEngine`'s
      per-mutation XSPF sync), which is otherwise the *only* way a track
      can ever be added to a playlist file. A plain "EMPTY PLAYLIST" /
@@ -5302,12 +5357,15 @@ Design notes).
 ### Normal Flow
 
 1. UC-10 step 6 / UC-22 step 6 always call `PlaybackEngine
-   .loadPlaylistTracks(tracks)` — never `clearQueue()`+`addTracks()`
-   directly from QML — regardless of whether a playlist was already
-   active. (An earlier version of this step only called
+   .loadPlaylistTracks(tracks, playlistName)` — never `clearQueue()`+
+   `addTracks()` directly from QML — regardless of whether a playlist was
+   already active. (An earlier version of this step only called
    `loadPlaylistTracks()` when `activePlaylistName ≠ ""`, silently
    appending via `addTracks()` otherwise — the bug that motivated this
-   fix, see UC-10's Normal Flow step 6 note.)
+   fix, see UC-10's Normal Flow step 6 note.) `playlistName` used to be a
+   second, separate `setActivePlaylistName()` call the QML caller made
+   right after this one — moved into this call's own parameter list after
+   a real bug (below) traced to exactly that separation.
 2. `loadPlaylistTracks()` checks eligibility: `AppConfig.crossfadeEnabled()`
    is on, `isPlaying()` is true, a track is current
    (`m_currentIndex >= 0`), and — the same rule `onDeckPositionChanged()`
@@ -5320,15 +5378,19 @@ Design notes).
    `startCrossfade()`) and the outgoing track's file path
    (`m_fadeOutFilePath`, since that track won't have a slot in the queue
    once it's replaced), builds the *entire new queue* into
-   `m_pendingQueue` (not `m_queue` yet), loads the new first track onto the
-   standby deck at volume `0` and starts it playing, then starts the same
-   `m_fadeTimer`/`onFadeTick()` ramp the natural crossfade uses — with a
-   new `m_crossfadeReplacesQueue = true` flag and `m_fadeTargetIndex = 0`.
+   `m_pendingQueue` (not `m_queue` yet), stores `playlistName` into
+   `m_pendingActivePlaylistName` (not applied yet either — see step 4),
+   loads the new first track onto the standby deck at volume `0` and
+   starts it playing, then starts the same `m_fadeTimer`/`onFadeTick()`
+   ramp the natural crossfade uses — with a new
+   `m_crossfadeReplacesQueue = true` flag and `m_fadeTargetIndex = 0`.
 4. At the fade's midpoint (`onFadeTick()`, `frac >= 0.5`, unchanged
    trigger): the UI-facing deck alias swaps as usual, and — only because
    `m_crossfadeReplacesQueue` is `true` — `m_queue` is replaced wholesale
    with `m_pendingQueue` (`beginResetModel`/`endResetModel`,
-   `queueCountChanged()`) *before* the existing, unmodified
+   `queueCountChanged()`), **immediately followed by
+   `setActivePlaylistName(m_pendingActivePlaylistName)`** — both inside the
+   same synchronous block, deliberately — *before* the existing, unmodified
    `switchCurrentIndexTo(m_fadeTargetIndex)` call, which now correctly
    resolves index `0` in the *new* queue. `NowPlaying`/`PlaybackQueue`
    update together at this instant, exactly like a natural crossfade's
@@ -5336,8 +5398,25 @@ Design notes).
 5. At fade completion (`frac >= 1.0`): the outgoing deck stops and its
    volume resets, same as always; `trackPlayedToCompletion` fires for the
    captured `m_fadeOutFilePath` (not a `m_queue` index lookup, since that
-   track is no longer in the queue) and the three new members reset so
-   they can never leak into a later, unrelated natural crossfade.
+   track is no longer in the queue) and the new members reset so they can
+   never leak into a later, unrelated natural crossfade.
+
+**Real bug fixed (2026-09-22): the old track briefly reappeared in `PlaylistViewer` during the
+crossfade.** Before `m_pendingActivePlaylistName` existed, `loadPlaylistTracks(tracks)` and
+`setActivePlaylistName(name)` were two independent calls the QML caller made back-to-back. For the
+crossfade-eligible path that's a real race: `setActivePlaylistName()` fired
+`activePlaylistNameChanged()` immediately, well before `m_queue` actually got replaced at the
+midpoint (step 4). `PlaylistViewer.qml`'s `isSelectedActiveInQueue` is a reactive binding on
+`activePlaylistName`, so it flipped `true` right away and rebuilt its live-queue mirror from
+`trackList()` — which still returned the **old** queue at that instant. The panel visibly showed
+the previous track (rendered through the same `AlbumCard` delegate `AlbumBrowser` uses, hence easy
+to mistake for "the AlbumBrowser") until the midpoint's `modelReset` triggered a second, correct
+refresh. Fixed by making `loadPlaylistTracks()` take the name itself and apply it via
+`setActivePlaylistName()` at exactly the same synchronous point `m_queue` gets replaced (step 4)
+for the crossfade path, or immediately for every other path (empty playlist, ineligible fallback,
+missing-first-track abort) — closing the race at its source rather than in either QML call site
+(there are two: `NowPlaying.qml`'s `_finishLoad()` and `PlaylistViewer.qml`'s LOAD handler, both
+had the identical bug).
 
 ### Alternate: Crossfade disabled or ineligible
 
@@ -5351,7 +5430,8 @@ incoming track being shorter than the configured crossfade length.
 Any queue-mutating method (`removeAt`, `moveUp`, `moveDown`, `moveTrack`,
 `clearQueue`) or `loadTrack()`/`seek()` calls `cancelCrossfade()` first, same
 as for a natural crossfade (UC-15) — now additionally resetting
-`m_crossfadeReplacesQueue`/`m_pendingQueue`/`m_fadeOutFilePath`. If canceled
+`m_crossfadeReplacesQueue`/`m_pendingQueue`/`m_fadeOutFilePath`/
+`m_pendingActivePlaylistName`. If canceled
 before the midpoint, the old queue and track are untouched and simply
 resume at full volume; if canceled after the midpoint, the new queue is
 already in place (the swap is synchronous, not gradual) and only the
@@ -6640,9 +6720,7 @@ non-Windows toolchains.
    playlist-conflict prompt, just two choices instead of three) —
    - **YES**: same as step 3, overwriting the existing in-folder file
      (`importPlaylistFile()` removes the destination first — `QFile::copy()`
-     itself refuses to overwrite — mirroring
-     `BackupRestoreController::restorePlaylistEntry()`'s own "overwrite"
-     action).
+     itself refuses to overwrite).
    - **NO**: still imported, just not under the colliding name — a real
      bug in the first shipped version of UC-30 loaded directly from the
      original external location instead, leaving `activePlaylistName` set
@@ -6653,11 +6731,10 @@ non-Windows toolchains.
      playing. Fixed by generating a de-conflicted name instead:
      `PlaylistManager::findAvailableCopyName(nameWithExt)` tries
      `"<base>-1<ext>"` through `"<base>-9<ext>"` and imports under the
-     first free one (a 9-slot cap, but a plain `"-N"` suffix rather than
-     `BackupRestoreController::restorePlaylistEntry()`'s own zero-padded
-     `"- Copy 0N"` scheme for RESTORE's equivalent playlist-name
-     collision, UC-27 — the two are independent methods on different
-     classes, deliberately not sharing an implementation). If all 9 are
+     first free one (a 9-slot cap; UC-27's RESTORE has no equivalent
+     per-file collision scheme any more — a restore is a wholesale
+     wipe-and-replace of the whole playlist folder, not a per-file
+     decision, see UC-27's Extension section). If all 9 are
      taken, the import is aborted outright — no fallback — with an
      "AMBIGUOUS PLAYLIST" / "Too many ambiguous Playlists are in the
      Playlist Folder.\nThe Playlist could not be imported." `MessageBox`;
@@ -6665,7 +6742,7 @@ non-Windows toolchains.
 5. Every successful branch funnels through one shared `NowPlaying.qml`
    function, `_finishLoad(result)` — the exact body
    `loadPlaylistDialog.onAccepted` had before UC-30 (crossfade-eligible
-   `loadPlaylistTracks()` + `setActivePlaylistName()` +
+   `loadPlaylistTracks(tracks, result.fileName)` +
    `missingPlaylistTracks()` for any unresolvable entries) — so every
    outcome (in-folder, imported under its own name, or imported under a
    de-conflicted copy name) finishes identically once a `loadPlaylist()`

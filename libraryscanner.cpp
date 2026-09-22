@@ -74,8 +74,10 @@ static inline QString albumKey(const TrackInfo &t)
 // dispatch overhead.
 static constexpr int kTagReadChunkSize = 200;
 
-QList<QFileInfo> LibraryScanner::discoverAudioFiles(const QString &dirPath, bool recursive) const
+QList<QFileInfo> LibraryScanner::discoverAudioFiles(const QString &dirPath, bool recursive)
 {
+    emit scanningFolder(dirPath);
+
     QList<QFileInfo> result;
     const QDir::Filters dirFilter =
         QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Readable;
@@ -322,6 +324,7 @@ void LibraryScanner::performScan(QStringList genres, QVariantList folders,
     // 4. Resolve album cover art — one deterministic, order-independent pass
     //    (see resolveCoverArt()) instead of the old fully sequential,
     //    processing-order-dependent dedup.
+    emit scanFinalizing();
     resolveCoverArt(result, pool);
     if (m_cancelRequested.load(std::memory_order_relaxed)) return;
 

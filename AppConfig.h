@@ -135,6 +135,10 @@ class AppConfig : public QObject
     // (Windowed) -- see Main.qml's `visibility` binding.
     Q_PROPERTY(bool startFullscreen READ startFullscreen NOTIFY startFullscreenChanged)
 
+    // Opt-in SCAN FOLDERS progress dialog (Setup > MISC). Default false --
+    // see ScanFoldersDialog.qml/LibraryModel's currentScanFolder/recentScanFiles.
+    Q_PROPERTY(bool visualFolderScanning READ visualFolderScanning NOTIFY visualFolderScanningChanged)
+
     // Opt-in for NowPlaying's delete-current-rating trash-bin button
     // (Setup > MISC). Default false -- the button doesn't render in
     // NowPlaying at all until this is turned on. See UC-29.
@@ -253,6 +257,7 @@ public:
     int playbackQueueWidth()   const { return m_playbackQueueWidth; }
     int nowPlayingWidth()      const { return m_nowPlayingWidth;    }
     bool startFullscreen()     const { return m_startFullscreen;   }
+    bool visualFolderScanning() const { return m_visualFolderScanning; }
     bool deleteCurrentRatingEnabled() const { return m_deleteCurrentRatingEnabled; }
     QString albumBrowserSortOrder() const { return m_albumBrowserSortOrder; }
 
@@ -377,6 +382,7 @@ public:
     Q_INVOKABLE void saveWindowPosition(int x, int y, const QString &screenName);
 
     Q_INVOKABLE void setStartFullscreen(bool enabled);
+    Q_INVOKABLE void setVisualFolderScanning(bool enabled);
     Q_INVOKABLE void setDeleteCurrentRatingEnabled(bool enabled);
     // Ignores anything other than "artistYearAlbum"/"artistAlbum" (no-op) --
     // same validation convention as setAutoPlaySongRepeat().
@@ -512,6 +518,7 @@ signals:
     void windowGeometryChanged();
     void panelWidthsChanged();
     void startFullscreenChanged();
+    void visualFolderScanningChanged();
     void deleteCurrentRatingEnabledChanged();
     void albumBrowserSortOrderChanged();
     void crossfadeChanged();
@@ -563,6 +570,7 @@ private:
     int m_playbackQueueWidth = 374;
     int m_nowPlayingWidth    = 359;
     bool m_startFullscreen   = false;
+    bool m_visualFolderScanning = false;
     bool m_deleteCurrentRatingEnabled = false;
     QString m_albumBrowserSortOrder = QStringLiteral("artistYearAlbum");
 

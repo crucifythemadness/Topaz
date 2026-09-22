@@ -331,7 +331,7 @@ Rectangle {
             id: treeScrollTrack
             z: 2   // guarantee hit-testing above delegate content, regardless of stacking order
             anchors { right: treeList.right; top: treeList.top; bottom: treeList.bottom }
-            width: 4
+            width: 8   // doubled from 4 -- easier to grab/drag with the left mouse button
             color: Theme.surfaceContainerLowest
             Rectangle {
                 id: treeScrollThumb

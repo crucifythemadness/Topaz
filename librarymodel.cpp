@@ -194,6 +194,12 @@ void LibraryModel::startWorkerThread()
     connect(m_scanWorker, &LibraryScanner::scanCompleted,
             this, &LibraryModel::onScanCompleted,
             Qt::QueuedConnection);
+    connect(m_scanWorker, &LibraryScanner::scanningFolder,
+            this, &LibraryModel::onScanningFolder,
+            Qt::QueuedConnection);
+    connect(m_scanWorker, &LibraryScanner::scanFinalizing,
+            this, &LibraryModel::onScanFinalizing,
+            Qt::QueuedConnection);
 
     // Commands → worker thread (queued so they execute on the worker's event loop)
     connect(this, &LibraryModel::_requestFullScan,
@@ -392,6 +398,19 @@ bool LibraryModel::albumBrowserSortByYear() const
 
 void LibraryModel::onScanStarted()
 {
+    // Visual Folder Scanning (Setup > MISC): cleared here, UNCONDITIONALLY,
+    // before the early-return below -- onScanStarted() is "the very first
+    // thing performScan() does" for every scan regardless of which trigger
+    // fired it (see LibraryScanner::scanStarted()'s doc comment), so this is
+    // the one choke point that covers all of them, including the two most
+    // common cases (a manual SCAN FOLDERS click, the startup stat-check)
+    // where m_scanning is already true by the time this runs and the early
+    // return below would otherwise skip a reset placed after it.
+    m_currentScanFolder.clear();
+    m_finalizingScan = false;
+    emit currentScanFolderChanged();
+    emit finalizingScanChanged();
+
     // Already optimistically set by startFullScan()/rescanFolderContaining()/
     // loadCacheAndStartStatCheck() -- avoid a redundant, no-op
     // scanningChanged() emission for those. This is the ONLY path that
@@ -408,16 +427,40 @@ void LibraryModel::onScanStarted()
 
 void LibraryModel::onScanProgress(int done, int total)
 {
-    m_scanProgress = (total > 0) ? (done * 100 / total) : 0;
+    // Capped at 92, not 100: discover/classify/tag-read (what done/total
+    // actually measure) is only PART of a scan -- resolveCoverArt() and
+    // LibraryCache::save() still follow (the latter especially can take
+    // real, otherwise-invisible time: it writes the whole library, base64
+    // cover thumbnails included). Letting the bar hit 100 here made a
+    // Visual Folder Scanning dialog sit at "100%" for a noticeable stretch
+    // with the scan still very much running -- reserving the top 8% for
+    // that finalizing phase (see onScanFinalizing()) keeps the bar honest;
+    // it only ever reaches a true 100 in onScanCompleted().
+    m_scanProgress = (total > 0) ? qMin(92, done * 100 / total) : 0;
     emit scanProgressChanged();
+}
+
+void LibraryModel::onScanningFolder(const QString &path)
+{
+    if (m_currentScanFolder == path) return;
+    m_currentScanFolder = path;
+    emit currentScanFolderChanged();
+}
+
+void LibraryModel::onScanFinalizing()
+{
+    m_finalizingScan = true;
+    emit finalizingScanChanged();
 }
 
 void LibraryModel::onScanCompleted(QList<TrackInfo> tracks)
 {
     m_scanning     = false;
     m_scanProgress = 100;
+    m_finalizingScan = false;
     emit scanningChanged();
     emit scanProgressChanged();
+    emit finalizingScanChanged();
     applyTracks(std::move(tracks));
 
     // A scan may have detected a configured folder disappearing/

@@ -41,6 +41,9 @@ class LibraryModel : public QAbstractListModel
     Q_PROPERTY(AppConfig* appConfig  READ appConfig  WRITE setAppConfig  NOTIFY appConfigChanged)
     Q_PROPERTY(bool        scanning   READ scanning   NOTIFY scanningChanged)
     Q_PROPERTY(int         scanProgress READ scanProgress NOTIFY scanProgressChanged)
+    // Visual Folder Scanning (Setup > MISC, opt-in) -- see ScanFoldersDialog.qml.
+    Q_PROPERTY(QString currentScanFolder READ currentScanFolder NOTIFY currentScanFolderChanged)
+    Q_PROPERTY(bool    finalizingScan    READ finalizingScan    NOTIFY finalizingScanChanged)
     Q_PROPERTY(int         trackCount READ trackCount  NOTIFY trackCountChanged)
     Q_PROPERTY(int         albumCount READ albumCount  NOTIFY albumCountChanged)
     Q_PROPERTY(int         ratingCount READ ratingCount NOTIFY ratingCountChanged)
@@ -81,6 +84,8 @@ public:
     AppConfig *appConfig()    const { return m_appConfig; }
     bool       scanning()     const { return m_scanning; }
     int        scanProgress() const { return m_scanProgress; }
+    QString    currentScanFolder() const { return m_currentScanFolder; }
+    bool       finalizingScan()    const { return m_finalizingScan; }
     int        trackCount()   const { return m_tracks.size(); }
     int        albumCount()   const { return m_albumCount; }
     // Number of tracks in the current library with a rating (1-10) set --
@@ -252,6 +257,8 @@ signals:
     void appConfigChanged();
     void scanningChanged();
     void scanProgressChanged();
+    void currentScanFolderChanged();
+    void finalizingScanChanged();
     void trackCountChanged();
     void albumCountChanged();
     void ratingCountChanged();
@@ -296,6 +303,10 @@ private slots:
     void onScanStarted();
     void onScanProgress(int done, int total);
     void onScanCompleted(QList<TrackInfo> tracks);
+    // Visual Folder Scanning (Setup > MISC) -- see LibraryScanner's matching
+    // signals' doc comments.
+    void onScanningFolder(const QString &path);
+    void onScanFinalizing();
 
 private:
     void applyTracks(QList<TrackInfo> &&tracks);
@@ -323,6 +334,8 @@ private:
     QThread          *m_scanThread   = nullptr;
     bool              m_scanning     = false;
     int               m_scanProgress = 0;
+    QString           m_currentScanFolder;
+    bool              m_finalizingScan = false;
     bool              m_ratingsReady = false;
     bool              m_removingAbandonedRatings = false;
     int               m_abandonedRatingsProgress = 0;

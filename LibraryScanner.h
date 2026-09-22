@@ -96,6 +96,24 @@ signals:
     void scanProgress(int done, int total);
     void scanCompleted(QList<TrackInfo> tracks);
 
+    // ── Visual Folder Scanning (Setup > MISC, opt-in) ────────────────────
+    // scanningFolder reuses a checkpoint that already exists rather than
+    // adding any new per-file cost: fires once per directory visited (from
+    // discoverAudioFiles(), already one call per folder, not per file). A
+    // naive per-file signal would mean 12,000+ cross-thread queued-signal
+    // posts for a full library scan; this stays within a few thousand at
+    // most, regardless of library size.
+    void scanningFolder(const QString &path);
+
+    // Emitted once, right after the discover/classify/tag-read phase ends
+    // and before the two remaining steps that scanProgress never covers --
+    // resolveCoverArt() and LibraryCache::save() (the latter especially:
+    // writing a large Topaz.library.json, base64 cover thumbnails included,
+    // is real, otherwise-invisible time on every scan). Lets a progress
+    // dialog show it's still doing real work instead of sitting at a
+    // premature 100% while nothing visibly happens.
+    void scanFinalizing();
+
 private slots:
     void onDirectoryChanged(const QString &path);
     void onDebounceTimeout();
@@ -116,7 +134,9 @@ private:
     // Recursively lists every *.mp3/*.flac/*.opus file under dirPath. Pure
     // filesystem listing, no tag reads — stays sequential (fast compared to
     // TagReader::read(), so parallelizing it wouldn't move the needle).
-    QList<QFileInfo> discoverAudioFiles(const QString &dirPath, bool recursive) const;
+    // Not const: emits scanningFolder() once per directory visited (Visual
+    // Folder Scanning, Setup > MISC).
+    QList<QFileInfo> discoverAudioFiles(const QString &dirPath, bool recursive);
 
     // Reads tags (no cover) for every path in `paths` in parallel over `pool`,
     // in chunks — checks m_cancelRequested and emits scanProgress(done, total)

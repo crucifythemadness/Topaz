@@ -1482,7 +1482,7 @@ Popup {
                                                 enabled: loudnessBlock.correctionOn && audiophileStrategyBlock.selected
                                                 from: -15.0
                                                 to:   15.0
-                                                stepSize: 0.5
+                                                stepSize: 0.1
                                                 snapMode: Slider.SnapAlways
                                                 // qmllint disable missing-property
                                                 value: root.appConfig ? root.appConfig.audiophileTrimDb : 0.0
@@ -1645,7 +1645,7 @@ Popup {
                                                 enabled: loudnessBlock.correctionOn && backgroundStrategyBlock.selected
                                                 from: -15.0
                                                 to:   15.0
-                                                stepSize: 0.5
+                                                stepSize: 0.1
                                                 snapMode: Slider.SnapAlways
                                                 // qmllint disable missing-property
                                                 value: root.appConfig ? root.appConfig.backgroundTrimDb : 0.0
@@ -4259,6 +4259,67 @@ Popup {
                                 }
                             }
                         }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        height: 1
+                        color: Theme.ov20
+                    }
+
+                    // ── Visual Folder Scanning row ───────────────────────
+                    // Opt-in SCAN FOLDERS progress dialog (auto-opens on any
+                    // scan start, auto-closes on completion) -- see
+                    // ScanFoldersDialog.qml.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 16
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Visual Folder Scanning"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        // Same 48x24/18x18 pill toggle as the other MISC toggles.
+                        // Both visualFolderScanning/setVisualFolderScanning are
+                        // real AppConfig members (qmllint --ignore-settings
+                        // reports 0) -- see CLAUDE.md's "Editor diagnostics" note.
+                        // qmllint disable missing-property
+                        Rectangle {
+                            id: visualFolderScanningTrack
+                            readonly property bool on:
+                                root.appConfig !== null && root.appConfig.visualFolderScanning
+
+                            width: 48; height: 24
+                            radius: 12
+                            color: on ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: visualFolderScanningTrack.on ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setVisualFolderScanning(
+                                            !root.appConfig.visualFolderScanning)
+                                }
+                            }
+                        }
+                        // qmllint enable missing-property
                     }
 
                     Rectangle {

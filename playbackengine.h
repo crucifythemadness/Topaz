@@ -215,7 +215,22 @@ public:
     // short for the configured crossfade length (same eligibility rule as
     // the natural crossfade). No other queue-mutating path is affected by
     // any of this -- see UC-23.
-    Q_INVOKABLE void loadPlaylistTracks(const QVariantList &tracks);
+    //
+    // playlistName is applied via setActivePlaylistName() internally,
+    // synchronized with when m_queue itself actually changes -- NOT
+    // necessarily synchronously with this call. For the crossfade-eligible
+    // path, m_queue isn't replaced until the crossfade's midpoint (see
+    // onFadeTick()), so the caller used to have to make a second, separate
+    // setActivePlaylistName() call right after this one; that left a real
+    // window (the whole first half of the crossfade) where
+    // activePlaylistNameChanged() had already fired but m_queue/trackList()
+    // still reflected the OLD queue -- PlaylistViewer.qml's
+    // isSelectedActiveInQueue reacts to the name change immediately and
+    // rebuilds its live-queue mirror from trackList(), so it would briefly
+    // show the previous track before the real swap landed. Taking the name
+    // as a parameter here lets this method apply it at exactly the right
+    // moment for each path instead.
+    Q_INVOKABLE void loadPlaylistTracks(const QVariantList &tracks, const QString &playlistName);
 
     // Returns all queued tracks as a list of maps suitable for PlaylistManager.
     // Each map contains: filePath, title, artist, albumArtist, album,
@@ -472,6 +487,10 @@ private:
     bool             m_crossfadeReplacesQueue = false;
     QList<TrackInfo> m_pendingQueue;
     QString          m_fadeOutFilePath;
+    // The playlist name loadPlaylistTracks() was given, applied via
+    // setActivePlaylistName() at the same midpoint moment m_pendingQueue
+    // swaps into m_queue -- see loadPlaylistTracks()'s own doc comment.
+    QString          m_pendingActivePlaylistName;
 
     QFutureWatcher<QByteArray> m_coverWatcher;
 };

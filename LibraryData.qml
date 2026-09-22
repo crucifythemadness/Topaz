@@ -200,6 +200,32 @@ Item {
             if (_genreModel.get(i).active) names.push(_genreModel.get(i).name)
         }
         activeGenreNames = names
+
+        // selectedGenre must always name a currently-active genre, or be
+        // empty -- otherwise AlbumBrowser's filteredAlbums() keeps narrowing
+        // to a genre GenreBar/LibraryTree no longer show as selected at all.
+        // Real bug this fixed: toggleGenre()'s own selectedGenre reconciliation
+        // (auto-select a neighbour, or clear it) only ran on the LIBRARY tab,
+        // so deactivating the currently-selected genre while on SEARCH/
+        // PLAYLISTS left selectedGenre pointing at a genre activeGenreNames no
+        // longer contained -- AlbumBrowser (freshly recreated by Main.qml's
+        // Loader on returning to LIBRARY) kept showing that stale genre's
+        // albums even though nothing looked selected in GenreBar/LibraryTree.
+        // Unlike the artist/album preservation below, this runs regardless of
+        // activeTab: an invalid selectedGenre is never worth keeping around
+        // for when the user tabs back. Falls back to the first still-active
+        // genre if one exists, otherwise clears it (AlbumBrowser then shows
+        // all active genres, or nothing if none are active -- same as
+        // filteredAlbums()'s existing "no genre selected" behavior). Clears
+        // selectedArtist/selectedAlbum together with it -- they'd otherwise
+        // reference an entry under the now-gone genre -- but only when this
+        // reconciliation actually fires, not on every ordinary toggle.
+        if (selectedGenre !== "" && !names.includes(selectedGenre)) {
+            selectedGenre  = names.length > 0 ? names[0] : ""
+            selectedArtist = ""
+            selectedAlbum  = ""
+        }
+
         // Only clear the drill-down selection on the LIBRARY tab -- while
         // SEARCH is active, toggling a genre (e.g. for "Consider Genre")
         // must not disturb whatever artist/album the user had selected in

@@ -238,9 +238,14 @@ Rectangle {
                         // it crossfades into the new playlist when CROSSFADE
                         // is on and something is currently playing,
                         // otherwise it's an instant replace (see UC-23).
+                        // playlistName is applied internally at the right
+                        // moment for each case (immediately, or -- during a
+                        // crossfade -- at its midpoint, alongside the actual
+                        // queue swap) rather than as a separate call here;
+                        // see loadPlaylistTracks()'s doc comment for the bug
+                        // that fixed.
                         if (root.autoPlay) root.autoPlay.clearHistory()
-                        root.engine.loadPlaylistTracks(tracks)
-                        root.engine.setActivePlaylistName(loadedFileName)
+                        root.engine.loadPlaylistTracks(tracks, loadedFileName)
                     } else if (root.engine && tracks.length === 0 && missing.length === 0) {
                         // Genuinely empty playlist -- still becomes the
                         // active playlist (so LIBRARY/SEARCH additions
@@ -248,8 +253,7 @@ Rectangle {
                         // auto-sync), just with nothing queued to play.
                         // See UC-22/UC-09.
                         if (root.autoPlay) root.autoPlay.clearHistory()
-                        root.engine.loadPlaylistTracks([])
-                        root.engine.setActivePlaylistName(loadedFileName)
+                        root.engine.loadPlaylistTracks([], loadedFileName)
                         emptyPlaylistBox.open()
                     }
                     // Selection deliberately stays on the just-loaded
@@ -499,7 +503,7 @@ Rectangle {
             id: resultScrollTrack
             z: 2   // guarantee hit-testing above delegate content, regardless of stacking order
             anchors { right: resultList.right; top: resultList.top; bottom: resultList.bottom }
-            width: 4
+            width: 8   // doubled from 4 -- easier to grab/drag with the left mouse button
             color: Theme.surfaceContainerLowest
             Rectangle {
                 id: resultScrollThumb
