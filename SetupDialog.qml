@@ -1170,6 +1170,18 @@ Popup {
                                  "<br><br><a href=\"https://www.un4seen.com/\">https://www.un4seen.com/</a>"
                     }
 
+                    // Shown when "Consistent Background Music" is picked without
+                    // the BASS_FX add-on next to Topaz -- see UC-35. Like
+                    // bass.dll itself, bass_fx is never bundled.
+                    MessageBox {
+                        id: missingBassFxBox
+                        title: "LOUDNESS CORRECTION"
+                        message: "<b>Consistent Background Music</b> needs the BASS_FX add-on.<br><br>" +
+                                 "Download <b>bass_fx.dll</b> (Windows) or <b>libbass_fx.so</b> (Linux) " +
+                                 "and place it next to Topaz, then try again." +
+                                 "<br><br><a href=\"https://www.un4seen.com/\">https://www.un4seen.com/</a>"
+                    }
+
                     // Shown right when the user actually switches backends --
                     // see UC-15 "Step 2b". Not shown for clicking the
                     // already-selected option, and not shown on the
@@ -1200,82 +1212,494 @@ Popup {
                             color: Theme.fgSurface
                         }
 
-                        Row {
-                            Layout.leftMargin: 24
-                            spacing: 32
+                        RowLayout {
+                            Layout.fillWidth: true
 
-                            Repeater {
-                                model: [
-                                    { value: "ffmpeg", label: "FFmpeg" },
-                                    { value: "bass",    label: "BASS Audio Library" }
-                                ]
+                            Row {
+                                id: backendRadioRow
+                                Layout.leftMargin: 24
+                                spacing: 32
 
-                                delegate: RowLayout {
-                                    spacing: 8
+                                // x of the "BASS Audio Library" radio inside this
+                                // row (kept up to date by that delegate) -- the
+                                // Auto Loudness Correction block below is aligned
+                                // under it.
+                                property real bassX: 0
 
-                                    readonly property bool selected:
-                                        root.appConfig !== null
-                                        && root.appConfig.audioBackend === modelData.value
+                                Repeater {
+                                    model: [
+                                        { value: "ffmpeg", label: "FFmpeg" },
+                                        { value: "bass",    label: "BASS Audio Library" }
+                                    ]
 
-                                    Rectangle {
-                                        width: 18; height: 18
-                                        radius: 9
-                                        color: "transparent"
-                                        border.width: 2
-                                        border.color: selected ? Theme.secondary : Theme.outlineVariant
+                                    delegate: RowLayout {
+                                        spacing: 8
+
+                                        readonly property bool selected:
+                                            root.appConfig !== null
+                                            && root.appConfig.audioBackend === modelData.value
+
+                                        onXChanged: if (modelData.value === "bass") backendRadioRow.bassX = x
 
                                         Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 10; height: 10
-                                            radius: 5
-                                            color: Theme.secondary
-                                            visible: selected
-                                        }
-                                    }
+                                            width: 18; height: 18
+                                            radius: 9
+                                            color: "transparent"
+                                            border.width: 2
+                                            border.color: selected ? Theme.secondary : Theme.outlineVariant
 
-                                    Text {
-                                        text: modelData.label
-                                        font.family:    Theme.fontFamilyBody
-                                        font.pixelSize: Theme.labelXl
-                                        color: Theme.fgSurface
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (!root.appConfig) return
-                                            if (selected) return // already this backend, nothing changed
-                                            if (modelData.value === "bass"
-                                                && !root.appConfig.bassLibraryAvailable()) {
-                                                missingBassDllsBox.open()
-                                                return
+                                            Rectangle {
+                                                anchors.centerIn: parent
+                                                width: 10; height: 10
+                                                radius: 5
+                                                color: Theme.secondary
+                                                visible: selected
                                             }
-                                            root.appConfig.setAudioBackend(modelData.value)
-                                            playbackBackendChangedBox.open()
+                                        }
+
+                                        Text {
+                                            text: modelData.label
+                                            font.family:    Theme.fontFamilyBody
+                                            font.pixelSize: Theme.labelXl
+                                            color: Theme.fgSurface
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (!root.appConfig) return
+                                                if (selected) return // already this backend, nothing changed
+                                                if (modelData.value === "bass"
+                                                    && !root.appConfig.bassLibraryAvailable()) {
+                                                    missingBassDllsBox.open()
+                                                    return
+                                                }
+                                                root.appConfig.setAudioBackend(modelData.value)
+                                                playbackBackendChangedBox.open()
+                                            }
                                         }
                                     }
                                 }
                             }
+
+                            Item { Layout.fillWidth: true }
+
+                            // Reports what's actually running THIS session --
+                            // distinct from the radio group, which is only the
+                            // stored preference for the *next* launch (and
+                            // silently gets corrected back to FFmpeg if BASS was
+                            // selected but turned out unusable). See UC-15
+                            // "Step 2b" / PlaybackEngine.activeBackendName.
+                            Text {
+                                text: "Currently active: " +
+                                      (root.playbackEngine && root.playbackEngine.activeBackendName
+                                           ? root.playbackEngine.activeBackendName
+                                           : "—")
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.labelMd
+                                font.weight:    Font.Bold
+                                color: Theme.fgSurface
+                            }
                         }
 
-                        // Reports what's actually running THIS session --
-                        // distinct from the radio group above, which is only
-                        // the stored preference for the *next* launch (and
-                        // silently gets corrected back to FFmpeg if BASS was
-                        // selected but turned out unusable). See UC-15
-                        // "Step 2b" / PlaybackEngine.activeBackendName.
-                        Text {
-                            Layout.leftMargin: 24
-                            Layout.topMargin: 16
-                            text: "Currently active: " +
-                                  (root.playbackEngine && root.playbackEngine.activeBackendName
-                                       ? root.playbackEngine.activeBackendName
-                                       : "—")
-                            font.family:    Theme.fontFamilyBody
-                            font.pixelSize: Theme.labelSm
-                            font.weight:    Font.Bold
-                            color: Theme.fgSurface
+                        // ── Auto Loudness Correction (UC-35) ─────────────
+                        // Placed right under the "BASS Audio Library" radio
+                        // (aligned to its left edge). Everything here is BASS
+                        // only: greyed out and inert while FFmpeg is the
+                        // selected backend, and the two strategy radios also
+                        // need the checkbox on. The settings are live -- the
+                        // running BASS engine reacts at once (PlaybackEngine).
+                        ColumnLayout {
+                            id: loudnessBlock
+                            Layout.leftMargin: 24 + backendRadioRow.bassX
+                            Layout.topMargin: 20
+                            spacing: 14
+
+                            readonly property bool bassSelected:
+                                root.appConfig !== null && root.appConfig.audioBackend === "bass"
+                            readonly property bool correctionOn:
+                                bassSelected && root.appConfig.autoLoudnessCorrection
+
+                            // Checkbox -- same visual idiom as the GENRES /
+                            // Milkdrop-cleanup checkboxes.
+                            RowLayout {
+                                spacing: 10
+                                opacity: loudnessBlock.bassSelected ? 1.0 : 0.35
+
+                                Rectangle {
+                                    width: 18; height: 18
+                                    radius: 3
+                                    color: loudnessBlock.correctionOn ? Theme.secondaryContainer : "transparent"
+                                    border.width: loudnessBlock.correctionOn ? 0 : 1
+                                    border.color: Theme.outlineVariant
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        visible: loudnessBlock.correctionOn
+                                        text: "✓"
+                                        font.pixelSize: 11
+                                        font.weight: Font.Bold
+                                        color: Theme.fgSecondaryContainer
+                                    }
+                                }
+
+                                Text {
+                                    text: "Auto Loudness Correction"
+                                    font.family:    Theme.fontFamilyBody
+                                    font.pixelSize: Theme.labelXl
+                                    color: Theme.fgSurface
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    enabled: loudnessBlock.bassSelected
+                                    hoverEnabled: true
+                                    cursorShape: loudnessBlock.bassSelected ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("Evens out the loudness of your tracks while playing with the BASS Audio Library. Your audio files are never changed.")
+                                    onClicked: {
+                                        if (root.appConfig)
+                                            root.appConfig.setAutoLoudnessCorrection(
+                                                !root.appConfig.autoLoudnessCorrection)
+                                    }
+                                }
+                            }
+
+                            // Strategy radios + Trim sliders (same visuals as "Playback with" /
+                            // the crossfade Length slider). Bigger gap (24, vs. the checkbox
+                            // block's 10) between the two strategies so each radio's Trim
+                            // slider has room right under it, as asked.
+                            ColumnLayout {
+                                Layout.leftMargin: 28
+                                spacing: 24
+                                opacity: loudnessBlock.correctionOn ? 1.0 : 0.35
+
+                                // ── Audiophile/Critical Listening ─────────────────────
+                                ColumnLayout {
+                                    id: audiophileStrategyBlock
+                                    spacing: 10
+
+                                    readonly property bool selected:
+                                        root.appConfig !== null
+                                        && root.appConfig.loudnessStrategy === "audiophile"
+
+                                    RowLayout {
+                                        spacing: 8
+
+                                        Rectangle {
+                                            width: 18; height: 18
+                                            radius: 9
+                                            color: "transparent"
+                                            border.width: 2
+                                            border.color: audiophileStrategyBlock.selected ? Theme.secondary : Theme.outlineVariant
+
+                                            Rectangle {
+                                                anchors.centerIn: parent
+                                                width: 10; height: 10
+                                                radius: 5
+                                                color: Theme.secondary
+                                                visible: audiophileStrategyBlock.selected
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "Audiophile/Critical Listening"
+                                            font.family:    Theme.fontFamilyBody
+                                            font.pixelSize: Theme.labelXl
+                                            color: Theme.fgSurface
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            enabled: loudnessBlock.correctionOn
+                                            hoverEnabled: true
+                                            cursorShape: loudnessBlock.correctionOn ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.delay:   600
+                                            ToolTip.text:    "Sets each track to the same level: uses a ReplayGain tag when the file has one, otherwise measures the track once and remembers the result.\n" +
+                                                             "K-weighted gated loudness (EBU R128 / ReplayGain 2.0 method, reference target -18 LUFS)"
+                                            onClicked: {
+                                                if (!root.appConfig || audiophileStrategyBlock.selected) return
+                                                root.appConfig.setLoudnessStrategy("audiophile")
+                                            }
+                                        }
+                                    }
+
+                                    // Trim: a manual correction on top of the automatic one
+                                    // above -- e.g. an outboard dB-meter reading the -18 LUFS
+                                    // reference as too quiet. Applied live; NEVER written to
+                                    // Topaz.volumeNormalization.json (only the automatic
+                                    // reference value is).
+                                    ColumnLayout {
+                                        Layout.leftMargin: 28
+                                        spacing: 8
+                                        opacity: audiophileStrategyBlock.selected ? 1.0 : 0.35
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Text {
+                                                text: "Trim"
+                                                font.family:    Theme.fontFamilyBody
+                                                font.pixelSize: Theme.titleMd
+                                                font.weight:    Font.Medium
+                                                color: Theme.fgSurface
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    ToolTip.visible: containsMouse
+                                                    ToolTip.delay:   600
+                                                    ToolTip.text:    qsTr("Manual correction on top of the automatic one -- not saved to the analysis file, only ever applied live")
+                                                }
+                                            }
+                                            Item { Layout.fillWidth: true }
+                                            Text {
+                                                text: (audiophileTrimSlider.value > 0 ? "+" : "")
+                                                      + audiophileTrimSlider.value.toFixed(1) + " dB"
+                                                font.family:    Theme.fontFamilyMono
+                                                font.pixelSize: Theme.labelLg
+                                                font.weight:    Font.Bold
+                                                color: Theme.secondary
+                                            }
+                                        }
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 8
+
+                                            Text {
+                                                text: "-15 dB"
+                                                font.family:    Theme.fontFamilyMono
+                                                font.pixelSize: Theme.labelSm
+                                                color: Theme.fgSurfaceVariant
+                                            }
+
+                                            Slider {
+                                                id: audiophileTrimSlider
+                                                Layout.fillWidth: true
+                                                enabled: loudnessBlock.correctionOn && audiophileStrategyBlock.selected
+                                                from: -15.0
+                                                to:   15.0
+                                                stepSize: 0.5
+                                                snapMode: Slider.SnapAlways
+                                                // qmllint disable missing-property
+                                                value: root.appConfig ? root.appConfig.audiophileTrimDb : 0.0
+
+                                                onMoved: {
+                                                    if (root.appConfig)
+                                                        root.appConfig.setAudiophileTrimDb(value)
+                                                }
+                                                // qmllint enable missing-property
+
+                                                background: Rectangle {
+                                                    x: audiophileTrimSlider.leftPadding
+                                                    y: audiophileTrimSlider.topPadding
+                                                       + audiophileTrimSlider.availableHeight / 2 - height / 2
+                                                    implicitWidth:  200
+                                                    implicitHeight: 4
+                                                    width:  audiophileTrimSlider.availableWidth
+                                                    height: implicitHeight
+                                                    radius: 2
+                                                    color:  Theme.surfaceContainerHighest
+
+                                                    Rectangle {
+                                                        width:  audiophileTrimSlider.visualPosition * parent.width
+                                                        height: parent.height
+                                                        radius: 2
+                                                        color:  Theme.secondary
+                                                    }
+                                                }
+
+                                                handle: Rectangle {
+                                                    x: audiophileTrimSlider.leftPadding
+                                                       + audiophileTrimSlider.visualPosition
+                                                         * (audiophileTrimSlider.availableWidth - width)
+                                                    y: audiophileTrimSlider.topPadding
+                                                       + audiophileTrimSlider.availableHeight / 2 - height / 2
+                                                    implicitWidth:  16
+                                                    implicitHeight: 16
+                                                    width:  implicitWidth
+                                                    height: implicitHeight
+                                                    radius: 8
+                                                    color: Theme.secondary
+                                                }
+                                            }
+
+                                            Text {
+                                                text: "+15 dB"
+                                                font.family:    Theme.fontFamilyMono
+                                                font.pixelSize: Theme.labelSm
+                                                color: Theme.fgSurfaceVariant
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // ── Consistent Background Music ───────────────────────
+                                ColumnLayout {
+                                    id: backgroundStrategyBlock
+                                    spacing: 10
+
+                                    readonly property bool selected:
+                                        root.appConfig !== null
+                                        && root.appConfig.loudnessStrategy === "background"
+
+                                    RowLayout {
+                                        spacing: 8
+
+                                        Rectangle {
+                                            width: 18; height: 18
+                                            radius: 9
+                                            color: "transparent"
+                                            border.width: 2
+                                            border.color: backgroundStrategyBlock.selected ? Theme.secondary : Theme.outlineVariant
+
+                                            Rectangle {
+                                                anchors.centerIn: parent
+                                                width: 10; height: 10
+                                                radius: 5
+                                                color: Theme.secondary
+                                                visible: backgroundStrategyBlock.selected
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "Consistent Background Music"
+                                            font.family:    Theme.fontFamilyBody
+                                            font.pixelSize: Theme.labelXl
+                                            color: Theme.fgSurface
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            enabled: loudnessBlock.correctionOn
+                                            hoverEnabled: true
+                                            cursorShape: loudnessBlock.correctionOn ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.delay:   600
+                                            ToolTip.text:    "A compressor that continuously evens out the volume of everything you play. Needs the BASS_FX add-on."
+                                            onClicked: {
+                                                if (!root.appConfig || backgroundStrategyBlock.selected) return
+                                                if (!root.appConfig.bassFxAvailable()) {
+                                                    missingBassFxBox.open()
+                                                    return
+                                                }
+                                                root.appConfig.setLoudnessStrategy("background")
+                                            }
+                                        }
+                                    }
+
+                                    // Trim: a manual correction on top of the compressor's own
+                                    // make-up gain -- e.g. this strategy already plays louder
+                                    // (around -6/-4 dB); Trim adjusts that further. Applied
+                                    // live; NEVER written to Topaz.volumeNormalization.json.
+                                    ColumnLayout {
+                                        Layout.leftMargin: 28
+                                        spacing: 8
+                                        opacity: backgroundStrategyBlock.selected ? 1.0 : 0.35
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Text {
+                                                text: "Trim"
+                                                font.family:    Theme.fontFamilyBody
+                                                font.pixelSize: Theme.titleMd
+                                                font.weight:    Font.Medium
+                                                color: Theme.fgSurface
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    ToolTip.visible: containsMouse
+                                                    ToolTip.delay:   600
+                                                    ToolTip.text:    qsTr("Manual correction on top of the compressor's own make-up gain -- not saved to the analysis file, only ever applied live")
+                                                }
+                                            }
+                                            Item { Layout.fillWidth: true }
+                                            Text {
+                                                text: (backgroundTrimSlider.value > 0 ? "+" : "")
+                                                      + backgroundTrimSlider.value.toFixed(1) + " dB"
+                                                font.family:    Theme.fontFamilyMono
+                                                font.pixelSize: Theme.labelLg
+                                                font.weight:    Font.Bold
+                                                color: Theme.secondary
+                                            }
+                                        }
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 8
+
+                                            Text {
+                                                text: "-15 dB"
+                                                font.family:    Theme.fontFamilyMono
+                                                font.pixelSize: Theme.labelSm
+                                                color: Theme.fgSurfaceVariant
+                                            }
+
+                                            Slider {
+                                                id: backgroundTrimSlider
+                                                Layout.fillWidth: true
+                                                enabled: loudnessBlock.correctionOn && backgroundStrategyBlock.selected
+                                                from: -15.0
+                                                to:   15.0
+                                                stepSize: 0.5
+                                                snapMode: Slider.SnapAlways
+                                                // qmllint disable missing-property
+                                                value: root.appConfig ? root.appConfig.backgroundTrimDb : 0.0
+
+                                                onMoved: {
+                                                    if (root.appConfig)
+                                                        root.appConfig.setBackgroundTrimDb(value)
+                                                }
+                                                // qmllint enable missing-property
+
+                                                background: Rectangle {
+                                                    x: backgroundTrimSlider.leftPadding
+                                                    y: backgroundTrimSlider.topPadding
+                                                       + backgroundTrimSlider.availableHeight / 2 - height / 2
+                                                    implicitWidth:  200
+                                                    implicitHeight: 4
+                                                    width:  backgroundTrimSlider.availableWidth
+                                                    height: implicitHeight
+                                                    radius: 2
+                                                    color:  Theme.surfaceContainerHighest
+
+                                                    Rectangle {
+                                                        width:  backgroundTrimSlider.visualPosition * parent.width
+                                                        height: parent.height
+                                                        radius: 2
+                                                        color:  Theme.secondary
+                                                    }
+                                                }
+
+                                                handle: Rectangle {
+                                                    x: backgroundTrimSlider.leftPadding
+                                                       + backgroundTrimSlider.visualPosition
+                                                         * (backgroundTrimSlider.availableWidth - width)
+                                                    y: backgroundTrimSlider.topPadding
+                                                       + backgroundTrimSlider.availableHeight / 2 - height / 2
+                                                    implicitWidth:  16
+                                                    implicitHeight: 16
+                                                    width:  implicitWidth
+                                                    height: implicitHeight
+                                                    radius: 8
+                                                    color: Theme.secondary
+                                                }
+                                            }
+
+                                            Text {
+                                                text: "+15 dB"
+                                                font.family:    Theme.fontFamilyMono
+                                                font.pixelSize: Theme.labelSm
+                                                color: Theme.fgSurfaceVariant
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

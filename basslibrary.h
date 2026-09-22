@@ -48,6 +48,27 @@ inline constexpr BASS_DWORD BASS_SYNC_END       = 2;
 // float samples regardless of the stream's own native format. See UC-15
 // "Step 3" / BassAudioDeck's buffer tap.
 inline constexpr BASS_DWORD BASS_DATA_FLOAT     = 0x40000000u;
+// Stream-creation flags (bass.h). Auto Loudness Correction's analysis pass
+// (loudnessanalyzer.cpp) opens the file as a DECODE stream: nothing is played,
+// no output device is involved, and the file is only ever read.
+inline constexpr BASS_DWORD BASS_SAMPLE_FLOAT   = 0x100u;
+inline constexpr BASS_DWORD BASS_STREAM_PRESCAN = 0x20000u;
+inline constexpr BASS_DWORD BASS_STREAM_DECODE  = 0x200000u;
+
+// ── BASS_FX (bass_fx.h) ─────────────────────────────────────────────────────
+// Only the "Compressor 2" effect is used (Setup > PLAYBACK > Auto Loudness
+// Correction > Consistent Background Music). The BFX effect types are the
+// ordinal positions in bass_fx.h's effect enum, starting at 0x10000.
+inline constexpr BASS_DWORD BASS_FX_BFX_COMPRESSOR2 = 0x10011u;
+inline constexpr int        BASS_BFX_CHANALL        = -1;
+struct BASS_BFX_COMPRESSOR2 {
+    float fGain;        // output gain after compression, dB   [-60..60]
+    float fThreshold;   // where compression begins, dB        [-60..0]
+    float fRatio;       // compression ratio                   [1..n]
+    float fAttack;      // attack, ms                          [0.01..1000]
+    float fRelease;     // release, ms                         [0.01..5000]
+    int   lChannel;     // BASS_BFX_CHANxxx
+};
 
 // ── BassLibrary ───────────────────────────────────────────────────────────
 // Runtime loader (QLibrary) for bass.dll, resolved next to Topaz.exe -- never
@@ -95,6 +116,23 @@ public:
     BASS_BOOL   (BASSCALL *BASS_ChannelGetInfo)(BASS_HANDLE handle, BASS_CHANNELINFO *info) = nullptr;
     BASS_DWORD  (BASSCALL *BASS_ChannelGetData)(BASS_HANDLE handle, void *buffer, BASS_DWORD length) = nullptr;
 
+    // Effects (bass.h) -- resolved OPTIONALLY (not part of load()'s must-have
+    // set) so an older/odd bass.dll can never stop playback from working just
+    // because the loudness compressor can't be used. Only ever called when
+    // fxLoaded() is true.
+    BASS_HANDLE (BASSCALL *BASS_ChannelSetFX)(BASS_HANDLE handle, BASS_DWORD type, int priority) = nullptr;
+    BASS_BOOL   (BASSCALL *BASS_ChannelRemoveFX)(BASS_HANDLE handle, BASS_HANDLE fx) = nullptr;
+    BASS_BOOL   (BASSCALL *BASS_FXSetParameters)(BASS_HANDLE fx, const void *params) = nullptr;
+    // Read-back of an attribute (BASS_ATTRIB_VOL) -- diagnostics/tests only.
+    BASS_BOOL   (BASSCALL *BASS_ChannelGetAttribute)(BASS_HANDLE handle, BASS_DWORD attrib, float *value) = nullptr;
+
+    // Loads bass_fx.dll / libbass_fx.so from next to the executable (same
+    // rule as bass.dll itself; never bundled -- the user supplies it) and
+    // checks the effect exports above exist. Requires load() to have
+    // succeeded first. Idempotent; false if the library is absent/unusable.
+    bool loadFx();
+    bool fxLoaded() const { return m_fxLoaded; }
+
 private:
     BassLibrary() = default;
     ~BassLibrary();
@@ -104,5 +142,8 @@ private:
     bool resolve(Fn &fn, const char *name);
 
     QLibrary m_bass;
-    bool m_loaded = false;
+    QLibrary m_bassFx;
+    bool m_loaded   = false;
+    bool m_fxLoaded = false;
+    bool m_fxWarned = false;
 };

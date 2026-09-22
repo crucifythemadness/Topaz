@@ -3,11 +3,13 @@
 #include "bassaudiodeck.h"
 #include "basslibrary.h"
 #include "ffmpegaudiodeck.h"
+#include "loudnessanalyzer.h"
 #include "ratingcache.h"
 #include "tagreader.h"
 
 #include <QCursor>
 #include <QFileInfo>
+#include <cmath>
 #include <QGuiApplication>
 #include <QUrl>
 #include <QtConcurrent>
@@ -24,6 +26,17 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     m_fadeTimer = new QTimer(this);
     m_fadeTimer->setInterval(40); // ~25 volume updates/sec — smooth enough for a linear fade
     connect(m_fadeTimer, &QTimer::timeout, this, &PlaybackEngine::onFadeTick);
+
+    // "Consistent Background Music" live estimate (UC-35 follow-up) -- always
+    // connected (cheap early-return in the slot when not applicable, same
+    // "inert when unused" principle as the rest of Auto Loudness Correction).
+    connect(this, &PlaybackEngine::audioBufferAvailable,
+            this, &PlaybackEngine::onAudioBufferForCompressorMeter);
+    m_compressorMeterTimer = new QTimer(this);
+    // Display cadence -- 50ms was too twitchy in practice (user feedback),
+    // 500ms reads as a calm, still clearly "live" meter.
+    m_compressorMeterTimer->setInterval(500);
+    connect(m_compressorMeterTimer, &QTimer::timeout, this, &PlaybackEngine::onCompressorMeterTick);
 
     connect(&m_coverWatcher, &QFutureWatcher<QByteArray>::finished,
             this, [this]() {
@@ -49,7 +62,13 @@ PlaybackEngine::~PlaybackEngine() = default;
 void PlaybackEngine::setAppConfig(AppConfig *cfg)
 {
     if (m_appConfig == cfg) return;
+    if (m_appConfig)
+        disconnect(m_appConfig, &AppConfig::loudnessSettingsChanged,
+                   this, &PlaybackEngine::applyLoudnessSettings);
     m_appConfig = cfg;
+    if (m_appConfig)
+        connect(m_appConfig, &AppConfig::loudnessSettingsChanged,
+                this, &PlaybackEngine::applyLoudnessSettings);
     emit appConfigChanged();
     createDecksIfNeeded();
 }
@@ -116,7 +135,13 @@ void PlaybackEngine::createDecksIfNeeded()
     }
 
     m_deck = m_decks[m_activeDeck];
+    m_bassRunning = useBass;
     emit activeBackendNameChanged();
+
+    // Auto Loudness Correction (UC-35): a saved "Consistent Background Music"
+    // choice needs the compressor on both decks from the first track on. A
+    // no-op when the feature is off / the engine isn't BASS.
+    applyLoudnessSettings();
 }
 
 QString PlaybackEngine::activeBackendName() const
@@ -276,6 +301,33 @@ int PlaybackEngine::currentRating() const
     return m_queue.at(m_currentIndex).rating;
 }
 
+// Shared by both currentLoudnessText() branches below: "+X.X dB" / "-X.X dB",
+// one decimal, never "-0.0".
+static QString formatLoudnessDb(double db)
+{
+    db = std::round(db * 10.0) / 10.0;
+    if (db == 0.0) db = 0.0;
+    return QStringLiteral("%1%2 dB")
+        .arg(db > 0.0 ? QStringLiteral("+") : QString())
+        .arg(db, 0, 'f', 1);
+}
+
+QString PlaybackEngine::currentLoudnessText() const
+{
+    if (loudnessAudiophile()) {
+        if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
+        const auto it = m_loudnessDb.constFind(m_queue.at(m_currentIndex).filePath);
+        if (it == m_loudnessDb.constEnd()) return {};
+        return formatLoudnessDb(appliedAudiophileGain(it.value()));
+    }
+    if (loudnessBackground()) {
+        if (!m_compressorMeterHasData) return {};   // nothing decoded yet -- don't flash a stale/zero value
+        const double trim = m_appConfig ? m_appConfig->backgroundTrimDb() : 0.0;
+        return formatLoudnessDb(m_compressorMeter.currentGainDb(BassAudioDeck::kCompMakeupDb, trim));
+    }
+    return {};
+}
+
 QString PlaybackEngine::currentCoverSource() const
 {
     if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
@@ -323,6 +375,11 @@ void PlaybackEngine::addTrack(const QVariantMap &trackMap, bool autoPlayAdded)
     endInsertRows();
     emit queueCountChanged();
 
+    // Auto Loudness Correction (UC-35): analyse it in the background right
+    // away (urgent when it is the playing or the next track), so its value
+    // is ready long before it plays. No-op unless BASS + feature on.
+    requestLoudness(t, row <= m_currentIndex + 1);
+
     // Sync active playlist
     if (m_playlistManager && !m_activePlaylistName.isEmpty())
         m_playlistManager->appendTrack(m_activePlaylistName, trackMap);
@@ -359,6 +416,11 @@ void PlaybackEngine::addTracks(const QVariantList &trackList)
         m_queue.append(trackFromMap(v.toMap()));
     endInsertRows();
     emit queueCountChanged();
+
+    // Auto Loudness Correction (UC-35), see addTrack(): the playing / next
+    // tracks first, the rest of the list in the background.
+    for (int i = first; i < m_queue.size(); ++i)
+        requestLoudness(m_queue.at(i), i <= m_currentIndex + 1);
 
     // Sync active playlist (skip when locked)
     if (m_playlistManager && !m_activePlaylistName.isEmpty() && !m_playlistLocked) {
@@ -584,9 +646,14 @@ void PlaybackEngine::loadPlaylistTracks(const QVariantList &trackList)
     for (int i = 1; i < trackList.size(); ++i)
         m_pendingQueue.append(trackFromMap(trackList.at(i).toMap()));
 
-    m_decks[m_fadeInDeck]->setSource(firstNew.filePath);
+    loadIntoDeck(m_fadeInDeck, firstNew);
     m_decks[m_fadeInDeck]->setVolume(0.0f);
     m_decks[m_fadeInDeck]->play();
+
+    // Auto Loudness Correction (UC-35): the rest of the incoming playlist is
+    // analysed in the background (the second track first: it plays next).
+    for (int i = 1; i < m_pendingQueue.size(); ++i)
+        requestLoudness(m_pendingQueue.at(i), i == 1);
 
     m_crossfading            = true;
     m_crossfadeReplacesQueue = true;
@@ -769,7 +836,7 @@ bool PlaybackEngine::loadTrack(int idx)
     m_queueFinished = false;
     cancelCrossfade();
     m_deck->setVolume(1.0f);   // in case a fade left this deck's volume < 1
-    m_deck->setSource(t.filePath);
+    loadIntoDeck(m_activeDeck, t);   // == m_deck->setSource(t.filePath) + loudness gain (UC-35)
 
     switchCurrentIndexTo(idx);
     return true;
@@ -827,6 +894,158 @@ void PlaybackEngine::switchCurrentIndexTo(int idx)
     emit currentIndexChanged();
     emit currentTrackChanged();
     emit currentRatingChanged();
+    emit currentLoudnessChanged();
+
+    // Auto Loudness Correction (UC-35): the track after this one is the next
+    // to be loaded into a deck (hard cut or crossfade) -- make sure it is at
+    // the front of the analysis queue.
+    if (idx + 1 < m_queue.size())
+        requestLoudness(m_queue.at(idx + 1), true);
+}
+
+// ── Auto Loudness Correction (UC-35) ──────────────────────────────────────
+
+bool PlaybackEngine::loudnessAudiophile() const
+{
+    return m_bassRunning && m_appConfig && m_appConfig->autoLoudnessCorrection()
+        && m_appConfig->loudnessStrategy() == QStringLiteral("audiophile");
+}
+
+bool PlaybackEngine::loudnessBackground() const
+{
+    return m_bassRunning && m_appConfig && m_appConfig->autoLoudnessCorrection()
+        && m_appConfig->loudnessStrategy() == QStringLiteral("background");
+}
+
+// The reference value the analyzer determined (stored in m_loudnessDb and in
+// Topaz.volumeNormalization.json) plus the user's own "Trim" slider (Setup >
+// PLAYBACK, UC-35) -- the value actually applied to a deck and shown in
+// NowPlaying. The trim is deliberately NOT clamped further here (beyond its
+// own +-15 dB in AppConfig::setAudiophileTrimDb()): it is a manual "make it
+// louder even if a hot peak then clips" control, the same as a preamp would
+// be, so it must not be silently limited away.
+double PlaybackEngine::appliedAudiophileGain(double referenceDb) const
+{
+    return referenceDb + (m_appConfig ? m_appConfig->audiophileTrimDb() : 0.0);
+}
+
+void PlaybackEngine::requestLoudness(const TrackInfo &t, bool urgent)
+{
+    if (!loudnessAudiophile()) return;
+    if (m_loudnessDb.contains(t.filePath)) return;   // already known this session
+
+    if (!m_loudness) {
+        m_loudness = new LoudnessAnalyzer(this);
+        connect(m_loudness, &LoudnessAnalyzer::loudnessReady,
+                this, &PlaybackEngine::onLoudnessReady, Qt::QueuedConnection);
+    }
+    LoudnessAnalyzer::Request r;
+    r.filePath = t.filePath;
+    r.genre    = t.genre;
+    // fileSize stays 0: the worker stats the file itself, so a big playlist
+    // load never does filesystem I/O (possibly on a slow volume) on this thread.
+    r.id = TrackInfo::computeNormalizationId(t.albumArtist, t.artist, t.album, t.title);
+    m_loudness->request(r, urgent);
+}
+
+void PlaybackEngine::loadIntoDeck(int d, const TrackInfo &t)
+{
+    m_deckPath[d] = t.filePath;
+    m_decks[d]->setSource(t.filePath);   // also resets the deck's loudness gain to 0 dB
+
+    // New track: the "Consistent Background Music" live estimate must not
+    // carry the previous track's smoothed reduction into this one. Harmless
+    // (and cheap) to always do, regardless of which strategy is selected.
+    m_compressorMeter.reset();
+    m_compressorMeterHasData = false;
+
+    if (!loudnessAudiophile()) return;   // feature off / other strategy / FFmpeg: exactly as before
+
+    const auto it = m_loudnessDb.constFind(t.filePath);
+    if (it != m_loudnessDb.constEnd())
+        m_decks[d]->setLoudnessGainDb(float(appliedAudiophileGain(it.value())), false);   // known: correct from the first sample
+    requestLoudness(t, true);                                      // unknown: applied (smoothly) when it arrives
+}
+
+void PlaybackEngine::onLoudnessReady(const QString &filePath, double gainDb)
+{
+    m_loudnessDb.insert(filePath, gainDb);   // reference only -- Trim is never stored
+    if (!loudnessAudiophile()) return;   // switched off / changed strategy while it was being determined
+
+    for (int d = 0; d < 2; ++d)
+        if (m_decks[d] && m_deckPath[d] == filePath)
+            m_decks[d]->setLoudnessGainDb(float(appliedAudiophileGain(gainDb)), true);
+
+    if (m_currentIndex >= 0 && m_currentIndex < m_queue.size()
+        && m_queue.at(m_currentIndex).filePath == filePath)
+        emit currentLoudnessChanged();
+}
+
+void PlaybackEngine::applyLoudnessSettings()
+{
+    if (!m_bassRunning) return;
+    const bool background = loudnessBackground();
+    const bool audiophile = loudnessAudiophile();
+    if (!background && !audiophile && !m_loudnessWasActive) return;   // never used: nothing to undo
+    if (background || audiophile) m_loudnessWasActive = true;
+
+    const float backgroundTrim = m_appConfig ? float(m_appConfig->backgroundTrimDb()) : 0.0f;
+
+    for (int d = 0; d < 2; ++d) {
+        if (!m_decks[d]) continue;
+        m_decks[d]->setCompressorEnabled(background);
+        m_decks[d]->setCompressorTrimDb(backgroundTrim, true);   // harmless while the compressor is off
+        if (audiophile) {
+            const auto it = m_loudnessDb.constFind(m_deckPath[d]);
+            if (!m_deckPath[d].isEmpty() && it != m_loudnessDb.constEnd())
+                m_decks[d]->setLoudnessGainDb(float(appliedAudiophileGain(it.value())), true);
+        } else {
+            m_decks[d]->setLoudnessGainDb(0.0f, true);   // back to the original level
+        }
+    }
+
+    if (audiophile) {
+        // Analyse what is already queued: the playing and the next track first.
+        for (int i = 0; i < m_queue.size(); ++i)
+            requestLoudness(m_queue.at(i), i >= m_currentIndex && i <= m_currentIndex + 1);
+    }
+
+    // "Consistent Background Music" live estimate: only run the 500ms publish
+    // timer while it's actually needed, and start with a clean slate every
+    // time this strategy (re-)becomes active, so a stale reading from before
+    // it was switched off never flashes.
+    if (background) {
+        m_compressorMeter.reset();
+        m_compressorMeterHasData = false;
+        m_compressorMeterTimer->start();
+    } else {
+        m_compressorMeterTimer->stop();
+    }
+
+    emit currentLoudnessChanged();
+}
+
+void PlaybackEngine::onAudioBufferForCompressorMeter(const QAudioBuffer &buffer)
+{
+    if (!loudnessBackground()) return;
+    // BassAudioDeck::pollAudioBuffer() -- the only source of this signal
+    // while the Background strategy can even be selected (it requires BASS)
+    // -- always emits Float; a format check here would never actually fire,
+    // but stays as a defensive guard against future deck implementations.
+    if (buffer.format().sampleFormat() != QAudioFormat::Float) return;
+    const int frames   = buffer.frameCount();
+    const int channels = buffer.format().channelCount();
+    const int rate     = buffer.format().sampleRate();
+    if (frames <= 0 || channels <= 0 || rate <= 0) return;
+
+    m_compressorMeter.process(buffer.constData<float>(), frames, channels, rate);
+    m_compressorMeterHasData = true;
+}
+
+void PlaybackEngine::onCompressorMeterTick()
+{
+    if (!loudnessBackground() || !m_compressorMeterHasData) return;
+    emit currentLoudnessChanged();
 }
 
 void PlaybackEngine::clearCoverSource()
@@ -901,7 +1120,7 @@ void PlaybackEngine::startCrossfade()
         return;   // never flips m_crossfading / starts m_fadeTimer
     }
 
-    m_decks[m_fadeInDeck]->setSource(next.filePath);
+    loadIntoDeck(m_fadeInDeck, next);
     m_decks[m_fadeInDeck]->setVolume(0.0f);
     m_decks[m_fadeInDeck]->play();
 

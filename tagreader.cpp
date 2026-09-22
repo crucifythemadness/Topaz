@@ -6,6 +6,9 @@
 #include <QImage>
 #include <QStringDecoder>
 
+#include <cmath>
+#include <optional>
+
 // ── ID3v1 genre table (192 entries) ──────────────────────────────────────
 static const char *const kId3v1Genres[] = {
     "Blues","Classic Rock","Country","Dance","Disco","Funk","Grunge","Hip-Hop",
@@ -613,6 +616,228 @@ TrackInfo TagReader::read(const QString &filePath, bool generateCoverThumb)
     if (info.albumArtist.isEmpty()) info.albumArtist = info.artist;
 
     return info;
+}
+
+// ── readReplayGain ────────────────────────────────────────────────────────
+// (UC-35) Read-only scan for ReplayGain / R128 track gain + peak tags. See
+// tagreader.h for the value convention (dB to add to reach -18 LUFS).
+
+namespace {
+
+struct GainAccum {
+    std::optional<double> rgGain;    // REPLAYGAIN_TRACK_GAIN, dB
+    std::optional<double> rgPeak;    // REPLAYGAIN_TRACK_PEAK, linear
+    std::optional<double> r128Gain;  // Opus R128_TRACK_GAIN, dB relative to -23 LUFS
+};
+
+// "-6.54 dB", "+3.2dB", "-6,54 dB" (comma decimals exist in the wild), "0.987".
+std::optional<double> parseGainNumber(QString s)
+{
+    s = s.trimmed();
+    if (s.endsWith(QLatin1String("dB"), Qt::CaseInsensitive))
+        s.chop(2);
+    s = s.trimmed();
+    s.replace(QLatin1Char(','), QLatin1Char('.'));
+    bool ok = false;
+    const double v = s.toDouble(&ok);
+    if (!ok || !std::isfinite(v)) return std::nullopt;
+    return v;
+}
+
+void takeGainTag(const QString &keyIn, const QString &value, GainAccum &acc)
+{
+    const QString key = keyIn.trimmed().toUpper();
+    if (key == QLatin1String("REPLAYGAIN_TRACK_GAIN")) {
+        if (const auto v = parseGainNumber(value)) acc.rgGain = *v;
+    } else if (key == QLatin1String("REPLAYGAIN_TRACK_PEAK")) {
+        if (const auto v = parseGainNumber(value)) acc.rgPeak = *v;
+    } else if (key == QLatin1String("R128_TRACK_GAIN")) {
+        bool ok = false;
+        const int q78 = value.trimmed().toInt(&ok);   // signed Q7.8 dB
+        if (ok) acc.r128Gain = q78 / 256.0;
+    }
+}
+
+// Vorbis-comment block (FLAC VORBIS_COMMENT body, or an OpusTags packet from
+// byte 8): vendor string, then count x (length + "KEY=value"). All reads are
+// bounds-checked; two statements per skip on purpose (see readFlac()'s comment
+// on C++17 sequencing of "pos += 4 + int(leU32())").
+void scanVorbisCommentsForGain(const QByteArray &data, int pos, GainAccum &acc)
+{
+    auto leU32 = [&]() -> quint32 {
+        if (pos + 4 > data.size()) return 0;
+        const uchar *p = reinterpret_cast<const uchar *>(data.constData() + pos);
+        pos += 4;
+        return quint32(p[0]) | (quint32(p[1]) << 8) | (quint32(p[2]) << 16) | (quint32(p[3]) << 24);
+    };
+    const quint32 vendorLen = leU32();
+    pos += int(vendorLen);
+    const quint32 count = leU32();
+    for (quint32 i = 0; i < count && pos + 4 <= data.size(); ++i) {
+        const quint32 len = leU32();
+        if (len > quint32(data.size()) || pos + int(len) > data.size()) break;
+        // Skip picture comments (huge base64 blobs) without decoding them.
+        if (len > 100000) { pos += int(len); continue; }
+        const QString comment = QString::fromUtf8(data.constData() + pos, int(len));
+        pos += int(len);
+        const int eq = comment.indexOf(QLatin1Char('='));
+        if (eq <= 0) continue;
+        takeGainTag(comment.left(eq), comment.mid(eq + 1), acc);
+    }
+}
+
+// Decodes an ID3v2 text string in `enc` (0 Latin-1, 1 UTF-16 w/ BOM, 2 UTF-16BE,
+// 3 UTF-8).
+QString decodeId3String(const QByteArray &bytes, quint8 enc)
+{
+    // Same decoders as TagReader::decodeTextFrame(); Utf16 detects the BOM.
+    switch (enc) {
+    case 1: { auto d = QStringDecoder(QStringDecoder::Utf16);   return d(bytes); }
+    case 2: { auto d = QStringDecoder(QStringDecoder::Utf16BE); return d(bytes); }
+    case 3: return QString::fromUtf8(bytes);
+    default: return QString::fromLatin1(bytes);
+    }
+}
+
+// TXXX frame body: encoding byte, NUL-terminated description, value.
+void takeTxxxFrame(const QByteArray &fd, GainAccum &acc)
+{
+    if (fd.size() < 3) return;
+    const quint8 enc = quint8(fd[0]);
+    const bool wide = (enc == 1 || enc == 2);
+    int descEnd = -1;
+    if (wide) {
+        for (int i = 1; i + 1 < fd.size(); i += 2)
+            if (fd[i] == 0 && fd[i + 1] == 0) { descEnd = i; break; }
+    } else {
+        descEnd = fd.indexOf('\0', 1);
+    }
+    if (descEnd < 0) return;
+    const QString desc  = decodeId3String(fd.mid(1, descEnd - 1), enc);
+    QByteArray valBytes = fd.mid(descEnd + (wide ? 2 : 1));
+    QString value = decodeId3String(valBytes, enc);
+    const int nul = value.indexOf(QChar(0));
+    if (nul >= 0) value.truncate(nul);
+    takeGainTag(desc, value, acc);
+}
+
+// APEv2 tag at the end of the file (mp3gain / WavPack style), optionally
+// followed by a 128-byte ID3v1 block.
+void scanApeV2ForGain(QFile &f, GainAccum &acc)
+{
+    const qint64 size = f.size();
+    for (const qint64 tail : { qint64(0), qint64(128) }) {
+        if (size < 32 + tail) continue;
+        if (!f.seek(size - 32 - tail)) continue;
+        const QByteArray footer = f.read(32);
+        if (footer.size() != 32 || footer.left(8) != QByteArray("APETAGEX")) continue;
+        auto le32 = [&](int off) {
+            const uchar *p = reinterpret_cast<const uchar *>(footer.constData()) + off;
+            return quint32(p[0]) | (quint32(p[1]) << 8) | (quint32(p[2]) << 16) | (quint32(p[3]) << 24);
+        };
+        const quint32 tagSize = le32(12);   // items + footer, excludes an optional header
+        const quint32 items   = le32(16);
+        if (tagSize < 32 || tagSize > 1024 * 1024 || qint64(tagSize) > size - tail) continue;
+        if (!f.seek(size - tail - tagSize)) continue;
+        const QByteArray body = f.read(qint64(tagSize) - 32);
+        int pos = 0;
+        for (quint32 i = 0; i < items && pos + 9 <= body.size(); ++i) {
+            const uchar *p = reinterpret_cast<const uchar *>(body.constData()) + pos;
+            const quint32 valLen = quint32(p[0]) | (quint32(p[1]) << 8) | (quint32(p[2]) << 16) | (quint32(p[3]) << 24);
+            pos += 8;                                   // value size + flags
+            const int keyEnd = body.indexOf('\0', pos);
+            if (keyEnd < 0) break;
+            const QString key = QString::fromLatin1(body.constData() + pos, keyEnd - pos);
+            pos = keyEnd + 1;
+            if (pos + int(valLen) > body.size()) break;
+            takeGainTag(key, QString::fromUtf8(body.constData() + pos, int(valLen)), acc);
+            pos += int(valLen);
+        }
+        return;
+    }
+}
+
+} // namespace
+
+TagReader::ReplayGain TagReader::readReplayGain(const QString &filePath)
+{
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly)) return {};
+
+    GainAccum acc;
+    const QString ext = QFileInfo(filePath).suffix().toLower();
+
+    if (ext == QLatin1String("mp3")) {
+        uchar hdr[10];
+        if (f.read(reinterpret_cast<char *>(hdr), 10) == 10
+            && hdr[0] == 'I' && hdr[1] == 'D' && hdr[2] == '3' && hdr[3] >= 2 && hdr[3] != 0xFF) {
+            const quint8 version = hdr[3];
+            const quint32 tagSize = syncsafeToInt(hdr + 6);
+            if (tagSize > 0 && tagSize < 64u * 1024u * 1024u) {
+                const QByteArray tag = f.read(tagSize);
+                const int frameHdr = (version == 2) ? 6 : 10;
+                int pos = 0;
+                if ((hdr[5] & 0x40) && version >= 3 && tag.size() >= 4) {   // skip extended header
+                    const uchar *e = reinterpret_cast<const uchar *>(tag.constData());
+                    const quint32 ext32 = (version == 4)
+                        ? syncsafeToInt(e)
+                        : ((quint32(e[0]) << 24) | (quint32(e[1]) << 16) | (quint32(e[2]) << 8) | quint32(e[3]));
+                    pos = int((version == 4) ? ext32 : ext32 + 4);
+                }
+                while (pos + frameHdr <= tag.size()) {
+                    const uchar *fh = reinterpret_cast<const uchar *>(tag.constData()) + pos;
+                    if (fh[0] == 0) break;              // padding
+                    const bool v22 = (version == 2);
+                    const QByteArray id = tag.mid(pos, v22 ? 3 : 4);
+                    const quint32 fsize = v22
+                        ? ((quint32(fh[3]) << 16) | (quint32(fh[4]) << 8) | quint32(fh[5]))
+                        : (version == 4 ? syncsafeToInt(fh + 4)
+                                        : ((quint32(fh[4]) << 24) | (quint32(fh[5]) << 16) | (quint32(fh[6]) << 8) | quint32(fh[7])));
+                    pos += frameHdr;
+                    if (fsize == 0 || pos + int(fsize) > tag.size()) break;
+                    if (id == "TXXX" || id == "TXX")
+                        takeTxxxFrame(tag.mid(pos, int(fsize)), acc);
+                    pos += int(fsize);
+                }
+            }
+        }
+        if (!acc.rgGain) scanApeV2ForGain(f, acc);
+    } else if (ext == QLatin1String("flac")) {
+        if (f.read(4) == QByteArray("fLaC", 4)) {
+            while (!f.atEnd()) {
+                uchar bh[4];
+                if (f.read(reinterpret_cast<char *>(bh), 4) != 4) break;
+                const bool    last = (bh[0] & 0x80) != 0;
+                const quint8  type = bh[0] & 0x7F;
+                const quint32 len  = (quint32(bh[1]) << 16) | (quint32(bh[2]) << 8) | quint32(bh[3]);
+                if (type == 4) {
+                    scanVorbisCommentsForGain(f.read(len), 0, acc);
+                    break;                              // VORBIS_COMMENT is the only block we need
+                }
+                if (last || !f.seek(f.pos() + len)) break;
+            }
+        }
+    } else if (ext == QLatin1String("opus")) {
+        qint64 granulePos = 0;
+        const QByteArray head = readOggPacket(f, granulePos);
+        if (head.size() >= 12 && head.left(8) == QByteArray("OpusHead", 8)) {
+            const QByteArray tags = readOggPacket(f, granulePos);
+            if (tags.size() >= 8 && tags.left(8) == QByteArray("OpusTags", 8))
+                scanVorbisCommentsForGain(tags, 8, acc);
+        }
+    }
+
+    ReplayGain rg;
+    if (ext == QLatin1String("opus") && acc.r128Gain) {
+        rg.valid       = true;
+        rg.trackGainDb = *acc.r128Gain + 5.0;           // -23 LUFS reference -> -18 LUFS
+    } else if (acc.rgGain) {
+        rg.valid       = true;
+        rg.trackGainDb = *acc.rgGain;
+    }
+    if (rg.valid && acc.rgPeak && *acc.rgPeak > 0.0)
+        rg.trackPeak = *acc.rgPeak;
+    return rg;
 }
 
 // ── readRawCover ──────────────────────────────────────────────────────────

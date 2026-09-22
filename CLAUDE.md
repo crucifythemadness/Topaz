@@ -235,7 +235,9 @@ target machine, but `LD_LIBRARY_PATH` takes precedence over it (modern CMake emi
 `DT_RUNPATH`, not old-style `DT_RPATH`).
 
 Like the Windows deploy, BASS (`libbass.so`/`libbassflac.so`/`libbassopus.so`) is never
-bundled — the user supplies their own licensed copies next to `topaz-bin` if wanted.
+bundled — the user supplies their own licensed copies next to `topaz-bin` if wanted. The same
+goes for the optional BASS_FX add-on (`libbass_fx.so` / `bass_fx.dll`), needed only by Auto
+Loudness Correction's "Consistent Background Music" strategy (UC-35); Topaz loads it lazily.
 
 ### Editor diagnostics (VS Code Problems tab)
 
@@ -336,6 +338,8 @@ first) → calls `LibraryModel.filteredAlbums()`. `LibraryModel.filteredAlbums()
 - `Topaz.config` — app settings (genres, monitored folders, window/panel layout), JSON, at `QStandardPaths::AppConfigLocation`.
 - `Topaz.library.json` — scanned track cache, same directory.
 - `<AppConfigLocation>/playlists/<name>.xml` — XSPF v1 playlists, drive letters stripped from `<location>` for portability across drive-letter reassignment.
+- `Topaz.rating.json` — user ratings (authoritative; survives a library rebuild), same directory.
+- `Topaz.volumeNormalization.json` — per-track loudness gain of Auto Loudness Correction (BASS only, UC-35): `normalizationId` (same UUIDv5 as `ratingId`), `dB`, `source` (`tag`/`measured`), `peak`, `fileSize`. A recomputable cache, created only once the feature has analysed a track. **Topaz never writes to an audio file** — this JSON is all the feature persists.
 
 Config/cache directory: `%LOCALAPPDATA%\Topaz\` on Windows, `~/.config/Topaz/` on Linux
 (`QStandardPaths::AppConfigLocation`). `main.cpp` pins `setApplicationName("Topaz")` so this

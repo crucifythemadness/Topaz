@@ -38,6 +38,21 @@ public:
     // no embedded cover is found. Safe to call from any thread.
     static QByteArray readRawCover(const QString &filePath);
 
+    // ReplayGain information stored in a file's tags (UC-35, Auto Loudness
+    // Correction). Read-only: Topaz never writes tags. Gains are normalised
+    // to the ReplayGain 2.0 reference of -18 LUFS, i.e. trackGainDb is the
+    // dB to ADD to reach that level: ID3v2 TXXX:REPLAYGAIN_TRACK_GAIN, an
+    // APEv2 REPLAYGAIN_TRACK_GAIN item (mp3gain), a FLAC/Vorbis
+    // REPLAYGAIN_TRACK_GAIN comment, or for Opus R128_TRACK_GAIN (Q7.8,
+    // relative to -23 LUFS, so +5 dB to -18). Album gain is ignored: the
+    // queue is an arbitrary mix of albums. Safe to call from any thread.
+    struct ReplayGain {
+        bool   valid       = false;   // a track gain was found
+        double trackGainDb = 0.0;
+        double trackPeak   = 0.0;     // linear sample peak, 0 = not tagged
+    };
+    static ReplayGain readReplayGain(const QString &filePath);
+
 private:
     // Returns the byte offset of the first MPEG audio frame (= end of ID3 tag).
     static bool readId3v2(QFile &f, TrackInfo &info,

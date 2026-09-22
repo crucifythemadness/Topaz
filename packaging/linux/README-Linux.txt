@@ -75,6 +75,14 @@ copies of:
 directly next to topaz-bin in this folder. Without them Topaz uses the FFmpeg
 backend, which needs nothing extra.
 
+Auto Loudness Correction (Setup > PLAYBACK) only works with the BASS backend.
+Its "Audiophile/Critical Listening" strategy needs nothing more. Its
+"Consistent Background Music" strategy (a compressor) additionally needs the
+BASS_FX add-on, also supplied by you and placed next to topaz-bin:
+    libbass_fx.so
+Topaz never modifies your audio files; it only stores its results in
+~/.config/Topaz/Topaz.volumeNormalization.json.
+
 What's bundled
 --------------
 - topaz-bin            the executable

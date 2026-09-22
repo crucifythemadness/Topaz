@@ -114,6 +114,14 @@ qt_add_executable(topaz
     basslibrary.cpp
     bassaudiodeck.h
     bassaudiodeck.cpp
+    # Auto Loudness Correction (UC-35)
+    loudnessanalyzer.h
+    loudnessanalyzer.cpp
+    loudnesslog.h
+    volumenormalizationcache.h
+    volumenormalizationcache.cpp
+    compressormeter.h
+    compressormeter.cpp
     playbackengine.h
     playbackengine.cpp
     playlistmanager.h

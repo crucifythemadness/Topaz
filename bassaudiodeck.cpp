@@ -1,10 +1,13 @@
 #include "bassaudiodeck.h"
 
+#include "loudnesslog.h"
+
 #include <QAudioFormat>
 #include <QFile>
 #include <QMetaObject>
 #include <QTimer>
 
+#include <cmath>
 #include <string>
 
 namespace {
@@ -12,6 +15,11 @@ namespace {
 // ~23ms, so a visualizer-quality tap needs roughly this cadence. See class
 // doc comment point 3.
 constexpr int kBufferTapIntervalMs = 25;
+
+// Smooth loudness-gain change (UC-35): linear in dB over ~1.2 s.
+constexpr int kGainRampTickMs = 30;
+constexpr int kGainRampTotalMs = 1200;
+
 }
 
 BassAudioDeck::BassAudioDeck(QObject *parent)
@@ -20,6 +28,10 @@ BassAudioDeck::BassAudioDeck(QObject *parent)
     m_pollTimer = new QTimer(this);
     m_pollTimer->setInterval(100);
     connect(m_pollTimer, &QTimer::timeout, this, &BassAudioDeck::pollPosition);
+
+    m_gainRampTimer = new QTimer(this);
+    m_gainRampTimer->setInterval(kGainRampTickMs);
+    connect(m_gainRampTimer, &QTimer::timeout, this, &BassAudioDeck::onGainRampTick);
 
     m_bufferTapTimer = new QTimer(this);
     m_bufferTapTimer->setInterval(kBufferTapIntervalMs);
@@ -41,9 +53,23 @@ void BassAudioDeck::setSource(const QString &filePath)
     m_streamFreq  = 0;
     m_streamChans = 0;
     if (m_stream) {
-        bass.BASS_StreamFree(m_stream);
+        bass.BASS_StreamFree(m_stream);   // also frees any effect attached to it
         m_stream = 0;
     }
+    m_compressorFx = 0;
+
+    // A new stream starts at BASS's default volume (1.0) with no loudness
+    // correction, exactly as before the feature existed; PlaybackEngine sets
+    // the track's gain (and a crossfade's volume) right after this call. The
+    // compressor Trim (m_compTrimDb*) is NOT reset here -- it is a deck-level
+    // setting, not a per-track one, so a ramp in progress for it survives a
+    // track change; the shared timer is only stopped if that ramp has already
+    // finished (it is unconditionally restarted below via applyCompressor()
+    // if the compressor is wanted, which needs no ramp of its own here).
+    m_fadeVolume    = 1.0f;
+    m_gainDbTarget  = 0.0;
+    m_gainDbCurrent = 0.0;
+    if (m_compTrimDbCurrent == m_compTrimDbTarget) m_gainRampTimer->stop();
 
 #if defined(_WIN32)
     // BASS_UNICODE tells BASS the filename is UTF-16 (WCHAR*) rather than ANSI.
@@ -63,6 +89,8 @@ void BassAudioDeck::setSource(const QString &filePath)
 
     // See class doc comment for why this callback can't touch Qt state directly.
     bass.BASS_ChannelSetSync(m_stream, BASS_SYNC_END, 0, &BassAudioDeck::syncEndProc, this);
+
+    if (m_compressorWanted) applyCompressor();
 
     const BASS_QWORD lenBytes = bass.BASS_ChannelGetLength(m_stream, BASS_POS_BYTE);
     m_lastKnownDuration = static_cast<qint64>(bass.BASS_ChannelBytes2Seconds(m_stream, lenBytes) * 1000.0);
@@ -145,8 +173,123 @@ bool BassAudioDeck::isPlaying() const
 
 void BassAudioDeck::setVolume(float volume)
 {
+    m_fadeVolume = volume;
+    applyVolume();
+}
+
+void BassAudioDeck::applyVolume()
+{
     if (!m_stream) return;
-    BassLibrary::instance().BASS_ChannelSetAttribute(m_stream, BASS_ATTRIB_VOL, volume);
+    // 0 dB is exactly 1.0 (no pow() rounding), so with the feature off the
+    // attribute is bit-identical to what setVolume() was given.
+    const float gain = (m_gainDbCurrent == 0.0)
+        ? 1.0f : float(std::pow(10.0, m_gainDbCurrent / 20.0));
+    BassLibrary::instance().BASS_ChannelSetAttribute(m_stream, BASS_ATTRIB_VOL, m_fadeVolume * gain);
+}
+
+void BassAudioDeck::setLoudnessGainDb(float db, bool smooth)
+{
+    m_gainDbTarget = double(db);
+    if (!smooth || !m_stream || m_gainDbTarget == m_gainDbCurrent) {
+        m_gainDbCurrent = m_gainDbTarget;
+        applyVolume();
+        qCInfo(lcLoudness, "deck gain %.2f dB set", m_gainDbCurrent);
+        // Shared ramp timer: only stop it if the compressor Trim ramp isn't
+        // also using it right now (see onGainRampTick()).
+        if (m_compTrimDbCurrent == m_compTrimDbTarget) m_gainRampTimer->stop();
+        return;
+    }
+    m_gainDbStep = (m_gainDbTarget - m_gainDbCurrent) / double(kGainRampTotalMs / kGainRampTickMs);
+    m_gainRampTimer->start();
+    qCInfo(lcLoudness, "deck gain ramping %.2f -> %.2f dB", m_gainDbCurrent, m_gainDbTarget);
+}
+
+void BassAudioDeck::setCompressorTrimDb(float db, bool smooth)
+{
+    m_compTrimDbTarget = double(db);
+    if (!smooth || m_compTrimDbTarget == m_compTrimDbCurrent) {
+        m_compTrimDbCurrent = m_compTrimDbTarget;
+        applyCompressor();
+        qCInfo(lcLoudness, "compressor trim %.2f dB set", m_compTrimDbCurrent);
+        if (m_gainDbCurrent == m_gainDbTarget) m_gainRampTimer->stop();
+        return;
+    }
+    m_compTrimDbStep = (m_compTrimDbTarget - m_compTrimDbCurrent) / double(kGainRampTotalMs / kGainRampTickMs);
+    m_gainRampTimer->start();
+    qCInfo(lcLoudness, "compressor trim ramping %.2f -> %.2f dB", m_compTrimDbCurrent, m_compTrimDbTarget);
+}
+
+// Drives both ramps below off one shared timer (loudness gain and compressor
+// Trim are independent settings -- one per-track, one deck-level -- but both
+// are just "linear in dB over ~1.2s", so one timer/tick serves both; it keeps
+// running while either is still short of its target).
+void BassAudioDeck::onGainRampTick()
+{
+    bool stillRamping = false;
+
+    if (m_gainDbCurrent != m_gainDbTarget) {
+        m_gainDbCurrent += m_gainDbStep;
+        const bool reached = (m_gainDbStep > 0.0) ? (m_gainDbCurrent >= m_gainDbTarget)
+                                                  : (m_gainDbCurrent <= m_gainDbTarget);
+        if (reached) m_gainDbCurrent = m_gainDbTarget; else stillRamping = true;
+        applyVolume();
+    }
+    if (m_compTrimDbCurrent != m_compTrimDbTarget) {
+        m_compTrimDbCurrent += m_compTrimDbStep;
+        const bool reached = (m_compTrimDbStep > 0.0) ? (m_compTrimDbCurrent >= m_compTrimDbTarget)
+                                                       : (m_compTrimDbCurrent <= m_compTrimDbTarget);
+        if (reached) m_compTrimDbCurrent = m_compTrimDbTarget; else stillRamping = true;
+        applyCompressor();
+    }
+    if (!stillRamping) m_gainRampTimer->stop();
+}
+
+void BassAudioDeck::setCompressorEnabled(bool on)
+{
+    if (m_compressorWanted == on) return;
+    m_compressorWanted = on;
+    applyCompressor();
+}
+
+void BassAudioDeck::applyCompressor()
+{
+    if (!m_stream) return;
+    auto &bass = BassLibrary::instance();
+
+    if (!m_compressorWanted) {
+        if (m_compressorFx) {
+            bass.BASS_ChannelRemoveFX(m_stream, m_compressorFx);
+            m_compressorFx = 0;
+        }
+        return;
+    }
+    if (!m_compressorFx) {
+        // Never fatal: without bass_fx (or if BASS refuses the effect)
+        // playback simply carries on uncompressed.
+        if (!bass.loadFx()) return;
+        m_compressorFx = bass.BASS_ChannelSetFX(m_stream, BASS_FX_BFX_COMPRESSOR2, 0);
+        if (!m_compressorFx) {
+            qWarning("BassAudioDeck: compressor effect could not be added, BASS error %d",
+                     bass.BASS_ErrorGetCode());
+            return;
+        }
+    }
+    // Reached whenever the effect is (re-)added AND whenever just the Trim
+    // changes while it's already attached (see setCompressorTrimDb()) -- the
+    // struct is always sent in full; BASS_FXSetParameters has no "just one
+    // field" form.
+    BASS_BFX_COMPRESSOR2 p{};
+    p.fGain      = kCompMakeupDb + float(m_compTrimDbCurrent);
+    p.fThreshold = kCompThresholdDb;
+    p.fRatio     = kCompRatio;
+    p.fAttack    = kCompAttackMs;
+    p.fRelease   = kCompReleaseMs;
+    p.lChannel   = BASS_BFX_CHANALL;
+    if (!bass.BASS_FXSetParameters(m_compressorFx, &p)) {
+        qWarning("BassAudioDeck: compressor parameters rejected, BASS error %d", bass.BASS_ErrorGetCode());
+        bass.BASS_ChannelRemoveFX(m_stream, m_compressorFx);
+        m_compressorFx = 0;
+    }
 }
 
 void BassAudioDeck::pollPosition()

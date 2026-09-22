@@ -41,6 +41,26 @@ public:
     // regardless of which backend is behind this call.
     virtual void setVolume(float volume) = 0;
 
+    // Auto Loudness Correction (UC-35) -- BASS only. Both default to "do
+    // nothing", so FfmpegAudioDeck (and any deck when the feature is off)
+    // behaves exactly as before.
+    //
+    // A static loudness correction in dB (negative = quieter) applied ON TOP of
+    // whatever setVolume() last set: the deck multiplies the two, so the
+    // crossfade ramp in PlaybackEngine::onFadeTick() stays untouched. smooth
+    // ramps to the new value over ~1.2 s instead of jumping (a correction
+    // that arrives while the track is already audible). Reset to 0 dB by
+    // setSource().
+    virtual void setLoudnessGainDb(float db, bool smooth) { Q_UNUSED(db) Q_UNUSED(smooth) }
+    // "Consistent Background Music": a compressor on the deck's stream that
+    // evens out the volume as it plays. Survives setSource().
+    virtual void setCompressorEnabled(bool on) { Q_UNUSED(on) }
+    // Manual "Trim" on top of the compressor's own make-up gain (Setup >
+    // PLAYBACK, UC-35) -- a deck-level setting, unlike setLoudnessGainDb()'s
+    // per-track one, so (unlike that one) it survives setSource(). smooth
+    // ramps it like setLoudnessGainDb() does.
+    virtual void setCompressorTrimDb(float db, bool smooth) { Q_UNUSED(db) Q_UNUSED(smooth) }
+
 signals:
     // Fired whenever position advances during playback (poll-driven for
     // BassAudioDeck, native for FfmpegAudioDeck) -- drives both

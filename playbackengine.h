@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audiodeck.h"
+#include "compressormeter.h"
 #include "playlistmanager.h"
 #include "trackinfo.h"
 
@@ -8,9 +9,11 @@
 #include <QQmlEngine>
 #include <QAudioBuffer>
 #include <QFutureWatcher>
+#include <QHash>
 #include <QTimer>
 
 class AppConfig;
+class LoudnessAnalyzer;
 
 // ── PlaybackEngine ────────────────────────────────────────────────────────
 // QAbstractListModel that IS the playback queue model.
@@ -71,6 +74,12 @@ class PlaybackEngine : public QAbstractListModel
     Q_PROPERTY(QString currentFormat    READ currentFormat    NOTIFY currentTrackChanged)
     Q_PROPERTY(int     currentBitrate   READ currentBitrate   NOTIFY currentTrackChanged)
     Q_PROPERTY(int     currentRating    READ currentRating    NOTIFY currentRatingChanged)
+    // Auto Loudness Correction (UC-35): the static correction applied to the
+    // current track, formatted for NowPlaying ("-1.2 dB", "+2.0 dB"). Empty
+    // unless the feature is on with the "Audiophile" strategy on the BASS
+    // engine AND the value is already known -- NowPlaying then simply omits
+    // it from the format badge.
+    Q_PROPERTY(QString currentLoudnessText READ currentLoudnessText NOTIFY currentLoudnessChanged)
     Q_PROPERTY(QString currentCoverSource      READ currentCoverSource      NOTIFY currentTrackChanged)
     Q_PROPERTY(QString currentLargeCoverSource READ currentLargeCoverSource NOTIFY currentLargeCoverSourceChanged)
     Q_PROPERTY(int     queueCount             READ queueCount              NOTIFY queueCountChanged)
@@ -135,6 +144,7 @@ public:
     QString currentFormat()     const;
     int     currentBitrate()    const;
     int     currentRating()     const;   // 0-10; 0 if no track loaded or unrated
+    QString currentLoudnessText() const;
     QString currentCoverSource()      const;
     QString currentLargeCoverSource()  const { return m_largeCoverSource; }
     int     queueCount()               const { return m_queue.size(); }
@@ -244,6 +254,7 @@ signals:
     void durationChanged();
     void currentTrackChanged();
     void currentRatingChanged();
+    void currentLoudnessChanged();
     // Emitted right after a rating was written to (or removed from)
     // Topaz.rating.json by setCurrentRating()/deleteCurrentRating(), carrying
     // the track's ratingId (QUuid string) and the new rating (0 = removed).
@@ -323,6 +334,35 @@ private:
     // by the crossfade midpoint (audio is already transitioning independently).
     void switchCurrentIndexTo(int index);
 
+    // ── Auto Loudness Correction (UC-35) ──────────────────────────────────
+    // Everything below is inert unless the RUNNING engine is BASS and the
+    // feature is switched on in Setup > PLAYBACK: no analyzer thread, no
+    // Topaz.volumeNormalization.json access, no deck calls.
+    bool loudnessAudiophile() const;   // on + BASS running + "audiophile"
+    bool loudnessBackground() const;   // on + BASS running + "background"
+    // referenceDb (from m_loudnessDb / the analyzer) + the user's "Trim"
+    // slider (AppConfig::audiophileTrimDb) -- what's actually applied/shown.
+    double appliedAudiophileGain(double referenceDb) const;
+    // Queues one track for analysis (skipped when its value is already
+    // known); urgent = it is the playing/next track. Non-blocking.
+    void requestLoudness(const TrackInfo &t, bool urgent);
+    // Hands `t` to deck `d` (setSource) and applies its known loudness gain,
+    // or requests it and applies it as soon as it arrives. The single place
+    // every path (hard cut, natural crossfade, queue-replacing crossfade)
+    // loads a file into a deck.
+    void loadIntoDeck(int d, const TrackInfo &t);
+    void onLoudnessReady(const QString &filePath, double gainDb);
+    // "Consistent Background Music" live estimate (UC-35 follow-up). Always
+    // connected to our own audioBufferAvailable; cheap early-return unless
+    // loudnessBackground() is actually true right now.
+    void onAudioBufferForCompressorMeter(const QAudioBuffer &buffer);
+    // m_compressorMeterTimer's 500ms tick -- just re-publishes; the text
+    // itself is always computed live in currentLoudnessText(), never cached.
+    void onCompressorMeterTick();
+    // Reacts (live) to AppConfig::loudnessSettingsChanged(): compressor on/off
+    // on both decks, gains applied/ramped back to 0 dB, queue analysis started.
+    void applyLoudnessSettings();
+
     // ── Crossfade ──────────────────────────────────────────────────────────
     void startCrossfade();
     void cancelCrossfade();
@@ -371,6 +411,28 @@ private:
     AudioDeck                 *m_decks[2]          = { nullptr, nullptr };
     int                         m_activeDeck        = 0;
     AudioDeck                  *m_deck              = nullptr;
+
+    // Auto Loudness Correction (UC-35). m_loudness is created lazily by
+    // requestLoudness(); m_loudnessDb holds every result received this
+    // session (filePath -> dB); m_deckPath is the file last loaded into each
+    // deck, so a late result can be applied to the deck that plays it.
+    bool               m_bassRunning   = false;
+    // True once the feature has ever been active this session: only then does
+    // switching it off have anything to undo (keeps a never-used feature
+    // completely inert -- no deck calls at all).
+    bool               m_loudnessWasActive = false;
+    LoudnessAnalyzer  *m_loudness      = nullptr;
+    QHash<QString, double> m_loudnessDb;
+    QString            m_deckPath[2];
+
+    // "Consistent Background Music" live estimate (UC-35 follow-up) -- see
+    // compressormeter.h. Always exists (cheap; no allocation), fed only while
+    // loudnessBackground() is true. m_compressorMeterHasData guards
+    // currentLoudnessText() against showing a value before playback has
+    // actually produced a single buffer.
+    CompressorMeter m_compressorMeter;
+    bool            m_compressorMeterHasData = false;
+    QTimer         *m_compressorMeterTimer   = nullptr;
 
     bool    m_crossfading       = false;
     bool    m_fadeMidpointFired = false;

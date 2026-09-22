@@ -438,14 +438,16 @@ Rectangle {
 
                     // Format badge
                     Rectangle {
+                        id: formatBadge
                         anchors { left: parent.left; verticalCenter: parent.verticalCenter }
                         height: 26
-                        width:  formatLabel.implicitWidth + 20
+                        width:  contentRow.implicitWidth + 8   // 4px padding each side
                         radius: Theme.radiusFull
                         color:  Theme.surfaceContainerHigh
                         visible: root.engine && root.engine.currentFormat.length > 0
 
                         Row {
+                            id: contentRow
                             anchors.centerIn: parent
                             spacing: 6
 
@@ -472,6 +474,30 @@ Rectangle {
                                 font.letterSpacing: 0.8
                                 color: Theme.fgSurface
                             }
+                        }
+                    }
+
+                    // Auto Loudness Correction (UC-35) badge -- only shown while
+                    // the feature is active and the value is known. Solid pill
+                    // badge, same style as PlaylistsPanel.qml's "IN QUEUE" badge
+                    // (including its literal #FF1744 @ ~35% opacity color).
+                    Rectangle {
+                        visible: root.engine && root.engine.currentLoudnessText.length > 0
+                        anchors { left: formatBadge.right; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                        height: 20
+                        width:  loudnessLabel.implicitWidth + 16
+                        radius: Theme.radiusFull
+                        color:  Qt.rgba(1, 0.0902, 0.2667, 0.35)   // #FF1744 @ ~35% opacity
+
+                        Text {
+                            id: loudnessLabel
+                            anchors.centerIn: parent
+                            text: root.engine ? root.engine.currentLoudnessText : ""
+                            font.family:        Theme.fontFamilyBody
+                            font.pixelSize:     Theme.labelXs
+                            font.weight:        Font.Bold
+                            font.letterSpacing: Theme.lsWide
+                            color: Theme.fgSurface
                         }
                     }
                 }

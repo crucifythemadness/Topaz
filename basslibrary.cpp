@@ -98,6 +98,55 @@ bool BassLibrary::load()
         qWarning() << "BassLibrary: failed to load libbassopus.so plugin, error code" << BASS_ErrorGetCode();
 #endif
 
+    // Optional effect exports (see basslibrary.h) -- deliberately not part of
+    // `ok` above.
+    resolve(BASS_ChannelSetFX, "BASS_ChannelSetFX");
+    resolve(BASS_ChannelRemoveFX, "BASS_ChannelRemoveFX");
+    resolve(BASS_FXSetParameters, "BASS_FXSetParameters");
+    resolve(BASS_ChannelGetAttribute, "BASS_ChannelGetAttribute");
+
     m_loaded = true;
+    return true;
+}
+
+bool BassLibrary::loadFx()
+{
+    if (m_fxLoaded) return true;
+    if (!m_loaded) return false;
+    if (!BASS_ChannelSetFX || !BASS_ChannelRemoveFX || !BASS_FXSetParameters) {
+        qWarning() << "BassLibrary: bass.dll lacks the effect exports -- compressor unavailable";
+        return false;
+    }
+
+    const QString dir = QCoreApplication::applicationDirPath();
+#if defined(_WIN32)
+    m_bassFx.setFileName(dir + QStringLiteral("/bass_fx.dll"));
+#else
+    m_bassFx.setFileName(dir + QStringLiteral("/libbass_fx.so"));
+#endif
+    if (!m_bassFx.load()) {
+        // Retried on every request (the user may drop the file in while
+        // Topaz runs), but only reported once per process.
+        if (!m_fxWarned) {
+            m_fxWarned = true;
+            qWarning() << "BassLibrary: failed to load" << m_bassFx.fileName()
+                        << "-" << m_bassFx.errorString();
+        }
+        return false;
+    }
+
+    // bass_fx registers its BFX effect types with BASS when it is initialised;
+    // calling its version export makes sure that has happened (bass_fx.h: the
+    // documented way to force the library to load) and proves the library
+    // really is BASS_FX before any effect is requested from it.
+    using GetVersionFn = BASS_DWORD (BASSCALL *)();
+    auto getVersion = reinterpret_cast<GetVersionFn>(m_bassFx.resolve("BASS_FX_GetVersion"));
+    if (!getVersion) {
+        qWarning() << "BassLibrary: bass_fx has no BASS_FX_GetVersion export -- ignoring it";
+        m_bassFx.unload();
+        return false;
+    }
+    qInfo("BassLibrary: BASS_FX %08lX loaded", static_cast<unsigned long>(getVersion()));
+    m_fxLoaded = true;
     return true;
 }

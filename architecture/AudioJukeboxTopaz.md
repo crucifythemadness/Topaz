@@ -1133,6 +1133,38 @@ Only rated tracks (`rating` 1–10) are ever written; unrated tracks (`rating` 0
 appear here. `ratingId` is the join key back to `TrackInfo.ratingId` (see
 `TrackInfo::computeRatingId()` in the class diagram below and UC-14).
 
+### Volume normalization cache format — `Topaz.volumeNormalization.json`
+
+Same directory and atomic tmp-then-rename write as `Topaz.rating.json`, handled by
+`VolumeNormalizationCache` (`volumenormalizationcache.h/cpp`). Holds the per-track
+loudness correction of **Auto Loudness Correction** (UC-35) once it has been determined
+(from a ReplayGain tag, or measured), so it is only ever determined once. The file is only
+created once the feature has actually analysed a track (never for a user who doesn't use it).
+
+```json
+{
+  "version": 1,
+  "normalizations": [
+    {
+      "genre":           "Synthwave",
+      "normalizationId": "2e01a9cc-7ee7-5048-adec-1a8526c856d8",
+      "dB":              -1.2,
+      "source":          "tag",
+      "peak":            0.9871,
+      "fileSize":        12345678
+    }
+  ]
+}
+```
+
+`normalizationId` is `TrackInfo::computeNormalizationId()` — deliberately the same UUIDv5 of
+`albumArtist;artist;album;title` as `ratingId`, so a track has one identity in both files.
+`dB` is the final gain to add (already clamped to [-20, +10] dB and peak-limited), `source` is
+`"tag"` or `"measured"`, `peak` the linear sample peak (0 = unknown). `fileSize` is what makes
+an entry "still this file": a replaced or re-tagged file (e.g. an external tool added a
+ReplayGain tag) has a different size, so its entry is ignored and re-determined. Not part of
+Backup/Restore (UC-27): it is a recomputable cache.
+
 ### Data Flow: Library Scan
 
 ```
@@ -1325,6 +1357,11 @@ what "configured" means — absent means that pane has never been positioned yet
 | `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 12.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s PLAYBACK tab slider. |
 | `audioBackend` / `setAudioBackend(mode)` | Playback backend, `"ffmpeg"` (default) or `"bass"`; ignored for any other value; auto-saves. Set from `SetupDialog`'s PLAYBACK tab radio group. Selecting `"bass"` is only honored once `bassLibraryAvailable()` is true — inert until `PlaybackEngine` gains a real dual-backend abstraction (see UC-15). |
 | `bassLibraryAvailable()` | `true` only if `bass.dll`, `bassflac.dll`, and `bassopus.dll` (Linux: `libbass.so`/`libbassflac.so`/`libbassopus.so`) are all present next to the running executable. Checked before `audioBackend` can be set to `"bass"` (see UC-15). |
+| `autoLoudnessCorrection` / `setAutoLoudnessCorrection(on)` | Auto Loudness Correction on/off (default `false`); auto-saves; NOTIFY `loudnessSettingsChanged`. Only ever acts while the RUNNING engine is BASS (see UC-35). Set from `SetupDialog`'s PLAYBACK tab checkbox; reacted to live by `PlaybackEngine`. |
+| `loudnessStrategy` / `setLoudnessStrategy(strategy)` | `"audiophile"` (default: per-track gain) or `"background"` (compressor); ignored for any other value; auto-saves; NOTIFY `loudnessSettingsChanged`. Set from `SetupDialog`'s PLAYBACK tab radios (UC-35). |
+| `audiophileTrimDb` / `setAudiophileTrimDb(db)` | Manual "Trim" for the Audiophile strategy (default `0.0`); clamped to `[-15, 15]`, snapped to the nearest `0.5`; auto-saves; NOTIFY `loudnessSettingsChanged`. Added on top of the automatic reference gain live — never written to `Topaz.volumeNormalization.json` (UC-35). |
+| `backgroundTrimDb` / `setBackgroundTrimDb(db)` | Manual "Trim" for the Consistent Background Music strategy (default `0.0`); same clamp/snap/NOTIFY as above. Added to the compressor's make-up gain live (UC-35). |
+| `bassFxAvailable()` | `true` if `bass_fx.dll` (Linux: `libbass_fx.so`) is present next to the executable — needed by the "Consistent Background Music" strategy; never bundled, like the other BASS libraries (UC-35). |
 | `autoPlayQueueHorizon` / `setAutoPlayQueueHorizon(tracks)` | How many tracks the (still-unimplemented) AUTO PLAY feature should keep filled into `PlaybackQueue` as a lookahead (default `5`); clamped to `[1, 15]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Queue Horizon"); not yet consumed by any queue-filling logic (see UC-14). |
 | `autoPlayTitleAddingIntervalSeconds` / `setAutoPlayTitleAddingIntervalSeconds(seconds)` | Polling interval, in seconds, the (still-unimplemented) AUTO PLAY feature should use to add one new track at a time to the queue (default `30`); clamped to `[5, 90]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Title Adding"); not yet consumed by any poller (see UC-14). |
 | `autoPlayConsiderGenre` / `setAutoPlayConsiderGenre(enabled)` | Whether the (still-unimplemented) AUTO PLAY feature should factor genre into track selection (default `false`); auto-saves. Set from `SetupDialog`'s AUTO PLAY tab toggle ("Consider Genre"); not yet consumed by any selection logic (see UC-14). |
@@ -1858,6 +1895,10 @@ configurable via the app JSON config) will be introduced at that point.
     PlaybackEngine --> AudioDeck     : owns ×2 (dual-deck, see UC-15)
     AudioDeck <|-- FfmpegAudioDeck   : wraps QMediaPlayer/QAudioOutput
     AudioDeck <|-- BassAudioDeck     : wraps BASS HSTREAM (Step 2b)
+    PlaybackEngine --> LoudnessAnalyzer : owns (lazy; BASS engine + Auto Loudness Correction only, UC-35)
+    LoudnessAnalyzer --> VolumeNormalizationCache : Topaz.volumeNormalization.json
+    PlaybackEngine --> CompressorMeter : owns (live estimate for "Consistent Background Music", UC-35)
+    LoudnessAnalyzer ..> TagReader   : readReplayGain()
     PlaybackEngine --> AppConfig     : reads crossfadeEnabled/crossfadeSeconds live
     AutoPlayController --> PlaybackEngine : addTrack/playAt/trackList/clearQueue; listens trackPlayedToCompletion + queueExhausted (see UC-16)
     AutoPlayController --> LibraryModel   : calls autoPlayCandidatePool() (see UC-16)
@@ -2149,6 +2190,7 @@ abstraction that makes this backend-agnostic.
 | `currentFormat` | `QString` | "FLAC", "MP3", or "OPUS" derived from file extension |
 | `currentBitrate` | `int` | kbps bitrate of the current track |
 | `currentRating` | `int` | Rating (0-10; 0 = unrated) of the current track. Resolved in `loadTrack()` via `TrackInfo::computeRatingId()` + `RatingCache::load()` — the single canonical point regardless of how the track reached the queue (see UC-14). |
+| `currentLoudnessText` | `QString` | Auto Loudness Correction (UC-35): the static correction applied to the current track as shown after the bitrate in `NowPlaying` (`"-1.2 dB"`, `"+2.0 dB"`). Empty unless the feature is on with the "Audiophile" strategy on the BASS engine **and** the value is already known. NOTIFY `currentLoudnessChanged` (track switch, value arriving, setting change). |
 | `currentCoverSource` | `QString` | `data:image/jpeg;base64,…` cover thumbnail URL — 160×160 px, available immediately |  
 | `currentLargeCoverSource` | `QString` | Full-resolution cover as a `data:` URL, loaded asynchronously via `QtConcurrent::run` + `QFutureWatcher`. Unlike `currentCoverSource` (always re-encoded to JPEG by `TagReader::makeCoverThumb()`), this is `TagReader::readRawCover()`'s untouched embedded bytes — JPEG *or* PNG — so the MIME type is sniffed from the magic bytes (`\x89PNG` → `image/png`, else `image/jpeg`) rather than hardcoded. Empty until the background task completes; `NowPlaying.qml` falls back to `currentCoverSource` in the interim. |
 | `queueCount` | `int` | Number of tracks in the queue |
@@ -2882,6 +2924,20 @@ now that a real `BassAudioDeck` (Step 2b) exists. The Audio Visualizer
    existing `crossfade` JSON object (`"ffmpeg"` or `"bass"`; any other value
    or a missing key both default to `"ffmpeg"`) — deliberately not renamed
    alongside the tab, to avoid a migration path for existing config files.
+
+### AudioDeck loudness hooks (UC-35)
+
+`AudioDeck` also has two optional, default-no-op methods for Auto Loudness Correction:
+`setLoudnessGainDb(float db, bool smooth)` and `setCompressorEnabled(bool)`. `FfmpegAudioDeck`
+inherits the no-ops. `BassAudioDeck` keeps the last `setVolume()` value (the crossfade level)
+and a separate loudness gain and always writes their **product** to `BASS_ATTRIB_VOL`, so the
+crossfade ramp in `onFadeTick()` is untouched and the two never overwrite each other; with a
+0 dB gain the attribute is exactly what `setVolume()` was given. `setSource()` resets both to
+BASS's default (volume 1.0, gain 0 dB), as a fresh stream always did. The gain change is
+optionally ramped (linear in dB over ~1.2 s, a 30 ms `QTimer`); the compressor is a BASS_FX
+effect added to / removed from the current stream and re-added on every `setSource()` while
+wanted. `PlaybackEngine::loadIntoDeck(d, track)` is now the single place a file is handed to a
+deck (`loadTrack()`, `startCrossfade()`, the queue-replacing crossfade of UC-23).
 
 ### AudioDeck abstraction (Step 2)
 
@@ -6920,3 +6976,149 @@ their exact prior behavior.
   `Qt.PointingHandCursor` only when `wholeAlbumDoubleClickEnabled` is
   true, so it doesn't look falsely interactive in the two excluded hosts.
 
+
+
+## UC-35 Auto Loudness Correction (Setup → PLAYBACK, BASS Audio Library only)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Tracks of very different loudness play at a consistent level, without ever changing an audio file. |
+| **Actor** | User |
+| **Precondition** | "Playback with" is **BASS Audio Library** (Setup → PLAYBACK) and BASS is the *running* engine (`PlaybackEngine::activeBackendName`). |
+| **Trigger** | User ticks **Auto Loudness Correction** (default off) and picks a strategy. |
+
+### Controls (Setup → PLAYBACK)
+
+Directly under the "BASS Audio Library" radio (aligned to its left edge; the "Currently active:"
+line moved below the block): the checkbox **Auto Loudness Correction**, and under it two radios,
+**Audiophile/Critical Listening** (default) and **Consistent Background Music**. All three are
+greyed out and inert unless the *selected* backend is BASS (so they can be configured in the same
+visit as selecting it; the correction only acts once BASS is really running after the restart the
+backend switch already needs). The two radios additionally need the checkbox on. Changes are
+**live** (`AppConfig.loudnessSettingsChanged` → `PlaybackEngine::applyLoudnessSettings()`):
+turning it off ramps the playing deck back to 0 dB. Picking "Consistent Background Music" without
+`bass_fx` shows a MessageBox with the download hint and does not switch. Persisted as
+`playback.autoLoudnessCorrection` / `playback.loudnessStrategy` in `Topaz.config`.
+
+Right under each strategy's radio, with a wider gap between the two strategies than between the
+checkbox and the radios: a horizontal **Trim** slider (`[-15, +15]` dB, `0.5` dB steps, default `0`,
+`AppConfig.audiophileTrimDb` / `backgroundTrimDb`) — a manual correction the user dials in on top of
+whichever strategy is active. Both stay visible once the checkbox is on; only the slider under the
+*selected* strategy is fully interactive, the other dims to match the unselected radio. Added because
+the automatic Audiophile gain targets the ReplayGain 2.0 reference (−18 LUFS), noticeably quieter than
+most commercial masters — measured on the user's own outboard dB-meter as "consistent but too quiet"
+— so Trim is the deliberate "make it as loud as you want" escape hatch: unlike the automatic gain, it
+is **not** peak-limited, so a large positive Trim can clip on a hot peak, the same trade-off a manual
+preamp knob would make. Trim is **never written to `Topaz.volumeNormalization.json`** — only the
+automatic reference value is; `PlaybackEngine::appliedAudiophileGain(referenceDb)` adds the live Trim
+on top of that stored reference purely at apply/display time, so `LoudnessAnalyzer` and the JSON format
+are completely unaware Trim exists.
+
+### Strategy "Audiophile/Critical Listening" — a static gain per track
+
+Determined by `LoudnessAnalyzer` (`loudnessanalyzer.h/cpp`) on ONE low-priority worker thread,
+in this order (the first that yields a value wins):
+
+1. **`Topaz.volumeNormalization.json`** by `normalizationId` — only valid while the stored
+   `fileSize` still matches the file.
+2. **A ReplayGain / R128 tag** in the file (`TagReader::readReplayGain()`, read-only): ID3v2
+   `TXXX:REPLAYGAIN_TRACK_GAIN/PEAK`, an APEv2 footer (mp3gain), FLAC/Vorbis comments, Opus
+   `R128_TRACK_GAIN` (Q7.8 relative to −23 LUFS, so +5 dB to the −18 LUFS reference). Track gain
+   only: the queue is an arbitrary mix of albums.
+3. **An own measurement**: one BASS *decode* pass over the file (`BASS_STREAM_DECODE |
+   BASS_SAMPLE_FLOAT`; nothing is played, no device involved), `LoudnessMeter`: ITU-R BS.1770-4 /
+   EBU R128 integrated loudness — K-weighting (high shelf + high-pass), 400 ms blocks with 75 %
+   overlap, −70 LUFS absolute and −10 LU relative gate; LFE excluded, surrounds +1.5 dB, mono
+   counted as dual mono. Gain = −18 LUFS (the ReplayGain 2.0 reference) − loudness.
+
+The result is clamped to [−20, +10] dB, limited so the known peak × gain never exceeds 1.0
+(no clipping), rounded to 0.01 dB, **stored in the JSON** (source `"tag"` or `"measured"`,
+in memory, flushed debounced ~3 s / every 20 s of work / on shutdown) and then used.
+
+**When it runs.** `PlaybackEngine::requestLoudness()` is called for every track as it enters
+the queue (`addTrack`, `addTracks`, the queue-replacing crossfade of UC-23) — user, AUTO PLAY
+and playlist loads alike — so the value is normally ready long before the track plays; the
+playing and the next track are *urgent* (front of the queue, and a normal job yields to an urgent
+one), and `switchCurrentIndexTo()` re-asserts the next track as urgent. A result arrives via the
+queued `loudnessReady(path, dB)` signal into `PlaybackEngine::onLoudnessReady()`.
+
+**Applying it.** `loadIntoDeck()` sets a *known* value on the deck immediately after `setSource()`
+(so a crossfade's incoming track is already corrected when it fades in). A value that arrives
+later (the first track of an empty queue; a feature just switched on) is applied to every deck
+holding that file with a smooth ~1.2 s ramp. Measured on real files: a decode pass runs at
+**600–1,200× real time** (a 5-minute FLAC/MP3 in 0.2–0.45 s in a Release build; ~0.9 s in a
+Debug build while the UI starts), so even an unprepared first track is corrected within about a
+second of pressing play. (A "first 30 s" estimate was tried and dropped: for tracks with a quiet
+intro it is several dB off and would only add a second correction.)
+
+**NowPlaying.** `PlaybackEngine.currentLoudnessText` is appended to the format badge:
+`MP3  |  320 KBPS  |  -1.2 dB` — only while the feature is on with this strategy and the value
+is known. The number shown (and the one actually applied to the deck) is `appliedAudiophileGain()`
+= the stored reference **plus the live Audiophile Trim** — never the bare reference.
+
+### Strategy "Consistent Background Music" — a compressor
+
+No per-track gain and no analysis (the analyzer is never created). `BassAudioDeck` adds a **BASS_FX
+Compressor 2** effect (`BASS_FX_BFX_COMPRESSOR2`) to each deck's stream (threshold −20 dB, ratio 4:1,
+attack 5 ms, release 250 ms, +6 dB base make-up — `public static constexpr` on `BassAudioDeck`
+(`bassaudiodeck.h`), not file-local anymore, so `CompressorMeter` below can share the exact same
+numbers; by
+default the worst case 0 dBFS peak comes out at −9 dBFS, so the base make-up cannot clip *on its
+own* — the Background Trim slider above is added on top of it and, like the Audiophile Trim, can
+push it into clipping deliberately). Effective make-up gain = `kCompMakeupDb + backgroundTrimDb`,
+sent via `AudioDeck::setCompressorTrimDb(db, smooth)` → `BassAudioDeck` (re)sends the full
+`BASS_BFX_COMPRESSOR2` struct through `BASS_FXSetParameters` whenever it changes, ramped the same
+~1.2 s linear-in-dB way as the Audiophile gain — both ramps share one `QTimer`/tick
+(`BassAudioDeck::onGainRampTick()`), since a loudness-gain ramp is per-track (reset by `setSource()`)
+while a compressor-Trim ramp is deck-level (survives `setSource()`, since it isn't tied to any one
+track). It runs on the audio thread and costs well under 1 % of one core. Needs `bass_fx.dll` /
+`libbass_fx.so` next to Topaz, supplied by the user like `bass.dll` (never bundled; loaded by
+`BassLibrary::loadFx()`, which calls `BASS_FX_GetVersion()`); without it playback simply stays
+uncompressed (logged once) and the Setup radio refuses with the MessageBox above.
+
+**NowPlaying live estimate (`CompressorMeter`, `compressormeter.h/.cpp`).** BASS_FX's compressor has
+no gain-reduction read-back — only `BASS_FXSetParameters`/`GetParameters`, the static configuration
+— so this figure is Topaz's own parallel *estimate*, not a readout of BASS_FX's actual internal
+state; it will track closely (same threshold/ratio/attack/release/Trim as the real effect) but is
+not guaranteed bit-exact to it. Plain C++ (no `QObject`), unit-tested in isolation like
+`LoudnessMeter`, fed from the same decoded PCM already tapped for the Audio Visualizer/Milkdrop
+(`PlaybackEngine::audioBufferAvailable`, already active-deck-filtered — no new tap, and since that
+signal is only ever populated by `BassAudioDeck` while Background can even be selected, only
+`QAudioFormat::Float` needs handling). Standard feed-forward structure, matching
+`BASS_DX8_COMPRESSOR`'s own field semantics: per buffer, the peak sample (all channels) → dBFS →
+the static curve gives a *target* gain reduction (`max(0, (levelDb − threshold) × (1 − 1/ratio))`)
+→ a one-pole filter smooths the *reduction* (not the input level — attack while it's rising, release
+while falling) toward that target, `alpha = 1 − e^(−chunkSeconds / (attackOrReleaseMs / 1000))`.
+Shown value = `(kCompMakeupDb + backgroundTrimDb) − smoothedReduction`, published via a 500 ms
+`QTimer` (`m_compressorMeterTimer` — 50 ms was tried first but read as too twitchy) through the
+*same* `PlaybackEngine.currentLoudnessText`
+property/NOTIFY the Audiophile strategy uses — no `NowPlaying.qml` change was needed, the badge
+already added for UC-35 just updates live. Reset (`CompressorMeter::reset()`) on every new track and
+whenever loudness settings change, so no stale reading survives a boundary it wasn't heard at; blank
+until the first buffer has actually been processed. Verified against a synthetic step signal: at a
+0 dBFS peak the estimate settles at `makeup + trim − 15` = `−9 + trim` dB, matching the "can't clip
+by default" arithmetic above exactly.
+
+### Guarantees and non-goals
+
+- **Audio files are only ever read** (tag reads, BASS decode streams); Topaz writes only
+  `Topaz.volumeNormalization.json`. Verified by hashing test files before and after.
+- **Inert when unused**: a feature that is off (the default), or a non-BASS engine, creates no
+  thread, reads/writes no JSON and makes no deck calls beyond the two default no-ops; `FfmpegAudioDeck`
+  is untouched. With a 0 dB gain the BASS volume attribute is bit-identical to before.
+- A future "Volume Normalization Manager" (precise values, analysing whole libraries) is not part
+  of this use case; the JSON format and `LoudnessAnalyzer::measureFile()` are the seams for it.
+
+### Verification (non-visual)
+
+A scratch harness (not in the repo) with the real `LoudnessMeter`/`TagReader`/`BassLibrary`, on
+Windows and Linux: EBU 1 kHz −23 dBFS sine → −23.0 LUFS ±0.02 at 44.1/48/96 kHz (stereo and mono),
+relative gate, silence; synthetic MP3 (`TXXX` Latin-1/UTF-16, APEv2), FLAC and Opus files for the tag
+reader; real MP3/FLAC files for speed. A temporary QML harness drove the real engine (queue 3 tracks,
+natural crossfade, feature off/on, strategy switch) and confirmed the deck gains, `currentLoudnessText`,
+the JSON contents and a second run served entirely from the JSON. A follow-up temporary harness moved
+both Trim sliders through several values (including while a track played): confirmed the deck ramps to
+reference+Trim each time and `currentLoudnessText` reflects it live, confirmed the compressor's make-up
+gain ramps to `kCompMakeupDb + backgroundTrimDb`, and confirmed `Topaz.volumeNormalization.json` is
+completely unaffected by any Trim change — only the untouched reference entry from the earlier round
+remained in it throughout.

@@ -291,6 +291,54 @@ void AppConfig::setAudioBackend(const QString &mode)
     save();
 }
 
+void AppConfig::setAutoLoudnessCorrection(bool on)
+{
+    if (m_autoLoudnessCorrection == on) return;
+    m_autoLoudnessCorrection = on;
+    emit loudnessSettingsChanged();
+    save();
+}
+
+void AppConfig::setLoudnessStrategy(const QString &strategy)
+{
+    if (strategy != QStringLiteral("audiophile") && strategy != QStringLiteral("background"))
+        return;
+    if (m_loudnessStrategy == strategy) return;
+    m_loudnessStrategy = strategy;
+    emit loudnessSettingsChanged();
+    save();
+}
+
+void AppConfig::setAudiophileTrimDb(double db)
+{
+    db = qBound(-15.0, db, 15.0);
+    db = std::round(db * 2.0) / 2.0;
+    if (qFuzzyCompare(m_audiophileTrimDb, db)) return;
+    m_audiophileTrimDb = db;
+    emit loudnessSettingsChanged();
+    save();
+}
+
+void AppConfig::setBackgroundTrimDb(double db)
+{
+    db = qBound(-15.0, db, 15.0);
+    db = std::round(db * 2.0) / 2.0;
+    if (qFuzzyCompare(m_backgroundTrimDb, db)) return;
+    m_backgroundTrimDb = db;
+    emit loudnessSettingsChanged();
+    save();
+}
+
+bool AppConfig::bassFxAvailable() const
+{
+    const QString dir = QCoreApplication::applicationDirPath();
+#if defined(_WIN32)
+    return QFile::exists(dir + QStringLiteral("/bass_fx.dll"));
+#else
+    return QFile::exists(dir + QStringLiteral("/libbass_fx.so"));
+#endif
+}
+
 bool AppConfig::bassLibraryAvailable() const
 {
     const QString dir = QCoreApplication::applicationDirPath();
@@ -730,6 +778,12 @@ void AppConfig::applyJson(const QJsonObject &root)
     m_crossfadeSeconds = playback[QStringLiteral("crossfadeSeconds")].toDouble(5.0);
     const QString backend = playback[QStringLiteral("audioBackend")].toString();
     m_audioBackend = (backend == QStringLiteral("bass")) ? backend : QStringLiteral("ffmpeg");
+    m_autoLoudnessCorrection = playback[QStringLiteral("autoLoudnessCorrection")].toBool(false);
+    const QString strategy = playback[QStringLiteral("loudnessStrategy")].toString();
+    m_loudnessStrategy = (strategy == QStringLiteral("background")) ? strategy
+                                                                    : QStringLiteral("audiophile");
+    m_audiophileTrimDb = qBound(-15.0, playback[QStringLiteral("audiophileTrimDb")].toDouble(0.0), 15.0);
+    m_backgroundTrimDb = qBound(-15.0, playback[QStringLiteral("backgroundTrimDb")].toDouble(0.0), 15.0);
 
     const QJsonObject autoPlay = root[QStringLiteral("autoPlay")].toObject();
     m_autoPlayQueueHorizon   = autoPlay[QStringLiteral("queueHorizon")].toInt(5);
@@ -854,6 +908,7 @@ QVariantMap AppConfig::restoreFromJson(const QByteArray &json)
     emit albumBrowserSortOrderChanged();
     emit crossfadeChanged();
     // audioBackendChanged deliberately NOT emitted -- value is unchanged.
+    emit loudnessSettingsChanged();
     emit autoPlayQueueHorizonChanged();
     emit autoPlayTitleAddingIntervalSecondsChanged();
     emit autoPlayConsiderGenreChanged();
@@ -913,6 +968,10 @@ void AppConfig::save()
     playback[QStringLiteral("crossfadeEnabled")] = m_crossfadeEnabled;
     playback[QStringLiteral("crossfadeSeconds")] = m_crossfadeSeconds;
     playback[QStringLiteral("audioBackend")]     = m_audioBackend;
+    playback[QStringLiteral("autoLoudnessCorrection")] = m_autoLoudnessCorrection;
+    playback[QStringLiteral("loudnessStrategy")]       = m_loudnessStrategy;
+    playback[QStringLiteral("audiophileTrimDb")]       = m_audiophileTrimDb;
+    playback[QStringLiteral("backgroundTrimDb")]       = m_backgroundTrimDb;
     root[QStringLiteral("playback")] = playback;
 
     QJsonObject autoPlay;

@@ -32,7 +32,17 @@ class QJsonObject;
 //                  // "path" and "available" are NOT persisted — folders() computes them
 //                  // fresh from currently mounted volumes on every call.
 //     "playback": { "crossfadeEnabled": false, "crossfadeSeconds": 5.0,
-//                   "audioBackend": "ffmpeg" },
+//                   "audioBackend": "ffmpeg",
+//                   "autoLoudnessCorrection": false,
+//                   "loudnessStrategy": "audiophile",
+//                   "audiophileTrimDb": 0.0, "backgroundTrimDb": 0.0 },
+//                  // autoLoudnessCorrection/loudnessStrategy: Setup > PLAYBACK,
+//                  // BASS only (UC-35). Strategy is "audiophile" (per-track gain)
+//                  // or "background" (compressor); anything else reads as
+//                  // "audiophile". *TrimDb: user-set manual correction ("Trim")
+//                  // on top of the automatic one, [-15, 15], 0.5 dB steps,
+//                  // default 0 -- never written to Topaz.volumeNormalization.json,
+//                  // only ever applied live (PlaybackEngine).
 //                  // Object/key names match the PLAYBACK tab and the
 //                  // crossfadeEnabled/crossfadeSeconds Q_PROPERTYs exactly. Used
 //                  // to be called "crossfade"/"enabled"/"seconds" -- kept that way
@@ -141,6 +151,15 @@ class AppConfig : public QObject
     Q_PROPERTY(double crossfadeSeconds READ crossfadeSeconds NOTIFY crossfadeChanged)
     // "ffmpeg" (default) or "bass" -- see the schema comment above and UC-15.
     Q_PROPERTY(QString audioBackend    READ audioBackend    NOTIFY audioBackendChanged)
+    // Auto Loudness Correction (UC-35): checkbox + strategy radios under the
+    // "Playback with" row. Only ever acts while the RUNNING engine is BASS.
+    Q_PROPERTY(bool    autoLoudnessCorrection READ autoLoudnessCorrection NOTIFY loudnessSettingsChanged)
+    // "audiophile" (default) | "background"
+    Q_PROPERTY(QString loudnessStrategy       READ loudnessStrategy       NOTIFY loudnessSettingsChanged)
+    // Manual "Trim" sliders, one per strategy (UC-35): a user correction on top
+    // of the automatic one. Never written to Topaz.volumeNormalization.json.
+    Q_PROPERTY(double  audiophileTrimDb READ audiophileTrimDb NOTIFY loudnessSettingsChanged)
+    Q_PROPERTY(double  backgroundTrimDb READ backgroundTrimDb NOTIFY loudnessSettingsChanged)
 
     // ── AUTO PLAY settings ────────────────────────────────────────────────
     Q_PROPERTY(int  autoPlayQueueHorizon             READ autoPlayQueueHorizon             NOTIFY autoPlayQueueHorizonChanged)
@@ -240,6 +259,10 @@ public:
     bool    crossfadeEnabled() const { return m_crossfadeEnabled; }
     double  crossfadeSeconds() const { return m_crossfadeSeconds; }
     QString audioBackend()     const { return m_audioBackend;     }
+    bool    autoLoudnessCorrection() const { return m_autoLoudnessCorrection; }
+    QString loudnessStrategy()       const { return m_loudnessStrategy;       }
+    double  audiophileTrimDb() const { return m_audiophileTrimDb; }
+    double  backgroundTrimDb() const { return m_backgroundTrimDb; }
 
     int  autoPlayQueueHorizon()            const { return m_autoPlayQueueHorizon;            }
     int  autoPlayTitleAddingIntervalSeconds() const { return m_autoPlayTitleAddingIntervalSeconds; }
@@ -372,6 +395,19 @@ public:
     // before allowing "bass" to actually be selected.
     Q_INVOKABLE bool bassLibraryAvailable() const;
 
+    // ── Auto Loudness Correction (PLAYBACK tab, UC-35) ────────────────────
+    Q_INVOKABLE void setAutoLoudnessCorrection(bool on);
+    // Ignored unless "audiophile" or "background".
+    Q_INVOKABLE void setLoudnessStrategy(const QString &strategy);
+    // True if bass_fx.dll / libbass_fx.so is present next to the executable
+    // (the "Consistent Background Music" compressor needs it). Like the other
+    // BASS libraries it is never bundled -- the user supplies it.
+    Q_INVOKABLE bool bassFxAvailable() const;
+    // Clamped to [-15, 15] and snapped to the nearest 0.5 dB, matching
+    // setCrossfadeSeconds()'s convention.
+    Q_INVOKABLE void setAudiophileTrimDb(double db);
+    Q_INVOKABLE void setBackgroundTrimDb(double db);
+
     // ── AUTO PLAY operations ─────────────────────────────────────────────
     // Clamped to [1, 15].
     Q_INVOKABLE void setAutoPlayQueueHorizon(int tracks);
@@ -480,6 +516,7 @@ signals:
     void albumBrowserSortOrderChanged();
     void crossfadeChanged();
     void audioBackendChanged();
+    void loudnessSettingsChanged();
     void autoPlayQueueHorizonChanged();
     void autoPlayTitleAddingIntervalSecondsChanged();
     void autoPlayConsiderGenreChanged();
@@ -532,6 +569,10 @@ private:
     bool    m_crossfadeEnabled = false;
     double  m_crossfadeSeconds = 5.0;
     QString m_audioBackend     = QStringLiteral("ffmpeg");
+    bool    m_autoLoudnessCorrection = false;
+    QString m_loudnessStrategy = QStringLiteral("audiophile");
+    double  m_audiophileTrimDb = 0.0;
+    double  m_backgroundTrimDb = 0.0;
 
     int  m_autoPlayQueueHorizon             = 5;
     int  m_autoPlayTitleAddingIntervalSeconds = 30;

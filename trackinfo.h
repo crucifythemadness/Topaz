@@ -61,6 +61,17 @@ struct TrackInfo
                            + album + QChar(';') + title;
         return QUuid::createUuidV5(kRatingNamespace, key.toUtf8());
     }
+
+    // Identity of a track in Topaz.volumeNormalization.json (Auto Loudness
+    // Correction, UC-35): deliberately the very same UUIDv5 of
+    // "albumArtist;artist;album;title" as the ratingId, so a track has one
+    // stable identity across both files. A separate name because the two files
+    // are independent (the JSON field is called "normalizationId").
+    static QUuid computeNormalizationId(const QString &albumArtist, const QString &artist,
+                                         const QString &album, const QString &title)
+    {
+        return computeRatingId(albumArtist, artist, album, title);
+    }
 };
 
 Q_DECLARE_METATYPE(TrackInfo)
