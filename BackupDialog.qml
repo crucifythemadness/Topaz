@@ -36,9 +36,11 @@ Popup {
     // first time it fires. A mirrored root property would silently drift
     // out of sync with the on-screen checkbox after that -- see UC-27's
     // architecture-doc note for the bug this caused in RestoreDialog.qml.
-    readonly property bool anyChecked: backupConfigCheckbox.checked
+    readonly property bool anyChecked: backupLibraryCheckbox.checked
+                                        || backupConfigCheckbox.checked
                                         || backupPlaylistsCheckbox.checked
                                         || backupRatingsCheckbox.checked
+                                        || backupVolumeNormalizationCheckbox.checked
     readonly property bool canBackup:      hasDestination && hasFileName && anyChecked
 
     anchors.centerIn: Overlay.overlay
@@ -49,9 +51,11 @@ Popup {
     closePolicy: Popup.NoAutoClose
 
     onOpened: {
+        backupLibraryCheckbox.checked   = true
         backupConfigCheckbox.checked    = true
         backupPlaylistsCheckbox.checked = true
         backupRatingsCheckbox.checked   = true
+        backupVolumeNormalizationCheckbox.checked = true
         destFolder      = ""
         showResult      = false
         lastResult      = {}
@@ -218,6 +222,11 @@ Popup {
                         color: Theme.fgSurfaceVariant
                     }
                     CheckboxRow {
+                        id: backupLibraryCheckbox
+                        label: qsTr("Backup Topaz Library")
+                        checked: true
+                    }
+                    CheckboxRow {
                         id: backupConfigCheckbox
                         label: qsTr("Backup Topaz Config")
                         checked: true
@@ -230,6 +239,11 @@ Popup {
                     CheckboxRow {
                         id: backupRatingsCheckbox
                         label: qsTr("Backup Ratings")
+                        checked: true
+                    }
+                    CheckboxRow {
+                        id: backupVolumeNormalizationCheckbox
+                        label: qsTr("Backup Volume Normalization")
                         checked: true
                     }
                 }
@@ -426,9 +440,11 @@ Popup {
 
     function performBackup() {
         const categories = []
+        if (backupLibraryCheckbox.checked)   categories.push("library")
         if (backupConfigCheckbox.checked)    categories.push("config")
         if (backupPlaylistsCheckbox.checked) categories.push("playlists")
         if (backupRatingsCheckbox.checked)   categories.push("ratings")
+        if (backupVolumeNormalizationCheckbox.checked) categories.push("volumeNormalization")
 
         const result = root.controller.runBackup(categories, root.destFolder, root.zipFileName)
         root.lastResult = result

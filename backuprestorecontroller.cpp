@@ -1,5 +1,7 @@
 #include "backuprestorecontroller.h"
+#include "librarycache.h"
 #include "ratingcache.h"
+#include "volumenormalizationcache.h"
 
 #include "third_party/miniz/miniz.h"
 
@@ -33,14 +35,41 @@ QString configFilePath()
     return ratingsCacheDir() + QStringLiteral("/Topaz.config");
 }
 
-// " - Copy 0N" inserted before the extension, N zero-padded to 2 digits.
-QString buildCopyName(const QString &nameWithExt, int n)
+// Opens zipFilePath, locates entryName, extracts it into *out. Returns an
+// empty string on success, a human-readable error otherwise -- shared by
+// restoreLibrary()/restoreVolumeNormalization() so each stays a simple
+// "extract then write" call, same shape restoreConfig() already has inline.
+QString extractZipEntry(const QString &zipFilePath, const char *entryName, QByteArray *out)
 {
-    const int dot = nameWithExt.lastIndexOf(QChar('.'));
-    const QString base = dot >= 0 ? nameWithExt.left(dot) : nameWithExt;
-    const QString ext  = dot >= 0 ? nameWithExt.mid(dot)  : QString();
-    return QStringLiteral("%1 - Copy %2%3")
-        .arg(base, QString::number(n).rightJustified(2, QChar('0')), ext);
+    QFile f(normalizePath(zipFilePath));
+    if (!f.open(QIODevice::ReadOnly))
+        return QStringLiteral("Could not open the file.");
+    const QByteArray zipBytes = f.readAll();
+    f.close();
+
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+    if (!mz_zip_reader_init_mem(&zip, zipBytes.constData(), size_t(zipBytes.size()), 0))
+        return QStringLiteral("Not a valid zip archive.");
+
+    const int index = mz_zip_reader_locate_file(&zip, entryName, nullptr, 0);
+    if (index < 0) {
+        mz_zip_reader_end(&zip);
+        return QStringLiteral("That entry isn't in the archive.");
+    }
+
+    mz_zip_archive_file_stat stat;
+    if (!mz_zip_reader_file_stat(&zip, mz_uint(index), &stat)) {
+        mz_zip_reader_end(&zip);
+        return QStringLiteral("Could not read entry metadata.");
+    }
+
+    out->resize(qsizetype(stat.m_uncomp_size));
+    const bool ok = mz_zip_reader_extract_to_mem(&zip, mz_uint(index), out->data(),
+                                                  size_t(out->size()), 0);
+    mz_zip_reader_end(&zip);
+    if (!ok) return QStringLiteral("Could not extract entry.");
+    return QString();
 }
 
 } // namespace
@@ -119,6 +148,13 @@ QVariantMap BackupRestoreController::runBackup(const QStringList &categories,
     if (categories.contains(QStringLiteral("ratings")))
         addFile(RatingCache::cacheFilePath(), QStringLiteral("ratings/Topaz.rating.json"));
 
+    if (categories.contains(QStringLiteral("library")))
+        addFile(LibraryCache::cacheFilePath(), QStringLiteral("library/Topaz.library.json"));
+
+    if (categories.contains(QStringLiteral("volumeNormalization")))
+        addFile(VolumeNormalizationCache::cacheFilePath(),
+                QStringLiteral("volumeNormalization/Topaz.volumeNormalization.json"));
+
     if (fileCount == 0) {
         mz_zip_writer_end(&zip);
         result[QStringLiteral("success")] = false;
@@ -183,9 +219,8 @@ QVariantMap BackupRestoreController::inspectZip(const QString &zipFilePath) cons
         return result;
     }
 
-    bool hasConfig = false, hasRatings = false;
-    QVariantList playlists;
-    const QString playlistDir = m_playlistManager ? m_playlistManager->playlistDirectory() : QString();
+    bool hasConfig = false, hasRatings = false, hasPlaylists = false;
+    bool hasLibrary = false, hasVolumeNormalization = false;
 
     const mz_uint numFiles = mz_zip_reader_get_num_files(&zip);
     for (mz_uint i = 0; i < numFiles; ++i) {
@@ -197,42 +232,31 @@ QVariantMap BackupRestoreController::inspectZip(const QString &zipFilePath) cons
             hasConfig = true;
         } else if (name == QStringLiteral("ratings/Topaz.rating.json")) {
             hasRatings = true;
-        } else if (name.startsWith(QStringLiteral("playlists/"))) {
-            const QString fileName = name.mid(QStringLiteral("playlists/").size());
-            if (fileName.isEmpty()) continue;
-            QVariantMap p;
-            p[QStringLiteral("fileName")] = fileName;
-            p[QStringLiteral("conflict")] =
-                !playlistDir.isEmpty() && QFile::exists(playlistDir + QChar('/') + fileName);
-            playlists.append(p);
+        } else if (name == QStringLiteral("library/Topaz.library.json")) {
+            hasLibrary = true;
+        } else if (name == QStringLiteral("volumeNormalization/Topaz.volumeNormalization.json")) {
+            hasVolumeNormalization = true;
+        } else if (name.startsWith(QStringLiteral("playlists/")) && name.size() > 10) {
+            hasPlaylists = true;
         }
     }
     mz_zip_reader_end(&zip);
 
-    result[QStringLiteral("error")]           = QString();
-    result[QStringLiteral("hasConfig")]       = hasConfig;
-    result[QStringLiteral("hasRatings")]      = hasRatings;
-    result[QStringLiteral("hasPlaylists")]    = !playlists.isEmpty();
-    result[QStringLiteral("playlists")]       = playlists;
-    result[QStringLiteral("ratingsConflict")] = QFile::exists(RatingCache::cacheFilePath());
+    result[QStringLiteral("error")]                  = QString();
+    result[QStringLiteral("hasConfig")]              = hasConfig;
+    result[QStringLiteral("hasRatings")]              = hasRatings;
+    result[QStringLiteral("hasPlaylists")]            = hasPlaylists;
+    result[QStringLiteral("hasLibrary")]              = hasLibrary;
+    result[QStringLiteral("hasVolumeNormalization")]  = hasVolumeNormalization;
+    result[QStringLiteral("ratingsConflict")]         = QFile::exists(RatingCache::cacheFilePath());
     return result;
 }
 
-// ── RESTORE: one playlist entry ─────────────────────────────────────────
+// ── RESTORE: playlists, wholesale replace ───────────────────────────────
 
-QVariantMap BackupRestoreController::restorePlaylistEntry(const QString &zipFilePath,
-                                                            const QString &entryFileName,
-                                                            const QString &action) const
+QVariantMap BackupRestoreController::restoreAllPlaylists(const QString &zipFilePath) const
 {
     QVariantMap result;
-    result[QStringLiteral("action")] = action;
-
-    if (action == QStringLiteral("skip")) {
-        result[QStringLiteral("success")]         = true;
-        result[QStringLiteral("error")]           = QString();
-        result[QStringLiteral("writtenFileName")] = QString();
-        return result;
-    }
 
     if (!m_playlistManager) {
         result[QStringLiteral("success")] = false;
@@ -257,77 +281,49 @@ QVariantMap BackupRestoreController::restorePlaylistEntry(const QString &zipFile
         return result;
     }
 
-    const QByteArray archiveNameUtf8 =
-        (QStringLiteral("playlists/") + entryFileName).toUtf8();
-    const int index = mz_zip_reader_locate_file(&zip, archiveNameUtf8.constData(), nullptr, 0);
-    if (index < 0) {
-        mz_zip_reader_end(&zip);
-        result[QStringLiteral("success")] = false;
-        result[QStringLiteral("error")]   = QStringLiteral("Entry not found in the archive.");
-        return result;
+    const QString dir = m_playlistManager->playlistDirectory();
+
+    // 1. Clear every existing playlist first -- this is a wholesale
+    // "switch environments" replace, not a merge (a leftover playlist from
+    // before the restore could reference tracks that don't exist in the
+    // newly-restored library at all).
+    int deletedCount = 0;
+    for (const QVariant &v : m_playlistManager->listPlaylists()) {
+        const QString fileName = v.toMap().value(QStringLiteral("fileName")).toString();
+        if (QFile::remove(dir + QChar('/') + fileName))
+            ++deletedCount;
     }
 
-    mz_zip_archive_file_stat stat;
-    if (!mz_zip_reader_file_stat(&zip, mz_uint(index), &stat)) {
-        mz_zip_reader_end(&zip);
-        result[QStringLiteral("success")] = false;
-        result[QStringLiteral("error")]   = QStringLiteral("Could not read entry metadata.");
-        return result;
-    }
+    // 2. Write in every playlist the backup has.
+    int writtenCount = 0;
+    const mz_uint numFiles = mz_zip_reader_get_num_files(&zip);
+    for (mz_uint i = 0; i < numFiles; ++i) {
+        mz_zip_archive_file_stat stat;
+        if (!mz_zip_reader_file_stat(&zip, i, &stat) || stat.m_is_directory)
+            continue;
+        const QString name = QString::fromUtf8(stat.m_filename);
+        static const QString prefix = QStringLiteral("playlists/");
+        if (!name.startsWith(prefix) || name.size() <= prefix.size())
+            continue;
+        const QString fileName = name.mid(prefix.size());
 
-    QByteArray extracted(qsizetype(stat.m_uncomp_size), Qt::Uninitialized);
-    const bool extractedOk = mz_zip_reader_extract_to_mem(
-        &zip, mz_uint(index), extracted.data(), size_t(extracted.size()), 0);
+        QByteArray extracted(qsizetype(stat.m_uncomp_size), Qt::Uninitialized);
+        if (!mz_zip_reader_extract_to_mem(&zip, i, extracted.data(), size_t(extracted.size()), 0))
+            continue;   // skip this one entry rather than failing the whole restore
+
+        QFile out(dir + QChar('/') + fileName);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            continue;
+        out.write(extracted);
+        out.close();
+        ++writtenCount;
+    }
     mz_zip_reader_end(&zip);
 
-    if (!extractedOk) {
-        result[QStringLiteral("success")] = false;
-        result[QStringLiteral("error")]   = QStringLiteral("Could not extract entry.");
-        return result;
-    }
-
-    const QString dir = m_playlistManager->playlistDirectory();
-    QString destFileName;
-
-    if (action == QStringLiteral("overwrite")) {
-        destFileName = entryFileName;
-    } else if (action == QStringLiteral("rename")) {
-        for (int n = 1; n <= 9; ++n) {
-            const QString candidate = buildCopyName(entryFileName, n);
-            if (!QFile::exists(dir + QChar('/') + candidate)) {
-                destFileName = candidate;
-                break;
-            }
-        }
-        if (destFileName.isEmpty()) {
-            result[QStringLiteral("success")]         = false;
-            result[QStringLiteral("error")]           =
-                QStringLiteral("All 9 rename slots are already taken.");
-            result[QStringLiteral("writtenFileName")] = QString();
-            return result;
-        }
-    } else {
-        result[QStringLiteral("success")] = false;
-        result[QStringLiteral("error")]   = QStringLiteral("Unknown action.");
-        return result;
-    }
-
-    const QString destPath = dir + QChar('/') + destFileName;
-    if (action == QStringLiteral("overwrite"))
-        QFile::remove(destPath);
-
-    QFile out(destPath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        result[QStringLiteral("success")] = false;
-        result[QStringLiteral("error")]   = QStringLiteral("Could not write the playlist file.");
-        return result;
-    }
-    out.write(extracted);
-    out.close();
-
-    result[QStringLiteral("success")]         = true;
-    result[QStringLiteral("error")]           = QString();
-    result[QStringLiteral("writtenFileName")] = destFileName;
+    result[QStringLiteral("success")]      = true;
+    result[QStringLiteral("error")]        = QString();
+    result[QStringLiteral("deletedCount")] = deletedCount;
+    result[QStringLiteral("writtenCount")] = writtenCount;
     return result;
 }
 
@@ -488,4 +484,58 @@ QVariantMap BackupRestoreController::restoreConfig(const QString &zipFilePath) c
     }
 
     return m_appConfig->restoreFromJson(extracted);
+}
+
+// ── RESTORE: library / volume normalization ─────────────────────────────
+
+QVariantMap BackupRestoreController::restoreLibrary(const QString &zipFilePath) const
+{
+    QVariantMap result;
+    QByteArray extracted;
+    const QString err = extractZipEntry(zipFilePath, "library/Topaz.library.json", &extracted);
+    if (!err.isEmpty()) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = err;
+        return result;
+    }
+
+    QFile out(LibraryCache::cacheFilePath());
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = QStringLiteral("Could not write the library file.");
+        return result;
+    }
+    out.write(extracted);
+    out.close();
+
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("error")]   = QString();
+    return result;
+}
+
+QVariantMap BackupRestoreController::restoreVolumeNormalization(const QString &zipFilePath) const
+{
+    QVariantMap result;
+    QByteArray extracted;
+    const QString err = extractZipEntry(
+        zipFilePath, "volumeNormalization/Topaz.volumeNormalization.json", &extracted);
+    if (!err.isEmpty()) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   = err;
+        return result;
+    }
+
+    QFile out(VolumeNormalizationCache::cacheFilePath());
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")]   =
+            QStringLiteral("Could not write the volume normalization file.");
+        return result;
+    }
+    out.write(extracted);
+    out.close();
+
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("error")]   = QString();
+    return result;
 }

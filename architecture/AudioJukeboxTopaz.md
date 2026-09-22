@@ -6069,10 +6069,14 @@ queue and thus unselectable — see UC-22).
 
 | Field | Detail |
 |-------|--------|
-| **Goal** | Zip Topaz's own config/playlists/ratings into a single portable `*.zip` for safekeeping, and later restore playlists/ratings from such a zip, with per-conflict user choices rather than silent overwrite or silent skip. |
+| **Goal** | Zip Topaz's own config/playlists/ratings/library/volume-normalization data into a single portable `*.zip` for safekeeping, and later restore any subset from such a zip — including switching between entirely separate "environments" (e.g. an all-FLAC setup and an all-MP3 setup) without restarting Topaz. |
 | **Actor** | User |
 | **Precondition** | Topaz is running. |
 | **Trigger** | User clicks BACKUP or RESTORE in Setup → MISC, then the matching action button inside `BackupDialog.qml`/`RestoreDialog.qml`. |
+
+**2026-09-22 extension** — two more categories (Library, Volume Normalization) and a behavior
+change to Playlists, both driven by the user's "switch between complete environments" use case —
+see "Extension: Library + Volume Normalization + live in-memory sync" at the end of this section.
 
 Topaz had zero ZIP/archive capability before this, and Qt's public API has
 none either (`QZipReader`/`QZipWriter` are private, undocumented Qt
@@ -6117,10 +6121,12 @@ pre-conversion was Windows-specific.
 
 ```
 <zip root>
+├── library/Topaz.library.json
 ├── config/Topaz.config
 ├── playlists/<name>.xml     (one entry per playlist, same fileName
 │                              PlaylistManager::listPlaylists() returns)
-└── ratings/Topaz.rating.json
+├── ratings/Topaz.rating.json
+└── volumeNormalization/Topaz.volumeNormalization.json
 ```
 A category with nothing on disk is silently skipped, not an error; if
 *every* checked category produces nothing, `runBackup()` fails with a
@@ -6143,15 +6149,17 @@ same way `RatingCache`'s own private path helper already does.
   calling `runBackup()`; normalizes the path identically so the two never
   disagree about the final destination.
 - `inspectZip(zipFilePath)` — read-only, extracts nothing. Returns which
-  categories are present and, for playlists, which entries would conflict
-  with a same-named local file (`{playlists: [{fileName, conflict}, ...],
-  ratingsConflict, hasConfig, ...}` — `hasConfig` tells `RestoreDialog.qml`
-  whether "Restore Config" has anything to do).
-- `restorePlaylistEntry(zipFilePath, entryFileName, action)` — one
-  playlist, one decision (`"overwrite"|"skip"|"rename"`). Stateless: reopens
-  the zip per call rather than holding a live archive handle between calls
-  (re-parsing a small zip's central directory is sub-millisecond, far
-  simpler than a stateful "session" object surviving a dialog's lifetime).
+  categories are present: `{hasConfig, hasPlaylists, hasRatings, hasLibrary,
+  hasVolumeNormalization, ratingsConflict}`. No per-entry playlist list any
+  more (see `restoreAllPlaylists()` below — nothing left to iterate per
+  file); `ratingsConflict` is still the one real conflict left in the whole
+  feature (whether a local `Topaz.rating.json` already exists).
+- `restoreAllPlaylists(zipFilePath)` — **wholesale clear + replace**, not a
+  per-file decision: deletes every file `PlaylistManager::listPlaylists()`
+  currently reports, then extracts and writes every `playlists/*.xml` entry
+  from the zip, all within one zip-open session. Returns `{success, error,
+  deletedCount, writtenCount}`. Replaced the original per-file `"overwrite"|
+  "skip"|"rename"` flow (see the Extension subsection below for why).
 - `restoreRatings(zipFilePath, mode)` — the whole ratings file, one
   decision (`"overwrite"|"skip"|"mergeNew"|"mergeAll"`). Merge logic goes
   through `RatingCache::loadEntries()`/`saveEntries()` (existing bulk
@@ -6204,13 +6212,15 @@ same way `RatingCache`'s own private path helper already does.
   creation and simply persisted for next time, exactly like a manual
   drag/resize already behaves today.
 
-### RENAME retry algorithm
-
-`" - Copy 0N"` inserted before the extension, `N` zero-padded to 2 digits,
-1 through 9 (`"Foo.xml"` → `"Foo - Copy 01.xml"` → … → `"Foo - Copy 09.xml"`).
-First candidate not already present in `playlistDirectory()` wins. If all
-9 are taken, the restore for that file is reported as failed — no further
-fallback (no `- Copy 10`, no timestamp suffix).
+- `restoreLibrary(zipFilePath)` / `restoreVolumeNormalization(zipFilePath)`
+  — both share a small private `extractZipEntry()` helper (open → locate →
+  stat → extract-to-mem) with `restoreConfig()`'s inline steps, then a plain
+  overwrite of `LibraryCache::cacheFilePath()` / `VolumeNormalizationCache::
+  cacheFilePath()`. No live-object apply step here the way Config has
+  (`AppConfig::restoreFromJson()`) — both are recomputable caches with no
+  single owning live object; the caller (`RestoreDialog.qml`) reloads the
+  running session's in-memory state itself right after a successful call
+  (see the Extension subsection below).
 
 ### `ChoiceDialog.qml` — new generic N-button dialog
 
@@ -6218,61 +6228,58 @@ fallback (no `- Copy 10`, no timestamp suffix).
 feature) maxes out at exactly 2 buttons by construction. Rather than bolt
 on a second special-cased branch, `ChoiceDialog.qml` is a small reusable
 component (`title`/`message`/`choices: []` rendered via a `Repeater`,
-`signal choiceMade(string)`) serving both of RESTORE's multi-choice
-prompts: PLAYLIST EXISTS (YES/NO/RENAME) and RATINGS EXIST (YES/NO/MERGE
-NEW/MERGE ALL) — one component, two differently-configured instances.
+`signal choiceMade(string)`) — today used for exactly one prompt, RATINGS
+EXIST (YES/NO/MERGE NEW/MERGE ALL); it originally also drove a PLAYLIST
+EXISTS (YES/NO/RENAME) prompt, retired by the Extension below.
 
-### `RestoreDialog.qml` — sequential conflict state machine
+### `RestoreDialog.qml` — the ratings conflict + a wholesale confirm
 
-`inspectZip()` runs once up front; non-conflicting playlists and a
-non-conflicting ratings file are restored immediately with no dialog.
-Actual conflicts are collected into a plain JS array
-(`pendingPlaylistConflicts`) plus an index cursor
-(`conflictCursor`) and a `ratingsConflictPending` flag; an `advance()`
-function shows the next pending `ChoiceDialog` (one `ChoiceDialog`
-instance reused across every playlist conflict, its `fileName` property
-mutated between opens; a second instance for the single possible ratings
-conflict) or, once nothing remains, reveals the results screen — so
-exactly one decision dialog is ever open at a time, regardless of how many
-playlists conflict. Each `onChoiceMade` handler calls the matching
-`BackupRestoreController` method, appends an entry to a `resultsLog`
-array, and calls `advance()` again.
+`inspectZip()` runs once up front. A non-conflicting ratings file is
+restored immediately with no dialog; an actual ratings conflict opens the
+one remaining `ChoiceDialog` instance (`ratingsConflictDialog`). Every
+other checked category (Library, Playlists, Config, Volume Normalization)
+runs immediately, no per-item dialog at all — Playlists used to be the one
+exception (see the Extension below for why that changed). `advance()`
+opens `ratingsConflictDialog` if a conflict is pending, otherwise builds
+the summary screen directly. Each `onChoiceMade`/inline handler calls the
+matching `BackupRestoreController` method and appends an entry to a
+`resultsLog` array.
 
 **Real bug fixed after initial ship**: `ChoiceDialog`'s choice button used
 to emit `choiceMade` *then* call `root.close()`. QML signal handlers run
-synchronously with the emit, so for the playlist case, `onChoiceMade`'s
-call to `advance()` could reopen the very same `playlistConflictDialog`
-instance for the *next* conflict before the click handler's own trailing
-`root.close()` had run — that `close()` then executed immediately after
+synchronously with the emit, so when the dialog's own `onChoiceMade`
+handler reopened the same `ChoiceDialog` instance for a next pending item
+(the original trigger was the now-retired per-playlist conflict dialog —
+several conflicting playlists in a row, each its own turn on one reused
+instance), that reopen could happen *before* the click handler's own
+trailing `root.close()` ran — the `close()` then fired immediately after
 the reopen, silently closing the dialog the user was meant to see next.
-Symptoms: only the first of several conflicting playlists ever actually
-got restored, and the results screen never appeared at all whenever 2+
-playlists conflicted (the state machine hung waiting for a click on a
-dialog that had already silently closed itself). Fixed by reordering to
-close first, emit second — a reopen triggered by the handler now always
-sticks, since nothing runs after the emit in the click handler anymore.
+Fixed by reordering to close first, emit second — a reopen triggered by
+the handler now always sticks, since nothing runs after the emit in the
+click handler anymore. The fix lives in `ChoiceDialog.qml` itself, so it
+still protects `ratingsConflictDialog`'s single-instance reuse today, even
+though the playlist case that originally exposed the bug is gone.
 
-**Restore summary feedback**: beyond the per-file `resultsLog` breakdown,
-the Done screen also shows one or two plain-language summary sentences
-(`summaryLines`, built by `buildSummaryLines()` right before
-`showResult` flips true) — "`N` Playlist File(s) have been copied to the
-Topaz Playlist Folder." (only if Restore Playlists was checked; `N` counts
-every successful copy, immediate or conflict-resolved YES/RENAME alike,
-never NO/skip or a failed rename) and one ratings line depending on
-whichever mode actually ran (only if Restore Ratings was checked and a
-ratings file was actually present in the archive): "Topaz Rating File has
-been overwritten." (`overwrite` — covers both a YES conflict resolution
-and the silent no-conflict copy, since both call the same
-`restoreRatings(..., "overwrite")`), "No updates regarding Topaz Rating
-File." (`skip`/NO), or "`N` Ratings have been updated in the Topaz Rating
-File." (`mergeNew`/`mergeAll`, `N` = `addedCount + updatedCount` — for
-`mergeNew` this is just the added count since it never updates existing
-entries, for `mergeAll` it's the combined total of newly-added and
-overwritten-in-place entries).
+**Restore summary feedback**: beyond the per-category `resultsLog`
+breakdown, the Done screen also shows plain-language summary sentences
+(`summaryLines`, built by `buildSummaryLines()` right before `showResult`
+flips true) for every checked category that actually ran — "Topaz Library
+has been restored." (Library; simple overwrite, no conflict concept), "`D`
+existing Playlist File(s) removed; `W` Playlist File(s) have been restored
+from the Backup." (Playlists — reflects the wholesale clear + replace, `D`
+= `deletedCount`, `W` = `writtenCount`), one ratings line depending on
+whichever mode actually ran: "Topaz Rating File has been overwritten."
+(`overwrite` — covers both a YES conflict resolution and the silent
+no-conflict copy, since both call the same `restoreRatings(...,
+"overwrite")`), "No updates regarding Topaz Rating File." (`skip`/NO), or
+"`N` Ratings have been updated in the Topaz Rating File." (`mergeNew`/
+`mergeAll`, `N` = `addedCount + updatedCount`), "Topaz Config has been
+restored (Audio Playback Option kept as-is)." (Config), and "Topaz Volume
+Normalization File has been restored." (Volume Normalization).
 
 ### `BackupDialog.qml`/`RestoreDialog.qml` — checkbox rows
 
-Both dialogs' fixed (2-3 item, not dynamically scanned) category checkbox
+Both dialogs' fixed (5-item, not dynamically scanned) category checkbox
 lists use a local `component CheckboxRow: Item { ... }` (the same "define
 a local reusable piece with `component Name: BaseType`" idiom
 `TagInfoWindow.qml`'s `MetadataField`/`SpecField` already established) —
@@ -6343,6 +6350,70 @@ mouse genuinely leaves and re-enters the button afterward, real
 `onEntered`/`onExited` events resume firing normally (the grab is long
 over by then), so hover tracking self-corrects for every subsequent hover
 with no further intervention needed.
+
+### Extension: Library + Volume Normalization + live in-memory sync
+
+Added on top of the original UC-27 feature once the user described the actual motivation:
+using Backup/Restore to switch between entirely separate "environments" (e.g. one all-FLAC
+setup, one all-MP3 setup) without restarting Topaz — restore a different Config + Library pair
+and see the new library immediately, then optionally run a normal folder scan to reconcile with
+disk. Two new categories, "Library" (first in both dialogs' lists) and "Volume Normalization"
+(last), plus a realization that followed directly from that use case: **writing a restored file
+to disk isn't enough on its own** — the running app's in-memory state has to be brought in line
+too, or the UI keeps showing stale data until a restart.
+
+- **Library** (`restoreLibrary()` writing `Topaz.library.json`) is followed by
+  `LibraryModel::reloadFromCache()` — `applyTracks(LibraryCache::load())`, exactly step 1 of
+  `loadCacheAndStartStatCheck()` and nothing else (deliberately no stat-check/scan auto-triggered,
+  matching the user's own two-step mental model: restore library → restore config → *they* click
+  SCAN FOLDERS afterward, now scanning against the newly-restored environment since Config
+  restore already applies live). Reuses `applyTracks()` verbatim, so it emits the same
+  `libraryRefreshed()` every scan/cache-load already emits — `LibraryData.qml` already rebuilds
+  its tree from that signal, so no further QML changes were needed for the live reload to reach
+  the screen.
+- **Ratings**: `restoreRatings()`'s existing conflict flow (overwrite/skip/mergeNew/mergeAll) is
+  unchanged, but any outcome other than skip is now followed by
+  `LibraryModel::reapplyRatingsFromDisk()` — loads `RatingCache::load()` (already the
+  `QHash<QUuid,int>` shape needed), walks `m_tracks`, and sets each track's `rating` to the
+  matched entry's value **or 0 if absent** ("clear, then reapply" — a track with no counterpart
+  in the restored file goes back to unrated, not left showing a stale rating from a different
+  environment), then the same `updateRatingCount()` + `emit ratingsChanged()` `applyRating()`
+  already makes for a single star click — every existing reactive UI picks this up for free.
+- **Volume Normalization** (`restoreVolumeNormalization()` writing
+  `Topaz.volumeNormalization.json`) is followed by
+  `PlaybackEngine::reloadVolumeNormalizationCache()` — clears `m_loudnessDb` (every reference
+  gain resolved so far this session) and destroys+nulls `m_loudness` (the `LoudnessAnalyzer`,
+  graceful teardown via its existing destructor, lazily recreated by the next
+  `requestLoudness()` call, which freshly reads the just-restored file). If a track is currently
+  loaded, also re-issues `requestLoudness(..., true)` for it so the now-playing track's gain
+  re-resolves and ramps live too — the same "apply immediately" precedent `AppConfig::
+  restoreFromJson()` set for Config.
+- **Playlists — a real behavior change, not just an addition**: `restoreAllPlaylists()` replaced
+  the original per-file `restorePlaylistEntry()`/`"overwrite"|"skip"|"rename"` conflict flow with
+  an unconditional wipe + replace — every existing local playlist file is deleted first, then
+  every playlist in the backup is written in. Confirmed explicitly with the user: a playlist kept
+  from a previous environment could reference tracks that don't exist in the newly-restored
+  library at all, so nothing from the old set is worth offering to keep. This retired the
+  PLAYLIST EXISTS `ChoiceDialog`, `pendingPlaylistConflicts`, and the RENAME retry algorithm
+  entirely (see the sections above, updated in place rather than kept as dead documentation).
+- **One confirmation dialog, always**, before RESTORE actually starts — a new `MessageBox`
+  (`confirmMode`, same pattern as `PlaylistViewer`'s "DELETE PLAYLIST" and `BackupDialog`'s
+  "FILE EXISTS" confirmations) opens on the RESTORE button click; its `onAccepted` calls the
+  existing `startRestore()`. Added because Playlists are now wholesale-cleared and every other
+  checked category overwrites a Topaz file outright — the per-item YES/NO/RENAME/MERGE choices
+  that used to make restore feel "safe" one decision at a time no longer cover Playlists at all.
+
+Verified with a standalone harness (`QStandardPaths::setTestModeEnabled(true)`, so every
+`QStandardPaths::writableLocation()` call — `AppConfig`, `LibraryCache`, `RatingCache`,
+`VolumeNormalizationCache`, `PlaylistManager` — redirects to a Qt-sandboxed test location; the
+user's real `%LOCALAPPDATA%\Topaz\` was never touched) exercising the real
+`BackupRestoreController` against a seeded local state with a deliberately "leftover" extra
+playlist and a "wrong environment" library/volume-normalization file: backup of all 5
+categories, then restore proving the extra playlist is gone and only the backup's two survive,
+`Topaz.library.json`/`Topaz.volumeNormalization.json` land byte-identical to the backup (not the
+pre-restore local content), and the exact per-track lookup `reapplyRatingsFromDisk()` uses
+resolves to 0 before the restored file has a matching entry and to the restored value once it
+does.
 
 ---
 

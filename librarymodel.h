@@ -102,6 +102,23 @@ public:
     // Trigger a full re-scan of all configured folders in background.
     Q_INVOKABLE void startFullScan();
 
+    // UC-27 Restore: reloads m_tracks straight from Topaz.library.json on disk
+    // (exactly step 1 of loadCacheAndStartStatCheck() -- applyTracks(LibraryCache::
+    // load()) -- and nothing else: deliberately no stat-check/scan kicked off here,
+    // so a just-restored library shows immediately without implying a scan the user
+    // hasn't asked for yet. Reuses applyTracks(), so libraryRefreshed() fires exactly
+    // as it does after a normal scan/cache load, and every existing reactive view
+    // (LibraryTree/AlbumBrowser/GenreBar) updates with zero further changes needed.
+    Q_INVOKABLE void reloadFromCache();
+
+    // UC-27 Restore: re-syncs every currently-loaded track's in-memory rating from
+    // Topaz.rating.json on disk right after it was restored -- a track with no
+    // matching entry in the restored file goes back to unrated (0), not left
+    // showing a stale rating from before the restore ("clear, then reapply").
+    // Same two calls (updateRatingCount() + ratingsChanged()) applyRating() already
+    // makes for a single star click, so existing reactive UI needs no changes.
+    Q_INVOKABLE void reapplyRatingsFromDisk();
+
     // Rescans only the single configured FILE MONITORING folder that
     // filePath falls under (matched by prefix against m_appConfig->
     // activeFolders(), respecting includeSubfolders) -- called when

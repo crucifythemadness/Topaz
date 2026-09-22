@@ -23,11 +23,16 @@ Popup {
     id: root
 
     property var controller: null
+    // UC-27: only these two facts are needed here (not the whole running
+    // app) -- reloadFromCache()/reapplyRatingsFromDisk() on libraryModel,
+    // reloadVolumeNormalizationCache() on playbackEngine, both called right
+    // after the corresponding restore call succeeds so the running session
+    // reflects the restored files immediately, no restart needed.
+    property var libraryModel: null
+    property PlaybackEngine playbackEngine: null
 
     property string zipPath: ""
 
-    property var pendingPlaylistConflicts: []   // [fileName, ...]
-    property int  conflictCursor: 0
     property bool ratingsConflictPending: false
 
     property var  resultsLog: []                // [{category, fileName, outcome}, ...]
@@ -36,13 +41,19 @@ Popup {
 
     // Outcome tracking for the summary lines shown on the Done screen --
     // see buildSummaryLines() below.
-    property int    playlistsCopiedCount: 0
+    property bool   libraryHandled: false
+    property bool   librarySuccess: false
+    property int    playlistsDeletedCount: 0
+    property int    playlistsWrittenCount: 0
+    property bool   playlistsHandled: false
     property bool   ratingsHandled:      false   // true once a restoreRatings() call actually ran
     property string ratingsOutcomeMode:  ""      // "overwrite" | "skip" | "mergeNew" | "mergeAll"
     property int    ratingsAddedCount:   0
     property int    ratingsUpdatedCount: 0
     property bool   configHandled: false
     property bool   configSuccess: false
+    property bool   volumeNormalizationHandled: false
+    property bool   volumeNormalizationSuccess: false
     property var    summaryLines: []
 
     readonly property bool hasZip:      zipPath.length > 0
@@ -54,8 +65,9 @@ Popup {
     // first time it fires. A mirrored root property would silently drift
     // out of sync with the on-screen checkbox after that -- see UC-27's
     // architecture-doc note for the bug this caused.
-    readonly property bool anyChecked:  restorePlaylistsCheckbox.checked || restoreRatingsCheckbox.checked
-                                         || restoreConfigCheckbox.checked
+    readonly property bool anyChecked:  restoreLibraryCheckbox.checked || restorePlaylistsCheckbox.checked
+                                         || restoreRatingsCheckbox.checked || restoreConfigCheckbox.checked
+                                         || restoreVolumeNormalizationCheckbox.checked
     readonly property bool canRestore:  hasZip && anyChecked && !restoring
 
     anchors.centerIn: Overlay.overlay
@@ -66,23 +78,29 @@ Popup {
     closePolicy: Popup.NoAutoClose
 
     onOpened: {
+        restoreLibraryCheckbox.checked   = true
         restorePlaylistsCheckbox.checked = true
         restoreRatingsCheckbox.checked   = true
         restoreConfigCheckbox.checked    = true
+        restoreVolumeNormalizationCheckbox.checked = true
         zipPath                 = ""
-        pendingPlaylistConflicts = []
-        conflictCursor          = 0
         ratingsConflictPending  = false
         resultsLog              = []
         showResult              = false
         restoring               = false
-        playlistsCopiedCount    = 0
+        libraryHandled          = false
+        librarySuccess          = false
+        playlistsDeletedCount   = 0
+        playlistsWrittenCount   = 0
+        playlistsHandled        = false
         ratingsHandled          = false
         ratingsOutcomeMode      = ""
         ratingsAddedCount       = 0
         ratingsUpdatedCount     = 0
         configHandled           = false
         configSuccess           = false
+        volumeNormalizationHandled = false
+        volumeNormalizationSuccess = false
         summaryLines            = []
     }
 
@@ -92,6 +110,20 @@ Popup {
     MessageBox {
         id: errorBox
         title: qsTr("RESTORE FAILED")
+    }
+
+    // UC-27: one confirmation before RESTORE actually starts -- Playlists are
+    // now wholesale-cleared-and-replaced (no per-file undo) and every other
+    // checked category overwrites a Topaz file outright.
+    MessageBox {
+        id: confirmRestoreBox
+        title: qsTr("RESTORE TOPAZ ENVIRONMENT")
+        message: qsTr("This will overwrite the selected local Topaz files with the backup's contents. "
+                       + "If “Restore Playlists” is checked, ALL existing playlist files will be "
+                       + "deleted first and replaced with the backup's playlists. Continue?")
+        confirmMode: true
+        confirmButtonText: qsTr("RESTORE")
+        onAccepted: root.startRestore()
     }
 
     FileDialog {
@@ -108,30 +140,9 @@ Popup {
         }
     }
 
-    // One instance reused for every playlist conflict, one for the single
-    // possible ratings conflict -- see startRestore()/advance() below.
-    ChoiceDialog {
-        id: playlistConflictDialog
-        property string fileName: ""
-        title:   qsTr("PLAYLIST EXISTS")
-        message: qsTr("A playlist named \"%1\" already exists. What would you like to do?")
-                 .arg(playlistConflictDialog.fileName)
-        choices: ["YES", "NO", "RENAME"]
-        onChoiceMade: (choice) => {
-            const action = choice === "YES" ? "overwrite" : choice === "NO" ? "skip" : "rename"
-            const r = root.controller.restorePlaylistEntry(root.zipPath, fileName, action)
-            if (action !== "skip" && r.success) root.playlistsCopiedCount++
-            root.resultsLog.push({
-                category: qsTr("Playlist"),
-                fileName: r.writtenFileName || fileName,
-                outcome: action === "skip" ? qsTr("skipped")
-                         : (r.success ? qsTr("copied") : qsTr("failed"))
-            })
-            root.conflictCursor++
-            root.advance()
-        }
-    }
-
+    // Reused for the single possible ratings conflict -- see
+    // startRestore()/advance() below. Playlists no longer have a per-file
+    // conflict dialog (see restoreAllPlaylists()).
     ChoiceDialog {
         id: ratingsConflictDialog
         title:   qsTr("RATINGS EXIST")
@@ -145,6 +156,8 @@ Popup {
             root.ratingsOutcomeMode  = mode
             root.ratingsAddedCount   = r.addedCount || 0
             root.ratingsUpdatedCount = r.updatedCount || 0
+            if (mode !== "skip" && r.success && root.libraryModel)
+                root.libraryModel.reapplyRatingsFromDisk()
             root.resultsLog.push({
                 category: qsTr("Ratings"),
                 fileName: "",
@@ -278,6 +291,11 @@ Popup {
                         color: Theme.fgSurfaceVariant
                     }
                     CheckboxRow {
+                        id: restoreLibraryCheckbox
+                        label: qsTr("Restore Topaz Library")
+                        checked: true
+                    }
+                    CheckboxRow {
                         id: restoreConfigCheckbox
                         label: qsTr("Restore Topaz Config")
                         checked: true
@@ -290,6 +308,11 @@ Popup {
                     CheckboxRow {
                         id: restoreRatingsCheckbox
                         label: qsTr("Restore Ratings")
+                        checked: true
+                    }
+                    CheckboxRow {
+                        id: restoreVolumeNormalizationCheckbox
+                        label: qsTr("Restore Volume Normalization")
                         checked: true
                     }
                 }
@@ -485,7 +508,7 @@ Popup {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: root.canRestore ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked:   root.startRestore()
+                        onClicked:   { if (root.canRestore) confirmRestoreBox.open() }
                     }
                 }
             }
@@ -505,29 +528,47 @@ Popup {
 
         root.restoring  = true
         root.resultsLog = []
-        root.playlistsCopiedCount = 0
+        root.libraryHandled       = false
+        root.librarySuccess       = false
+        root.playlistsDeletedCount = 0
+        root.playlistsWrittenCount = 0
+        root.playlistsHandled      = false
         root.ratingsHandled       = false
         root.ratingsOutcomeMode   = ""
         root.ratingsAddedCount    = 0
         root.ratingsUpdatedCount  = 0
         root.configHandled        = false
         root.configSuccess        = false
+        root.volumeNormalizationHandled = false
+        root.volumeNormalizationSuccess = false
         root.summaryLines         = []
 
-        root.pendingPlaylistConflicts = []
+        // Library has no conflict concept -- one call, then reload the
+        // running session's in-memory library immediately (see
+        // LibraryModel::reloadFromCache()).
+        if (restoreLibraryCheckbox.checked && info.hasLibrary) {
+            const rl = root.controller.restoreLibrary(root.zipPath)
+            root.libraryHandled = true
+            root.librarySuccess = rl.success
+            if (rl.success && root.libraryModel) root.libraryModel.reloadFromCache()
+            root.resultsLog.push({
+                category: qsTr("Library"), fileName: "",
+                outcome: rl.success ? qsTr("copied") : qsTr("failed")
+            })
+        }
+
+        // Playlists: wholesale clear + replace, no per-file conflict dialog
+        // -- a playlist kept from before the restore could reference tracks
+        // that don't exist in a different environment's library at all.
         if (restorePlaylistsCheckbox.checked) {
-            for (const p of info.playlists) {
-                if (p.conflict) {
-                    root.pendingPlaylistConflicts.push(p.fileName)
-                } else {
-                    const r = root.controller.restorePlaylistEntry(root.zipPath, p.fileName, "overwrite")
-                    if (r.success) root.playlistsCopiedCount++
-                    root.resultsLog.push({
-                        category: qsTr("Playlist"), fileName: p.fileName,
-                        outcome: r.success ? qsTr("copied") : qsTr("failed")
-                    })
-                }
-            }
+            const rp = root.controller.restoreAllPlaylists(root.zipPath)
+            root.playlistsHandled      = true
+            root.playlistsDeletedCount = rp.deletedCount || 0
+            root.playlistsWrittenCount = rp.writtenCount || 0
+            root.resultsLog.push({
+                category: qsTr("Playlists"), fileName: "",
+                outcome: rp.success ? qsTr("copied") : qsTr("failed")
+            })
         }
 
         // Config has no conflict concept -- one call, no per-item dialog,
@@ -551,22 +592,31 @@ Popup {
             root.ratingsOutcomeMode  = "overwrite"
             root.ratingsAddedCount   = r.addedCount || 0
             root.ratingsUpdatedCount = r.updatedCount || 0
+            if (r.success && root.libraryModel) root.libraryModel.reapplyRatingsFromDisk()
             root.resultsLog.push({
                 category: qsTr("Ratings"), fileName: "",
                 outcome: r.success ? qsTr("copied") : qsTr("failed")
             })
         }
 
-        root.conflictCursor = 0
+        // Volume Normalization has no conflict concept -- one call, then
+        // drop the running session's in-memory loudness state (see
+        // PlaybackEngine::reloadVolumeNormalizationCache()).
+        if (restoreVolumeNormalizationCheckbox.checked && info.hasVolumeNormalization) {
+            const rv = root.controller.restoreVolumeNormalization(root.zipPath)
+            root.volumeNormalizationHandled = true
+            root.volumeNormalizationSuccess = rv.success
+            if (rv.success && root.playbackEngine) root.playbackEngine.reloadVolumeNormalizationCache()
+            root.resultsLog.push({
+                category: qsTr("Volume Normalization"), fileName: "",
+                outcome: rv.success ? qsTr("copied") : qsTr("failed")
+            })
+        }
+
         root.advance()
     }
 
     function advance() {
-        if (root.conflictCursor < root.pendingPlaylistConflicts.length) {
-            playlistConflictDialog.fileName = root.pendingPlaylistConflicts[root.conflictCursor]
-            playlistConflictDialog.open()
-            return
-        }
         if (root.ratingsConflictPending) {
             root.ratingsConflictPending = false
             ratingsConflictDialog.open()
@@ -579,11 +629,19 @@ Popup {
 
     function buildSummaryLines() {
         const lines = []
-        if (restorePlaylistsCheckbox.checked) {
-            const n = root.playlistsCopiedCount
-            lines.push(n === 1
-                ? qsTr("1 Playlist File has been copied to the Topaz Playlist Folder.")
-                : qsTr("%1 Playlist Files have been copied to the Topaz Playlist Folder.").arg(n))
+        if (restoreLibraryCheckbox.checked && root.libraryHandled) {
+            lines.push(root.librarySuccess
+                ? qsTr("Topaz Library has been restored.")
+                : qsTr("Topaz Library could not be restored."))
+        }
+        if (restorePlaylistsCheckbox.checked && root.playlistsHandled) {
+            const deleted = root.playlistsDeletedCount
+            const written = root.playlistsWrittenCount
+            const writtenPhrase = written === 1
+                ? qsTr("1 Playlist File has been restored")
+                : qsTr("%1 Playlist Files have been restored").arg(written)
+            lines.push(qsTr("%1 existing Playlist File(s) removed; ").arg(deleted)
+                       + writtenPhrase + qsTr(" from the Backup."))
         }
         if (restoreRatingsCheckbox.checked && root.ratingsHandled) {
             if (root.ratingsOutcomeMode === "overwrite")
@@ -598,6 +656,11 @@ Popup {
             lines.push(root.configSuccess
                 ? qsTr("Topaz Config has been restored (Audio Playback Option kept as-is).")
                 : qsTr("Topaz Config could not be restored."))
+        }
+        if (restoreVolumeNormalizationCheckbox.checked && root.volumeNormalizationHandled) {
+            lines.push(root.volumeNormalizationSuccess
+                ? qsTr("Topaz Volume Normalization File has been restored.")
+                : qsTr("Topaz Volume Normalization File could not be restored."))
         }
         root.summaryLines = lines
     }

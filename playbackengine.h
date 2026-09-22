@@ -222,6 +222,18 @@ public:
     //                    trackNumber, durationMs.
     Q_INVOKABLE QVariantList trackList() const;
 
+    // UC-27 Restore: called right after Topaz.volumeNormalization.json has been
+    // overwritten by a restore, so the running session doesn't keep applying
+    // stale gains. Clears m_loudnessDb (every reference gain resolved this
+    // session) and destroys the current LoudnessAnalyzer (graceful teardown via
+    // its own destructor -- m_quit + thread wait -- then lazily recreated by the
+    // next requestLoudness() call, which freshly reads the just-restored file).
+    // If a track is currently loaded, also re-requests its gain immediately
+    // (urgent) so the now-playing track re-resolves and ramps live too, rather
+    // than only the next track loaded after this call -- the same "apply
+    // immediately" precedent AppConfig::restoreFromJson() already set for Config.
+    Q_INVOKABLE void reloadVolumeNormalizationCache();
+
     // Cursor helpers — wrap QGuiApplication's override-cursor stack so QML
     // can set a global drag cursor that overrides all local MouseArea
     // shapes (a cursorShape binding on a MouseArea only applies while the

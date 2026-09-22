@@ -492,9 +492,13 @@ ApplicationWindow {
         id:               exportPlaylistDialog
         exportController: exportController
         // UC-26 Replay Gain Normalization -- see ExportPlaylistDialog.qml's
-        // property doc comments.
+        // property doc comments. Both are real declared properties there
+        // (qmllint --ignore-settings reports 0), but the editor's qmlls
+        // flags them anyway -- see CLAUDE.md's "Editor diagnostics" note.
+        // qmllint disable missing-property
         bassAudioActive:  engine.activeBackendName === "BASS Audio Library"
         appConfig:        appConfig
+        // qmllint enable missing-property
     }
 
     // Missing-playlist-tracks notice — opened after a LOAD (NowPlaying or

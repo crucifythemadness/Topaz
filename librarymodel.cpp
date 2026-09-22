@@ -295,6 +295,29 @@ void LibraryModel::loadCacheAndStartStatCheck()
                            m_tracks);
 }
 
+void LibraryModel::reloadFromCache()
+{
+    applyTracks(LibraryCache::load());
+}
+
+void LibraryModel::reapplyRatingsFromDisk()
+{
+    const QHash<QUuid, int> ratings = RatingCache::load();
+
+    bool changed = false;
+    for (TrackInfo &t : m_tracks) {
+        const int newRating = ratings.value(t.ratingId, 0);   // 0 = clear if absent
+        if (t.rating != newRating) {
+            t.rating = newRating;
+            changed = true;
+        }
+    }
+    if (!changed) return;
+
+    updateRatingCount();
+    emit ratingsChanged();
+}
+
 void LibraryModel::startFullScan()
 {
     if (!m_appConfig) return;

@@ -60,8 +60,9 @@ public:
     void setAppConfig(AppConfig *cfg);
 
     // ── BACKUP ────────────────────────────────────────────────────────────
-    // categories: subset of {"config", "playlists", "ratings"}. ".zip" is
-    // appended to zipFileName if not already present (case-insensitive).
+    // categories: subset of {"config", "playlists", "ratings", "library",
+    // "volumeNormalization"}. ".zip" is appended to zipFileName if not
+    // already present (case-insensitive).
     // A category with nothing on disk (e.g. "ratings" checked but no track
     // has ever been rated) is silently skipped, not an error; if that
     // leaves zero files across every checked category, this fails with a
@@ -82,22 +83,24 @@ public:
     // Returns { error: "<reason>" } if the file can't be opened/isn't a
     // valid zip. Otherwise:
     //   { hasPlaylists: bool, hasRatings: bool, hasConfig: bool,
-    //     playlists: [ { fileName, conflict }, ... ], ratingsConflict: bool }
-    // hasConfig tells RestoreDialog.qml whether "Restore Config" has
-    // anything to do -- see restoreConfig() below.
+    //     hasLibrary: bool, hasVolumeNormalization: bool, ratingsConflict: bool }
+    // hasConfig/hasLibrary/hasVolumeNormalization tell RestoreDialog.qml
+    // whether the corresponding no-conflict restore call has anything to
+    // do -- see restoreConfig()/restoreLibrary()/restoreVolumeNormalization()
+    // below. No per-entry playlist list anymore -- restoreAllPlaylists()
+    // below is a wholesale replace, not a per-file decision, so there's
+    // nothing left for a caller to iterate.
     Q_INVOKABLE QVariantMap inspectZip(const QString &zipFilePath) const;
 
-    // ── RESTORE: one playlist entry, one decision ────────────────────────
-    // entryFileName: bare file name as returned by inspectZip()'s
-    // "playlists" list (e.g. "Foo.xml") -- looked up in the zip at
-    // "playlists/<entryFileName>".
-    // action: "overwrite" | "skip" | "rename"
-    // Returns { success: bool, error: string, writtenFileName: string } --
-    // writtenFileName is "" when skipped, or when a "rename" exhausted all
-    // 9 " - Copy 0N" slots (treated as failed for that file).
-    Q_INVOKABLE QVariantMap restorePlaylistEntry(const QString &zipFilePath,
-                                                  const QString &entryFileName,
-                                                  const QString &action) const;
+    // ── RESTORE: playlists, wholesale replace ────────────────────────────
+    // Deletes every file m_playlistManager->listPlaylists() currently
+    // reports, then extracts and writes every "playlists/*.xml" entry from
+    // the zip (one zip-open session). No per-file conflict concept: this is
+    // a full "switch environments" replace, not a merge -- a playlist kept
+    // from before the restore could reference tracks that don't exist in
+    // the newly-restored library at all. Returns { success, error,
+    // deletedCount, writtenCount }.
+    Q_INVOKABLE QVariantMap restoreAllPlaylists(const QString &zipFilePath) const;
 
     // ── RESTORE: ratings, one decision for the whole file ────────────────
     // mode: "overwrite" | "skip" | "mergeNew" | "mergeAll". Call with
@@ -114,6 +117,18 @@ public:
     // the running app picks up the change immediately -- see UC-27).
     // Returns { success: bool, error: string }.
     Q_INVOKABLE QVariantMap restoreConfig(const QString &zipFilePath) const;
+
+    // ── RESTORE: library / volume normalization, one call each, no
+    // conflict dialog ────────────────────────────────────────────────────
+    // Extract library/Topaz.library.json (or volumeNormalization/
+    // Topaz.volumeNormalization.json) and overwrite the local file outright
+    // -- both are recomputable caches, so unlike Config there's no live
+    // object to apply into here; the caller (RestoreDialog.qml) reloads the
+    // running app's in-memory state right after a successful call --
+    // LibraryModel::reloadFromCache() / PlaybackEngine::
+    // reloadVolumeNormalizationCache(). Returns { success: bool, error: string }.
+    Q_INVOKABLE QVariantMap restoreLibrary(const QString &zipFilePath) const;
+    Q_INVOKABLE QVariantMap restoreVolumeNormalization(const QString &zipFilePath) const;
 
 signals:
     void playlistManagerChanged();

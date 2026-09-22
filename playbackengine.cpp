@@ -737,6 +737,18 @@ QVariantList PlaybackEngine::trackList() const
     }
     return result;
 }
+
+void PlaybackEngine::reloadVolumeNormalizationCache()
+{
+    m_loudnessDb.clear();
+    if (m_loudness) {
+        delete m_loudness;   // graceful teardown (m_quit + thread wait), same as ~PlaybackEngine()
+        m_loudness = nullptr;
+    }
+    if (m_currentIndex >= 0 && m_currentIndex < m_queue.size())
+        requestLoudness(m_queue.at(m_currentIndex), true);
+}
+
 void PlaybackEngine::beginDragCursor()
 {
     QGuiApplication::setOverrideCursor(Qt::ForbiddenCursor);

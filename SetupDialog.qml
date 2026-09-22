@@ -4424,6 +4424,8 @@ Popup {
                 RestoreDialog {
                     id: restoreDialog
                     controller: root.backupRestoreController
+                    libraryModel: root.libraryModel
+                    playbackEngine: root.playbackEngine
                     onClosed: restoreHover.hovered = false
                 }
             } // end MISC panel
