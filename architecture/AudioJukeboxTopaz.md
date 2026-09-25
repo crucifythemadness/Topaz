@@ -668,23 +668,41 @@ Topaz module
 │                         property string activeTab ("library"/"playlists"/"search", bound from Main.qml)  — drives which of the 3 tabs is highlighted; a Repeater-driven Row (same array-model convention as BottomBar), see UC-21/UC-22
 │                         signal librarySelected() / playlistsSelected() / searchSelected()  ← tab click; "dumb component, owner decides" — Main.qml sets activeTab in response
 │                         signal settingsRequested()  ← gear icon click
-│                         Loudspeaker icon (🔊, leftmost of the three): click opens a non-modal Popup (~8cm/300px-wide
-│                         Slider, 0-100, labeled "OS Volume") anchored under the button via parent: <button item>.
-│                         Closes when neither the button nor the popup itself has been hovered for ~150ms (combined
-│                         hover state + debounce Timer, to avoid flicker-closing in transit from button to popup) —
-│                         deliberately not Popup.CloseOnPressOutside, since the close trigger is hover-exit, not click.
-│                         Slider.onMoved calls systemVolume.setVolume(Math.round(value)) directly (Q_INVOKABLE, see
-│                         SystemVolumeController below — its Q_PROPERTY volume is intentionally READ-only, matching
-│                         AppConfig's convention of always using a separate Q_INVOKABLE setter rather than a
-│                         Q_PROPERTY WRITE clause, since a WRITE function is not itself callable as obj.setX() from
-│                         QML unless also marked Q_INVOKABLE — an early version of this feature used WRITE and the
-│                         slider silently did nothing to the real OS volume). onClicked also calls
-│                         systemVolume.refresh() right before opening the popup, so the slider reflects the OS
-│                         volume even if it changed elsewhere while Topaz was already running; beyond that,
-│                         Slider.value stays live-synced for the whole session via SystemVolumeController's
-│                         IAudioEndpointVolumeCallback registration — no further QML-side action needed, since
-│                         volumeChanged() re-firing is enough for the existing value: binding to pick it up,
-│                         popup open or not (see SystemVolumeController below).
+│                         Loudspeaker icon (🔊, or 🔇 while the OS is muted; leftmost of the three): click opens a
+│                         non-modal Popup anchored under the button via parent: <button item>, holding a square
+│                         288×288 area (75 % of the old ~385 px slider pane's width) with one VolumeKnob (below).
+│                         The pane itself is fully transparent (no background, no border — the user's choice), so
+│                         only the knob floats over the window. No "OS Volume" title and no 0/100 labels.
+│                         Close rule: closes when neither the button nor the pane has been hovered for 700 ms
+│                         (combined hover state + debounce Timer) and the knob isn't being dragged; a drag that
+│                         ends outside the pane restarts the timer, so it then closes normally. "The pane" for
+│                         hovering = the 288×288 area plus a further 32 px margin left/right/below it, so
+│                         overshooting the knob doesn't close it. The margin above the card only bridges the 8 px gap to the button: a
+│                         full margin there would reach into the bar and block clicks on the Settings gear.
+│                         Deliberately not Popup.CloseOnPressOutside, since the close trigger is hover-exit.
+│                         Knob wiring: value ← systemVolume.volume, muted ← systemVolume.muted (both live-synced by
+│                         SystemVolumeController, popup open or not); onMoved(v) → setMuted(false) if muted (changing
+│                         the level unmutes, like the OS flyout), then setVolume(v); onMuteToggled → setMuted(!muted).
+│                         setVolume/setMuted are Q_INVOKABLEs, not Q_PROPERTY WRITE functions — a WRITE function
+│                         isn't callable as obj.setX() from QML unless also Q_INVOKABLE (an early version of this
+│                         feature used WRITE and silently did nothing to the real OS volume). onClicked calls
+│                         systemVolume.refresh() right before opening the popup.
+├── VolumeKnob.qml      Round OS-volume knob used by TopBar's volume pane. Dumb component: property int value (0-100),
+│                         property bool muted, readonly property bool dragging; signal moved(int), signal muteToggled().
+│                         One Canvas first paints a faint round dark backdrop (radial gradient, ~45 % black up to the
+│                         ring's outer edge, fading to 0 at the knob's edge) so the knob stays readable floating over
+│                         bright covers in the transparent pane, then a thick (9 % of the knob size) 270° arc open at the bottom (135° → 405°
+│                         screen angles): the grey track, the value arc with a Theme.secondary → primary → tertiary
+│                         gradient plus a soft glow (shadowBlur in the gradient's end color), and a large white
+│                         handle at the value end. The gradient is drawn as 2° segments with interpolated colors
+│                         rather than createConicalGradient, so the color order doesn't depend on that gradient's
+│                         rotation direction. Muted = the value arc drawn at 35 % opacity. Center disc: a flat
+│                         speaker icon drawn on a small Canvas (waves, or ✕ when muted — not an emoji, so it's
+│                         monochrome with every platform font) that is the mute button, and the "NN%" label.
+│                         Input: press+drag on the ring band only (presses elsewhere are rejected so they reach the
+│                         mute button); a drag through the bottom gap sticks at 0/100 instead of flipping (jumps
+│                         > 50 are refused); WheelHandler over the whole knob, 2 % per 120-unit notch, small touchpad
+│                         deltas accumulated.
 ├── GenreBar.qml        3 × 10 genre toggle grid  (reads lib.genreModel, calls lib.toggleGenre)
 ├── LibraryTree.qml     Left sidebar  default width 286 px, user-resizable  (flat virtualised ListView; flatRows JS array; no nested Repeaters)
 ├── SearchPanel.qml     Replaces LibraryTree in the same SplitView slot when SEARCH is active — see UC-21 (independent of LibraryData; property SearchData searchData)
@@ -737,7 +755,7 @@ work), not just with track count.
 | `LibraryScanner` | `libraryscanner.h/cpp` | Worker: directory walk, parallel tag-reading (`QtConcurrent`/`QThreadPool`), genre filter, QFileSystemWatcher |
 | `LibraryModel` | `librarymodel.h/cpp` | QAbstractListModel + Q_INVOKABLE query helpers exposed to QML |
 | `PlaylistManager` | `playlistmanager.h/cpp` | XSPF playlist file creation; path-portability helpers; `listPlaylists()` for the PLAYLISTS tab (see UC-22) |
-| `SystemVolumeController` | `systemvolumecontroller.h/cpp` | OS master-volume control with live sync: Core Audio COM on Windows, native libpulse (PulseAudio / PipeWire) on Linux |
+| `SystemVolumeController` | `systemvolumecontroller.h/cpp` | OS master-volume and mute control with live sync: Core Audio COM on Windows, native libpulse (PulseAudio / PipeWire) on Linux |
 
 ### SystemVolumeController — OS master volume (Windows: Core Audio, Linux: libpulse)
 
@@ -815,6 +833,18 @@ class in this codebase logs anything) and leaves the endpoint pointer null;
     must live in the `.cpp` (same PIMPL/no-Windows-headers-in-the-header rationale
     below) rather than as a member of `SystemVolumeController` itself.
 
+**OS mute** (both platforms): `Q_PROPERTY(bool muted READ muted NOTIFY mutedChanged)`
++ `Q_INVOKABLE void setMuted(bool)` — the same READ/NOTIFY-only + separate-setter
+pattern as `volume`. It is the **real OS mute**, not a Topaz-side "volume to 0", so the
+volume knob's mute button (see `TopBar.qml`/`VolumeKnob.qml`) agrees with the keyboard
+mute key and the OS's own volume UI in both directions. A private `applyMute(bool)`
+(emits only on change, GUI thread only, reached by the friend `VolumeChangeCallback`)
+is the counterpart of `applyLevel()`. `setMuted()` is optimistic like `setVolume()`.
+On Windows: `IAudioEndpointVolume::GetMute()` seeds it at construction and in
+`refresh()`, `SetMute()` writes it, and `OnNotify()` forwards
+`AUDIO_VOLUME_NOTIFICATION_DATA::bMuted` in the same queued call as the level. The
+Linux path is described under the libpulse implementation below.
+
 All Windows/COM headers (`mmdeviceapi.h`, `endpointvolume.h`) are confined to the
 `.cpp` behind a private `struct Impl` (PIMPL) — `<windows.h>`-family headers define
 macros (`interface`, `min`, `max`) that can clash with Qt/STL if leaked into every
@@ -864,12 +894,20 @@ on that binary, first-channel-only text parsing).
   / `PA_VOLUME_NORM`), and `setVolume()` uses `pa_cvolume_scale()`, which also sets the
   loudest channel: read and write agree and a left/right balance configured elsewhere
   is preserved (an all-zero sink gets every channel set). Values above 100 % clamp to
-  100 in `applyLevel()`. Mute state is not mirrored (as on Windows).
+  100 in `applyLevel()`.
+- **Mute.** `onSinkInfo()` also reads `pa_sink_info.mute` and posts it next to the
+  level; `setMuted()` sends `pa_context_set_sink_mute_by_index()` (same no-sink
+  warn-once handling as `setVolume()`). See "OS mute" below.
 - **Echo suppression.** Server reports arriving < 250 ms after Topaz's own
-  `setVolume()` are ignored: they are the echoes of the slider drag itself
-  (38, 39, 40 … trailing behind a slider already at 41) and would make it jump back and
+  `setVolume()` are ignored: they are the echoes of the knob drag itself
+  (38, 39, 40 … trailing behind a knob already at 41) and would make it jump back and
   forth. Later changes go through `applyLevel()` normally. `setVolume()` is otherwise
   optimistic (updates `m_volume` + `volumeChanged()` immediately), like Windows.
+  Mute has its **own** 250 ms window (`sinceLocalMute`, restarted by `setMuted()`):
+  a report already under way when the mute button was clicked still carries the old
+  state and would flip the button straight back. The two windows are independent —
+  a level report swallowed by the level window still delivers its mute value
+  (`applyServerLevel()` and `applyServerMute()` run separately in the queued lambda).
 - **Recovery.** If the connection fails or the server restarts (`FAILED`/`TERMINATED`),
   the GUI thread rebuilds the context after 3 s and keeps retrying every 3 s; one
   warning per outage, not per retry. Destruction clears the callbacks, disconnects, and
@@ -1006,6 +1044,15 @@ working, and four problems:
   buffer's format, the first non-zero bar level ("analysis works, so it is a
   drawing problem") and — instead of silently skipping — a warning when a
   sample format is unsupported.
+  **Resolved (2026-09-25 real-hardware retest):** the Audio Visualizer now
+  draws on Linux. The root cause was never pinned down (the diagnostics were
+  never needed); they stay in as cheap one-shot logging.
+
+**Retest on real hardware (2026-09-25):** with all of the above in place, the
+user confirmed on Linux that the libpulse OS volume (see SystemVolumeController),
+the Audio Visualizer, Milkdrop, Backup / Restore / Export Playlist, the app
+icon and the dual-monitor setup (window/fullscreen restore on the right
+display, see UC-28) all work. No open Linux issues were reported.
 
 ### TagReader — supported formats
 
@@ -7219,7 +7266,7 @@ turning it off ramps the playing deck back to 0 dB. Picking "Consistent Backgrou
 `playback.autoLoudnessCorrection` / `playback.loudnessStrategy` in `Topaz.config`.
 
 Right under each strategy's radio, with a wider gap between the two strategies than between the
-checkbox and the radios: a horizontal **Trim** slider (`[-15, +15]` dB, `0.5` dB steps, default `0`,
+checkbox and the radios: a horizontal **Trim** slider (`[-15, +15]` dB, `0.1` dB steps, default `0`,
 `AppConfig.audiophileTrimDb` / `backgroundTrimDb`) — a manual correction the user dials in on top of
 whichever strategy is active. Both stay visible once the checkbox is on; only the slider under the
 *selected* strategy is fully interactive, the other dims to match the unselected radio. Added because

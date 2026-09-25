@@ -40,8 +40,10 @@
 // handle that, but that's a distinct concern from volume-level sync and
 // wasn't asked for. The Linux client does follow the default sink, and
 // reconnects if the sound server restarts. On Linux the initial volume arrives
-// asynchronously a moment after construction (nothing blocks the GUI thread);
-// mute state is not mirrored on either platform.
+// asynchronously a moment after construction (nothing blocks the GUI thread).
+// The OS mute state is mirrored the same way as the level (muted()/setMuted(),
+// live-synced through the same callbacks), so the volume knob's mute button
+// agrees with the keyboard mute key and the OS's own volume UI.
 //
 // Instantiated once in Main.qml:
 //   SystemVolumeController { id: systemVolume }
@@ -66,6 +68,9 @@ class SystemVolumeController : public QObject
     // Q_INVOKABLE (a real bug caught here: the call silently did nothing).
     Q_PROPERTY(int volume READ volume NOTIFY volumeChanged)
 
+    // The OS master mute, same READ-only + Q_INVOKABLE-setter pattern.
+    Q_PROPERTY(bool muted READ muted NOTIFY mutedChanged)
+
 public:
     explicit SystemVolumeController(QObject *parent = nullptr);
     ~SystemVolumeController() override;
@@ -73,12 +78,16 @@ public:
     int volume() const { return m_volume; }
     Q_INVOKABLE void setVolume(int v);
 
+    bool muted() const { return m_muted; }
+    Q_INVOKABLE void setMuted(bool m);
+
     // Re-reads the OS's current volume and updates this property if it
     // changed. Called from TopBar.qml right before the volume popup opens.
     Q_INVOKABLE void refresh();
 
 signals:
     void volumeChanged();
+    void mutedChanged();
 
 private:
     // Applies a 0.0-1.0 scalar level read from the OS (during construction,
@@ -91,8 +100,13 @@ private:
     // directly from elsewhere.
     void applyLevel(float level);
 
+    // Same for the mute state: updates m_muted, emits mutedChanged() only on
+    // an actual change. Same GUI-thread-only rule as applyLevel().
+    void applyMute(bool muted);
+
     struct Impl;
     Impl *m_impl;
 
-    int m_volume = 100;
+    int  m_volume = 100;
+    bool m_muted  = false;
 };

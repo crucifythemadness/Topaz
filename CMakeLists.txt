@@ -221,6 +221,7 @@ qt_add_qml_module(topaz
         RestoreDialog.qml
         ImportPlaylistDialog.qml
         ScanFoldersDialog.qml
+        VolumeKnob.qml
     RESOURCES
         app.ico
         InfoAbout.png

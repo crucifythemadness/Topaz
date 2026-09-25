@@ -519,23 +519,24 @@ Rectangle {
                     }
                     spacing: 6
 
-                    // Time row
+                    // Time row -- 26 px (was 22) for the one-step-larger
+                    // monoLg labels; shifts everything below down 4 px.
                     Item {
                         width:  parent.width
-                        height: 22
+                        height: 26
 
                         Text {
                             anchors { left: parent.left; verticalCenter: parent.verticalCenter }
                             text: root.engine ? root.engine.positionString : "0:00"
                             font.family:    Theme.fontFamilyMono
-                            font.pixelSize: Theme.monoMd
+                            font.pixelSize: Theme.monoLg
                             color: Theme.fgSurfaceVariant
                         }
                         Text {
                             anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                             text: root.engine ? root.engine.durationString : "0:00"
                             font.family:    Theme.fontFamilyMono
-                            font.pixelSize: Theme.monoMd
+                            font.pixelSize: Theme.monoLg
                             color: Theme.fgSurfaceVariant
                         }
                     }
@@ -697,6 +698,7 @@ Rectangle {
             Column {
                 id: playlistButtons
                 width: parent.width
+                topPadding: 16   // extra gap below the transport controls
 
                 // Row 1 — NEW  |  LOAD
                 Row {

@@ -143,7 +143,7 @@ Rectangle {
             spacing: 20
 
             // OS Volume (loudspeaker) -- opens a flyout pane with the volume
-            // slider. Leftmost of the three (swapped with Settings).
+            // knob (VolumeKnob.qml). Leftmost of the three (swapped with Settings).
             Item {
                 id: volumeButton
                 width:  32
@@ -164,7 +164,7 @@ Rectangle {
                     anchors.fill: parent
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment:   Text.AlignVCenter
-                    text: "🔊"
+                    text: root.systemVolume && root.systemVolume.muted ? "🔇" : "🔊"
                     font.pixelSize: 22
                 }
 
@@ -185,125 +185,88 @@ Rectangle {
 
                 Popup {
                     id: volumePopup
+
+                    // Transparent margin around the visible card that still
+                    // counts as "inside the pane" for the hover-to-stay-open
+                    // logic below, so a pointer that overshoots the card a
+                    // little doesn't close it. Left/right/bottom only: the
+                    // top one just bridges the 8 px gap under the button --
+                    // a full margin there would reach up into the bar and
+                    // cover (block clicks on) the Settings gear next door.
+                    readonly property int hoverMargin: 32
+                    readonly property int gapToButton: 8
+                    readonly property int cardSize:    288   // square, 75 % of the old slider pane's ~385 px width
+
                     parent: volumeButton
-                    x: volumeButton.width - width
-                    y: volumeButton.height + 8
-                    padding: Theme.sp5
+                    // Card's right edge lines up with the button's right edge.
+                    x: volumeButton.width - width + hoverMargin
+                    y: volumeButton.height
+                    padding: 0
 
                     modal: false
                     focus: false
                     closePolicy: Popup.NoAutoClose
 
-                    background: Rectangle {
-                        color:  Theme.surfaceContainerLow
-                        radius: Theme.radiusLg
-                        border.color: Theme.ov20
-                        border.width: 1
-                    }
+                    background: Item {}   // transparent -- only the knob is visible
 
-                    contentItem: ColumnLayout {
-                        spacing: 12
+                    contentItem: Item {
+                        implicitWidth:  volumePopup.cardSize + 2 * volumePopup.hoverMargin
+                        implicitHeight: volumePopup.gapToButton + volumePopup.cardSize
+                                        + volumePopup.hoverMargin
 
                         // Closes the pane once neither the button nor the
-                        // pane itself has been hovered for a short moment --
-                        // debounced so moving the mouse from the button onto
-                        // the pane doesn't flicker-close it in transit.
+                        // pane (card + hover margin) has been hovered for a
+                        // while, and never mid-drag. Debounced generously
+                        // (700 ms) so moving the mouse from the button onto
+                        // the knob, or briefly overshooting it, doesn't close
+                        // the pane under the user.
                         HoverHandler {
                             id: hoverPane
                             onHoveredChanged: volumeCloseTimer.restart()
                         }
                         Timer {
                             id: volumeCloseTimer
-                            interval: 150
+                            interval: 700
                             onTriggered: {
-                                if (!hoverVolume.containsMouse && !hoverPane.hovered)
+                                if (!hoverVolume.containsMouse && !hoverPane.hovered
+                                        && !volumeKnob.dragging)
                                     volumePopup.close()
                             }
                         }
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text {
-                                text: qsTr("OS Volume")
-                                font.family:    Theme.fontFamilyBody
-                                font.pixelSize: Theme.titleMd
-                                font.weight:    Font.Medium
-                                color: Theme.fgSurface
-                            }
-                            Item { Layout.fillWidth: true }
-                            Text {
-                                text: Math.round(volumeSlider.value)
-                                font.family:    Theme.fontFamilyMono
-                                font.pixelSize: Theme.labelLg
-                                font.weight:    Font.Bold
-                                color: Theme.secondary
-                            }
-                        }
+                        // Invisible card: only the knob itself is drawn,
+                        // floating over the window (user's choice -- no pane
+                        // background or border). It still sets the knob's size
+                        // and is part of the hover area.
+                        Item {
+                            x: volumePopup.hoverMargin
+                            y: volumePopup.gapToButton
+                            width:  volumePopup.cardSize
+                            height: volumePopup.cardSize
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-
-                            Text {
-                                text: "0"
-                                font.family:    Theme.fontFamilyMono
-                                font.pixelSize: Theme.labelSm
-                                color: Theme.fgSurfaceVariant
-                            }
-
-                            Slider {
-                                id: volumeSlider
-                                Layout.preferredWidth: 300
-                                from: 0
-                                to:   100
-                                stepSize: 1
-                                snapMode: Slider.SnapAlways
+                            VolumeKnob {
+                                id: volumeKnob
+                                anchors.fill: parent
+                                anchors.margins: 14
                                 value: root.systemVolume ? root.systemVolume.volume : 100
+                                muted: root.systemVolume ? root.systemVolume.muted : false
 
-                                onMoved: {
+                                // A drag that ends outside the pane closes it
+                                // normally afterwards (the timer was held off
+                                // only while dragging).
+                                onDraggingChanged: if (!dragging) volumeCloseTimer.restart()
+
+                                // Changing the level while muted unmutes, like
+                                // the OS's own volume flyout.
+                                onMoved: (v) => {
+                                    if (!root.systemVolume) return
+                                    if (root.systemVolume.muted) root.systemVolume.setMuted(false)
+                                    root.systemVolume.setVolume(v)
+                                }
+                                onMuteToggled: {
                                     if (root.systemVolume)
-                                        root.systemVolume.setVolume(Math.round(value))
+                                        root.systemVolume.setMuted(!root.systemVolume.muted)
                                 }
-
-                                background: Rectangle {
-                                    x: volumeSlider.leftPadding
-                                    y: volumeSlider.topPadding
-                                       + volumeSlider.availableHeight / 2 - height / 2
-                                    implicitWidth:  300
-                                    implicitHeight: 4
-                                    width:  volumeSlider.availableWidth
-                                    height: implicitHeight
-                                    radius: 2
-                                    color:  Theme.surfaceContainerHighest
-
-                                    Rectangle {
-                                        width:  volumeSlider.visualPosition * parent.width
-                                        height: parent.height
-                                        radius: 2
-                                        color:  Theme.secondary
-                                    }
-                                }
-
-                                handle: Rectangle {
-                                    x: volumeSlider.leftPadding
-                                       + volumeSlider.visualPosition
-                                         * (volumeSlider.availableWidth - width)
-                                    y: volumeSlider.topPadding
-                                       + volumeSlider.availableHeight / 2 - height / 2
-                                    implicitWidth:  16
-                                    implicitHeight: 16
-                                    width:  implicitWidth
-                                    height: implicitHeight
-                                    radius: 8
-                                    color: Theme.secondary
-                                }
-                            }
-
-                            Text {
-                                text: "100"
-                                font.family:    Theme.fontFamilyMono
-                                font.pixelSize: Theme.labelSm
-                                color: Theme.fgSurfaceVariant
                             }
                         }
                     }

@@ -74,8 +74,12 @@ public:
     {
         if (!pNotify) return S_OK;
         const float level = pNotify->fMasterVolume;
+        const bool  muted = pNotify->bMuted != FALSE;
         QMetaObject::invokeMethod(
-            m_owner, [owner = m_owner, level]() { owner->applyLevel(level); },
+            m_owner, [owner = m_owner, level, muted]() {
+                owner->applyLevel(level);
+                owner->applyMute(muted);
+            },
             Qt::QueuedConnection);
         return S_OK;
     }
@@ -135,6 +139,13 @@ SystemVolumeController::SystemVolumeController(QObject *parent)
     else
         qWarning("SystemVolumeController: GetMasterVolumeLevelScalar failed, hr=0x%08lX", hr);
 
+    BOOL mute = FALSE;
+    hr = m_impl->endpointVolume->GetMute(&mute);
+    if (SUCCEEDED(hr))
+        applyMute(mute != FALSE);
+    else
+        qWarning("SystemVolumeController: GetMute failed, hr=0x%08lX", hr);
+
     // Live sync: get notified of any future change to this endpoint's
     // volume, from any source (see the class doc comment in the header).
     m_impl->callback = new VolumeChangeCallback(this);
@@ -167,11 +178,40 @@ void SystemVolumeController::refresh()
 {
     if (!m_impl->endpointVolume) return;
     float level = 0.0f;
-    const HRESULT hr = m_impl->endpointVolume->GetMasterVolumeLevelScalar(&level);
+    HRESULT hr = m_impl->endpointVolume->GetMasterVolumeLevelScalar(&level);
     if (SUCCEEDED(hr))
         applyLevel(level);
     else
         qWarning("SystemVolumeController: refresh()'s GetMasterVolumeLevelScalar failed, hr=0x%08lX", hr);
+
+    BOOL mute = FALSE;
+    hr = m_impl->endpointVolume->GetMute(&mute);
+    if (SUCCEEDED(hr))
+        applyMute(mute != FALSE);
+    else
+        qWarning("SystemVolumeController: refresh()'s GetMute failed, hr=0x%08lX", hr);
+}
+
+void SystemVolumeController::applyMute(bool muted)
+{
+    if (muted == m_muted) return;
+    m_muted = muted;
+    emit mutedChanged();
+}
+
+void SystemVolumeController::setMuted(bool m)
+{
+    if (m == m_muted) return;
+    m_muted = m;                        // optimistic, like setVolume()
+    if (m_impl->endpointVolume) {
+        const HRESULT hr = m_impl->endpointVolume->SetMute(m ? TRUE : FALSE, nullptr);
+        if (FAILED(hr))
+            qWarning("SystemVolumeController: SetMute failed, hr=0x%08lX", hr);
+    } else {
+        qWarning("SystemVolumeController: setMuted() called but no IAudioEndpointVolume "
+                 "available (construction-time COM setup failed) — OS mute not changed");
+    }
+    emit mutedChanged();
 }
 
 void SystemVolumeController::setVolume(int v)
@@ -239,6 +279,7 @@ struct SystemVolumeController::Impl
 
     // ---- GUI thread only ----
     QElapsedTimer sinceLocalSet;   // echo suppression, see applyServerLevel()
+    QElapsedTimer sinceLocalMute;  // same for the mute state, see applyServerMute()
     bool          reconnectPending = false;
 };
 
@@ -420,8 +461,13 @@ public:
         d->warnedNoSink = false;
         d->warnedLost   = false;
 
-        QMetaObject::invokeMethod(self, [self, level]() { applyServerLevel(self, level); },
-                                  Qt::QueuedConnection);
+        // Level and mute are applied independently: an echo-suppressed level
+        // report must not swallow a real mute change riding along with it.
+        const bool muted = info->mute != 0;
+        QMetaObject::invokeMethod(self, [self, level, muted]() {
+            applyServerLevel(self, level);
+            applyServerMute(self, muted);
+        }, Qt::QueuedConnection);
     }
 
     // GUI thread. A change reported by the server. Reports that arrive right
@@ -436,6 +482,18 @@ public:
         if (d->sinceLocalSet.isValid() && d->sinceLocalSet.elapsed() < kEchoSuppressMs)
             return;
         self->applyLevel(level);
+    }
+
+    // GUI thread. Same idea for the mute state: a report that was already
+    // under way when the user clicked the mute button still carries the old
+    // state and would flip the button straight back, so reports arriving
+    // right after our own setMuted() are ignored.
+    static void applyServerMute(SystemVolumeController *self, bool muted)
+    {
+        auto *d = self->m_impl;
+        if (d->sinceLocalMute.isValid() && d->sinceLocalMute.elapsed() < kEchoSuppressMs)
+            return;
+        self->applyMute(muted);
     }
 };
 
@@ -533,6 +591,40 @@ void SystemVolumeController::setVolume(int v)
         pa_threaded_mainloop_unlock(m_impl->loop);
     }
     emit volumeChanged();
+}
+
+void SystemVolumeController::applyMute(bool muted)
+{
+    if (muted == m_muted) return;
+    m_muted = muted;
+    emit mutedChanged();
+}
+
+void SystemVolumeController::setMuted(bool m)
+{
+    if (m == m_muted) return;
+    m_muted = m;                       // optimistic, as on Windows
+    m_impl->sinceLocalMute.restart();
+
+    bool sent = false;
+    if (m_impl->loop) {
+        pa_threaded_mainloop_lock(m_impl->loop);
+        if (m_impl->ctx && pa_context_get_state(m_impl->ctx) == PA_CONTEXT_READY
+            && m_impl->sinkIndex != PA_INVALID_INDEX) {
+            if (pa_operation *op = pa_context_set_sink_mute_by_index(
+                    m_impl->ctx, m_impl->sinkIndex, m ? 1 : 0, nullptr, nullptr)) {
+                pa_operation_unref(op);
+                sent = true;
+            }
+        }
+        if (!sent && !m_impl->warnedNoSink) {
+            m_impl->warnedNoSink = true;
+            qWarning("SystemVolumeController: setMuted() found no connected PulseAudio/PipeWire "
+                     "default sink -- OS mute not changed");
+        }
+        pa_threaded_mainloop_unlock(m_impl->loop);
+    }
+    emit mutedChanged();
 }
 
 #endif
