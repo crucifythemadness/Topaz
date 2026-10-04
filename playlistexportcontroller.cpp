@@ -1,4 +1,5 @@
 #include "playlistexportcontroller.h"
+#include "mp3converter.h"
 #include "playlistexportworker.h"
 
 #include <QDir>
@@ -57,12 +58,23 @@ void PlaylistExportController::startWorkerThread()
     m_workerThread->start();
 }
 
-void PlaylistExportController::onWorkerProgress(int done, int total, const QString &currentFileName)
+void PlaylistExportController::onWorkerProgress(int done, int total, const QString &currentFileName,
+                                                 double fraction, bool converting)
 {
-    m_exportProgress = total > 0 ? (done * 100 / total) : 100;
+    // fraction = share of the current file already done, so a long conversion
+    // moves the bar smoothly instead of in one jump per track.
+    m_exportProgress = total > 0
+        ? int((done + qBound(0.0, fraction, 1.0)) * 100.0 / total)
+        : 100;
     emit exportProgressChanged();
-    m_currentFileName = currentFileName;
-    emit currentFileNameChanged();
+    if (m_currentFileName != currentFileName) {
+        m_currentFileName = currentFileName;
+        emit currentFileNameChanged();
+    }
+    if (m_converting != converting) {
+        m_converting = converting;
+        emit convertingChanged();
+    }
 }
 
 void PlaylistExportController::onWorkerFinished(const QVariantList &results)
@@ -73,6 +85,10 @@ void PlaylistExportController::onWorkerFinished(const QVariantList &results)
     emit exportProgressChanged();
     m_currentFileName.clear();
     emit currentFileNameChanged();
+    if (m_converting) {
+        m_converting = false;
+        emit convertingChanged();
+    }
     emit exportFinished(results);
 }
 
@@ -138,19 +154,36 @@ QVariantMap PlaylistExportController::analyzeDestination(const QString &destPath
     return result;
 }
 
-qint64 PlaylistExportController::computeRequiredBytes(const QVariantList &filePaths) const
+qint64 PlaylistExportController::computeExportBytes(const QVariantList &tracks, bool convertToMp3) const
 {
+    constexpr qint64 kMp3BytesPerMs  = 40;          // 320 kbps = 40,000 bytes/s
+    constexpr qint64 kTagCoverHeadroom = 1 << 20;   // ID3 tag + embedded cover art
+
     qint64 total = 0;
-    for (const QVariant &v : filePaths)
-        total += QFileInfo(v.toString()).size();
+    for (const QVariant &v : tracks) {
+        const QVariantMap track = v.toMap();
+        const QFileInfo src(track.value(QStringLiteral("filePath")).toString());
+        const qint64 durationMs = track.value(QStringLiteral("durationMs")).toLongLong();
+        const bool isMp3 = src.suffix().compare(QLatin1String("mp3"), Qt::CaseInsensitive) == 0;
+
+        if (convertToMp3 && !isMp3 && durationMs > 0)
+            total += durationMs * kMp3BytesPerMs + kTagCoverHeadroom;
+        else
+            total += src.size();
+    }
     return total;
+}
+
+bool PlaylistExportController::ffmpegAvailable() const
+{
+    return Mp3Converter::ffmpegUsable(Mp3Converter::findFfmpeg());
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────
 
 void PlaylistExportController::startExport(const QVariantList &tracks, const QString &destFolder,
                                             const QString &prefix, bool replayGainNormalization,
-                                            double audiophileTrimDb)
+                                            double audiophileTrimDb, bool convertToMp3)
 {
     if (m_exporting) return;
 
@@ -161,7 +194,8 @@ void PlaylistExportController::startExport(const QVariantList &tracks, const QSt
     m_currentFileName.clear();
     emit currentFileNameChanged();
 
-    emit _requestExport(tracks, destFolder, prefix, replayGainNormalization, audiophileTrimDb);
+    emit _requestExport(tracks, destFolder, prefix, replayGainNormalization, audiophileTrimDb,
+                         convertToMp3);
 }
 
 void PlaylistExportController::cancelExport()

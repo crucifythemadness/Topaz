@@ -97,6 +97,8 @@ qt_add_executable(topaz
     tagreader.cpp
     tagwriter.h
     tagwriter.cpp
+    mp3converter.h
+    mp3converter.cpp
     volumepath.h
     volumepath.cpp
     librarycache.h

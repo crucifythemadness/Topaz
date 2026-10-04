@@ -238,6 +238,9 @@ Like the Windows deploy, BASS (`libbass.so`/`libbassflac.so`/`libbassopus.so`) i
 bundled — the user supplies their own licensed copies next to `topaz-bin` if wanted. The same
 goes for the optional BASS_FX add-on (`libbass_fx.so` / `bass_fx.dll`), needed only by Auto
 Loudness Correction's "Consistent Background Music" strategy (UC-35); Topaz loads it lazily.
+And for **`ffmpeg`** (`ffmpeg.exe` / `ffmpeg`), needed only by the Export dialog's "Convert to MP3"
+option (UC-26): never bundled either (Qt's own FFmpeg is libraries-only and has no MP3 encoder);
+Topaz looks next to the executable first, then on the `PATH`, and needs the `libmp3lame` encoder.
 
 ### Editor diagnostics (VS Code Problems tab)
 

@@ -83,6 +83,16 @@ BASS_FX add-on, also supplied by you and placed next to topaz-bin:
 Topaz never modifies your audio files; it only stores its results in
 ~/.config/Topaz/Topaz.volumeNormalization.json.
 
+Export: "Convert to MP3"
+-----------------
+The Export Playlist dialog can convert FLAC/Opus tracks to MP3 (44.1 kHz,
+stereo, CBR 320 kbps) in the exported copies -- your library files are never
+changed. This needs the ffmpeg program, which Topaz does not bundle:
+    sudo apt install ffmpeg
+(or place an ffmpeg binary next to topaz-bin). It must include the libmp3lame
+encoder, which the Ubuntu/Mint package does. Without ffmpeg the "Convert to
+MP3" checkbox stays greyed out; its tooltip says why.
+
 What's bundled
 --------------
 - topaz-bin            the executable

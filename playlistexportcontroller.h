@@ -22,7 +22,7 @@ class PlaylistExportWorker;
 // freeze the UI if done on the main thread, unlike the small per-file
 // stat/delete work those two do.
 //
-// Destination analysis (analyzeDestination/computeRequiredBytes) stays
+// Destination analysis (analyzeDestination/computeExportBytes) stays
 // synchronous on the main thread -- it's just a handful of QFileInfo/
 // QStorageInfo stat calls, the same scale of work MilkdropCleanupController::
 // presetFolders() already does synchronously.
@@ -37,6 +37,9 @@ class PlaylistExportController : public QObject
     Q_PROPERTY(bool    exporting       READ exporting       NOTIFY exportingChanged)
     Q_PROPERTY(int     exportProgress  READ exportProgress  NOTIFY exportProgressChanged)
     Q_PROPERTY(QString currentFileName READ currentFileName NOTIFY currentFileNameChanged)
+    // True while the file currently being processed is converted to MP3
+    // rather than copied -- the dialog shows "Converting:" instead of "Exporting:".
+    Q_PROPERTY(bool    converting      READ converting      NOTIFY convertingChanged)
 
 public:
     explicit PlaylistExportController(QObject *parent = nullptr);
@@ -45,6 +48,7 @@ public:
     bool    exporting()       const { return m_exporting; }
     int     exportProgress()  const { return m_exportProgress; }
     QString currentFileName() const { return m_currentFileName; }
+    bool    converting()      const { return m_converting; }
 
     // Returns { exists, writable, isRemovable, volumeLabel, freeBytes, totalBytes }
     // for destPath. writable is determined by actually creating and removing
@@ -57,19 +61,31 @@ public:
     // a real equivalent -- see the future_linux_port tracking note.
     Q_INVOKABLE QVariantMap analyzeDestination(const QString &destPath) const;
 
-    // Sums QFileInfo(path).size() for each entry in filePaths. Queried live
-    // rather than trusting TrackInfo::fileSize, which the in-memory queue
-    // never actually populates.
-    Q_INVOKABLE qint64 computeRequiredBytes(const QVariantList &filePaths) const;
+    // Bytes the export of `tracks` ([{filePath, durationMs, ...}], the same
+    // maps startExport() takes) will need at the destination. A file that is
+    // copied counts its real size, queried live rather than trusting
+    // TrackInfo::fileSize, which the in-memory queue never actually populates.
+    // With convertToMp3, a non-MP3 track counts what its MP3 will take instead:
+    // 320 kbps = 40 bytes per millisecond, plus 1 MiB of headroom for the tags
+    // and cover art (an Opus file re-encoded at 320 kbps grows ~2.5x, so the
+    // source size would badly underestimate it). Unknown duration falls back
+    // to the source size.
+    Q_INVOKABLE qint64 computeExportBytes(const QVariantList &tracks, bool convertToMp3) const;
 
-    // tracks: [{filePath, title, albumArtist, artist, album}, ...] in queue
-    // order (see PlaybackEngine::trackList()). No-op if an export is already
-    // running. replayGainNormalization/audiophileTrimDb: see
-    // PlaylistExportWorker::runExport()'s doc comment (UC-26) -- both are
+    // True if an ffmpeg with the libmp3lame encoder can be found (next to the
+    // app or on the PATH) -- what the "Convert to MP3" checkbox needs. See
+    // Mp3Converter. Probes ffmpeg once per file (cached), so cheap to call
+    // every time the dialog opens.
+    Q_INVOKABLE bool ffmpegAvailable() const;
+
+    // tracks: [{filePath, title, albumArtist, artist, album, durationMs}, ...]
+    // in queue order (see PlaybackEngine::trackList()). No-op if an export is
+    // already running. replayGainNormalization/audiophileTrimDb/convertToMp3:
+    // see PlaylistExportWorker::runExport()'s doc comment (UC-26) -- all
     // captured once here, at click time, not live-bound.
     Q_INVOKABLE void startExport(const QVariantList &tracks, const QString &destFolder,
                                   const QString &prefix, bool replayGainNormalization = false,
-                                  double audiophileTrimDb = 0.0);
+                                  double audiophileTrimDb = 0.0, bool convertToMp3 = false);
 
     // Cooperative cancel -- see PlaylistExportWorker::cancelExport().
     Q_INVOKABLE void cancelExport();
@@ -78,16 +94,20 @@ signals:
     void exportingChanged();
     void exportProgressChanged();
     void currentFileNameChanged();
+    void convertingChanged();
 
-    // results: [{sourcePath, destPath, success, errorString}, ...]
+    // results: [{sourcePath, destPath, success, errorString, replayGainTagged,
+    // converted}, ...]
     void exportFinished(const QVariantList &results);
 
     // Commands → worker thread (queued so they execute on the worker's event loop).
     void _requestExport(QVariantList tracks, QString destFolder, QString prefix,
-                         bool replayGainNormalization, double audiophileTrimDb);
+                         bool replayGainNormalization, double audiophileTrimDb,
+                         bool convertToMp3);
 
 private slots:
-    void onWorkerProgress(int done, int total, const QString &currentFileName);
+    void onWorkerProgress(int done, int total, const QString &currentFileName,
+                          double fraction, bool converting);
     void onWorkerFinished(const QVariantList &results);
 
 private:
@@ -103,4 +123,5 @@ private:
     bool    m_exporting       = false;
     int     m_exportProgress  = 0;
     QString m_currentFileName;
+    bool    m_converting      = false;
 };

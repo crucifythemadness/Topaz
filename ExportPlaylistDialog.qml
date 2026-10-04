@@ -49,6 +49,11 @@ Popup {
     property real   requiredBytes: 0
     property string prefixText: ""
     property bool   replayGainNormalization: false
+    // UC-26 "Convert to MP3": needs an ffmpeg with the LAME encoder (see
+    // Mp3Converter); ffmpegAvailable is re-read from the controller every time
+    // the dialog opens, so an ffmpeg dropped in while Topaz runs is noticed.
+    property bool   convertToMp3: false
+    property bool   ffmpegAvailable: false
     property bool   showResults: false
     property var    lastResults: []
 
@@ -59,6 +64,41 @@ Popup {
     readonly property bool goodToGo:       destWritable && enoughSpace
     readonly property bool exporting:      root.exportController && root.exportController.exporting
     readonly property bool canExport:      goodToGo && !exporting
+
+    // Tracks the conversion would apply to (FLAC / Opus -- the only non-MP3
+    // formats the library holds), and whether the checkbox is usable at all.
+    readonly property int  convertibleCount:
+        root.tracks.filter(function (t) { return root.isConvertible(t.filePath) }).length
+    readonly property bool canConvert:     convertibleCount > 0 && ffmpegAvailable
+    // What actually gets sent to the controller / used for the space estimate.
+    readonly property bool convertActive:  convertToMp3 && canConvert
+
+    onConvertActiveChanged: recomputeRequired()
+
+    // ── Checkbox row sizing ───────────────────────────────────────────────
+    // Both checkboxes (Replay Gain, Convert to MP3) share one row. Their
+    // labels are measured, and the dialog is widened by whatever the row needs
+    // beyond the right column's base width (760 - 2*24 margins - 20 gap - the
+    // 200px left panel base), rather than guessing a font-dependent number.
+    TextMetrics {
+        id: replayGainLabelMetrics
+        font.family: Theme.fontFamilyBody
+        font.pixelSize: Theme.labelLg
+        text: qsTr("Replay Gain Normalization")
+    }
+    TextMetrics {
+        id: convertLabelMetrics
+        font.family: Theme.fontFamilyBody
+        font.pixelSize: Theme.labelLg
+        text: qsTr("Convert to MP3 (Stereo|CBR|320 kbps)")
+    }
+    readonly property int checkboxGap: 32
+    readonly property int checkboxRowNeededWidth:
+        Math.ceil((18 + 10 + replayGainLabelMetrics.advanceWidth)
+                  + checkboxGap
+                  + (18 + 10 + convertLabelMetrics.advanceWidth)) + 8
+    readonly property int rightColumnBaseWidth: 760 - 2 * 24 - 20 - leftPanelBaseWidth
+    readonly property int extraCheckboxWidth: Math.max(0, checkboxRowNeededWidth - rightColumnBaseWidth)
 
     // ── Left panel / volume-label sizing ──────────────────────────────────
     // Widened (from a 200px base) by however many pixels 8 more characters
@@ -129,7 +169,7 @@ Popup {
     // assignment, same as SetupDialog.qml.
     x: Overlay.overlay ? (Overlay.overlay.width  - width)  / 2 : 0
     y: Overlay.overlay ? (Overlay.overlay.height - height) / 2 : 0
-    width:  760 + extraLabelWidth
+    width:  760 + extraLabelWidth + extraCheckboxWidth
     height: 480
     padding: 0
 
@@ -146,14 +186,11 @@ Popup {
         destInfo     = {}
         prefixText   = ""
         replayGainNormalization = false
+        convertToMp3 = false
+        ffmpegAvailable = root.exportController ? root.exportController.ffmpegAvailable() : false
         showResults  = false
         lastResults  = []
-        if (root.exportController && root.tracks.length > 0) {
-            const paths = root.tracks.map(function (t) { return t.filePath })
-            requiredBytes = root.exportController.computeRequiredBytes(paths)
-        } else {
-            requiredBytes = 0
-        }
+        recomputeRequired()
     }
 
     Connections {
@@ -551,50 +588,110 @@ Popup {
                         }
                     }
 
-                    // ── Replay Gain Normalization (UC-26) ────────────────
-                    // Same checkbox visual idiom as SetupDialog.qml's Auto
-                    // Loudness Correction checkbox. Only usable while the
-                    // BASS Audio Library is the active backend -- the
-                    // reference-value lookup's fallback (a fresh measurement
-                    // for a track never analyzed before) needs BASS.
+                    // ── Export options row: Replay Gain Normalization (UC-26) +
+                    // Convert to MP3 ────────────────────────────────────
+                    // Each checkbox is its own RowLayout so that its
+                    // MouseArea (anchors.fill: parent) covers only itself.
                     RowLayout {
-                        spacing: 10
-                        opacity: root.bassAudioActive ? 1.0 : 0.35
+                        spacing: root.checkboxGap
 
-                        Rectangle {
-                            width: 18; height: 18
-                            radius: 3
-                            color: root.replayGainNormalization ? Theme.secondaryContainer : "transparent"
-                            border.width: root.replayGainNormalization ? 0 : 1
-                            border.color: Theme.outlineVariant
+                        // ── Replay Gain Normalization (UC-26) ────────────
+                        // Same checkbox visual idiom as SetupDialog.qml's Auto
+                        // Loudness Correction checkbox. Only usable while the
+                        // BASS Audio Library is the active backend -- the
+                        // reference-value lookup's fallback (a fresh measurement
+                        // for a track never analyzed before) needs BASS.
+                        RowLayout {
+                            spacing: 10
+                            opacity: root.bassAudioActive ? 1.0 : 0.35
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 3
+                                color: root.replayGainNormalization ? Theme.secondaryContainer : "transparent"
+                                border.width: root.replayGainNormalization ? 0 : 1
+                                border.color: Theme.outlineVariant
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: root.replayGainNormalization
+                                    text: "✓"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                    color: Theme.fgSecondaryContainer
+                                }
+                            }
 
                             Text {
-                                anchors.centerIn: parent
-                                visible: root.replayGainNormalization
-                                text: "✓"
-                                font.pixelSize: 11
-                                font.weight: Font.Bold
-                                color: Theme.fgSecondaryContainer
+                                text: qsTr("Replay Gain Normalization")
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.labelLg
+                                color: Theme.fgSurface
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: root.bassAudioActive
+                                hoverEnabled: true
+                                cursorShape: root.bassAudioActive ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text:    qsTr("Set Replay Gain Normalization according to the Reference Value and the Actual Trim (Audiophile/Critical Listening)")
+                                onClicked: root.replayGainNormalization = !root.replayGainNormalization
                             }
                         }
 
-                        Text {
-                            text: qsTr("Replay Gain Normalization")
-                            font.family:    Theme.fontFamilyBody
-                            font.pixelSize: Theme.labelLg
-                            color: Theme.fgSurface
+                        // ── Convert to MP3 ────────────────────────────────
+                        // Enabled when at least one track is FLAC or Opus AND an
+                        // ffmpeg with the LAME encoder was found (Mp3Converter).
+                        // The MouseArea stays enabled when the box is unusable
+                        // so its tooltip can say why.
+                        RowLayout {
+                            spacing: 10
+                            opacity: root.canConvert ? 1.0 : 0.35
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 3
+                                color: root.convertActive ? Theme.secondaryContainer : "transparent"
+                                border.width: root.convertActive ? 0 : 1
+                                border.color: Theme.outlineVariant
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: root.convertActive
+                                    text: "✓"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                    color: Theme.fgSecondaryContainer
+                                }
+                            }
+
+                            Text {
+                                text: qsTr("Convert to MP3 (Stereo|CBR|320 kbps)")
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.labelLg
+                                color: Theme.fgSurface
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: root.canConvert ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text: root.canConvert
+                                    ? qsTr("Converts every FLAC and Opus track to MP3 (44.1 kHz, Stereo, CBR 320 kbps) in the exported copies. Your library files are never changed.")
+                                    : (root.convertibleCount === 0
+                                       ? qsTr("This playlist has no FLAC or Opus tracks, so there is nothing to convert.")
+                                       : (Qt.platform.os === "windows"
+                                          ? qsTr("Needs ffmpeg with the LAME MP3 encoder: put ffmpeg.exe next to Topaz.exe, or install ffmpeg so it is on the PATH.")
+                                          : qsTr("Needs ffmpeg with the LAME MP3 encoder: install ffmpeg (e.g. sudo apt install ffmpeg) or put it next to topaz-bin.")))
+                                onClicked: if (root.canConvert) root.convertToMp3 = !root.convertToMp3
+                            }
                         }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            enabled: root.bassAudioActive
-                            hoverEnabled: true
-                            cursorShape: root.bassAudioActive ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            ToolTip.visible: containsMouse
-                            ToolTip.delay:   600
-                            ToolTip.text:    qsTr("Set Replay Gain Normalization according to the Reference Value and the Actual Trim (Audiophile/Critical Listening)")
-                            onClicked: root.replayGainNormalization = !root.replayGainNormalization
-                        }
+                        Item { Layout.fillWidth: true }
                     }
                 }
             }
@@ -609,7 +706,9 @@ Popup {
 
                 Text {
                     Layout.fillWidth: true
-                    text: qsTr("Exporting: ") + (root.exportController ? root.exportController.currentFileName : "")
+                    text: (root.exportController && root.exportController.converting
+                           ? qsTr("Converting: ") : qsTr("Exporting: "))
+                          + (root.exportController ? root.exportController.currentFileName : "")
                     elide: Text.ElideMiddle
                     horizontalAlignment: Text.AlignHCenter
                     font.family:    Theme.fontFamilyMono
@@ -654,6 +753,18 @@ Popup {
                     font.pixelSize: Theme.titleMd
                     font.weight:    Font.Bold
                     color: Theme.fgSurface
+                }
+
+                // Only when something was converted (UC-26 "Convert to MP3").
+                Text {
+                    readonly property int convertedCount:
+                        root.lastResults.filter(function (r) { return r.converted === true }).length
+                    visible: convertedCount > 0
+                    text: qsTr("Converted to MP3 (Stereo | CBR | 320 kbps): %1")
+                          .arg(convertedCount === 1 ? qsTr("1 track") : qsTr("%1 tracks").arg(convertedCount))
+                    font.family:    Theme.fontFamilyBody
+                    font.pixelSize: Theme.titleMd
+                    color: Theme.fgSurfaceVariant
                 }
 
                 ScrollView {
@@ -793,6 +904,24 @@ Popup {
     }
 
     // ── Logic ─────────────────────────────────────────────────────────────
+    // FLAC and Opus are the formats "Convert to MP3" applies to.
+    function isConvertible(filePath) {
+        const dot = (filePath || "").lastIndexOf(".")
+        const ext = dot >= 0 ? filePath.substring(dot + 1).toLowerCase() : ""
+        return ext === "flac" || ext === "opus"
+    }
+
+    // The REQUIRED SPACE figure (and with it the enough-space gate) follows
+    // the Convert checkbox: a converted track needs its MP3 size, not the
+    // source's. Called on open and whenever the effective flag flips.
+    function recomputeRequired() {
+        if (!root.exportController || root.tracks.length === 0) {
+            root.requiredBytes = 0
+            return
+        }
+        root.requiredBytes = root.exportController.computeExportBytes(root.tracks, root.convertActive)
+    }
+
     function refreshDestInfo() {
         if (!root.exportController || !root.hasDestination) {
             root.destInfo = {}
@@ -835,14 +964,16 @@ Popup {
         // Normalization (TrackInfo::computeNormalizationId), but always
         // included -- both track-map sources (PlaybackEngine.trackList(),
         // PlaylistManager.loadPlaylist()) already carry them.
+        // durationMs only scales the progress of a conversion.
         const tracks = root.tracks.map(function (t) {
             return { filePath: t.filePath, title: t.title,
                       albumArtist: t.albumArtist || "", artist: t.artist || "",
-                      album: t.album || "" }
+                      album: t.album || "", durationMs: t.durationMs || 0 }
         })
         const trim = (root.replayGainNormalization && root.appConfig)
                      ? root.appConfig.audiophileTrimDb : 0.0
         root.exportController.startExport(tracks, root.destFolder, root.prefixText,
-                                           root.replayGainNormalization, trim)
+                                           root.replayGainNormalization, trim,
+                                           root.convertActive)
     }
 }

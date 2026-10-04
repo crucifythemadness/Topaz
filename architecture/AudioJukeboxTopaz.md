@@ -756,6 +756,7 @@ work), not just with track count.
 | `LibraryScanner` | `libraryscanner.h/cpp` | Worker: directory walk, parallel tag-reading (`QtConcurrent`/`QThreadPool`), genre filter, QFileSystemWatcher |
 | `LibraryModel` | `librarymodel.h/cpp` | QAbstractListModel + Q_INVOKABLE query helpers exposed to QML |
 | `PlaylistManager` | `playlistmanager.h/cpp` | XSPF playlist file creation; path-portability helpers; `listPlaylists()` for the PLAYLISTS tab (see UC-22) |
+| `Mp3Converter` | `mp3converter.h/cpp` | Export's "Convert to MP3": locates a user-supplied `ffmpeg` and converts one file to 44.1 kHz / stereo / CBR 320 kbps MP3 (tags + cover carried over), with progress and cancel — see UC-26 |
 | `SystemVolumeController` | `systemvolumecontroller.h/cpp` | OS master-volume and mute control with live sync: Core Audio COM on Windows, native libpulse (PulseAudio / PipeWire) on Linux |
 
 ### SystemVolumeController — OS master volume (Windows: Core Audio, Linux: libpulse)
@@ -5908,7 +5909,7 @@ this doc) — never persisted anywhere.
 
 | Field | Detail |
 |-------|--------|
-| **Goal** | Copy every audio file in a playlist (either the currently-loaded queue, or a playlist merely selected in the PLAYLISTS tab's list) to a chosen destination folder (typically a USB stick, for car use) under a generated `<prefix><index>_<title>.<ext>` filename, after confirming the destination has enough free space and is actually writable. |
+| **Goal** | Copy every audio file in a playlist (either the currently-loaded queue, or a playlist merely selected in the PLAYLISTS tab's list) to a chosen destination folder (typically a USB stick, for car use) under a generated `<prefix><index>_<title>.<ext>` filename, after confirming the destination has enough free space and is actually writable. Optionally (checkboxes) writes a Replay Gain tag into the copies and/or converts every non-MP3 track to MP3 (44.1 kHz, stereo, CBR 320 kbps) in the copies — library originals are never changed. |
 | **Actor** | User |
 | **Precondition** | Either a named playlist is loaded into the queue and non-empty (`PlaybackEngine.activePlaylistName`/`queueCount`), or a playlist with at least one resolvable track is selected in the PLAYLISTS tab (`PlaylistsData.selectedRawTracks`). |
 | **Trigger** | User clicks EXPORT in NowPlaying's playlist-management row, or EXPORT next to LOAD in the PLAYLISTS tab's `PlaylistViewer.qml`, then EXPORT again inside `ExportPlaylistDialog`. |
@@ -5970,20 +5971,30 @@ every other stateful controller in this app).
     the "Linux port, step 5" note above.
   - Accepts both plain paths and `file://` URLs, same convention as
     `AppConfig::addFolder()`/`addMilkdropPresetFolder()`.
-- `Q_INVOKABLE qint64 computeRequiredBytes(const QVariantList &filePaths)` —
-  sums `QFileInfo(path).size()` per path, queried live rather than trusting
-  `TrackInfo::fileSize`, which the in-memory queue never actually populates
-  (`PlaybackEngine::trackFromMap()` doesn't set it, and `trackList()`
-  doesn't emit it) — making it unreliable as a source for this calculation.
+- `Q_INVOKABLE qint64 computeExportBytes(const QVariantList &tracks, bool convertToMp3)` —
+  what the export will need at the destination (it replaced the older `computeRequiredBytes(filePaths)`,
+  which could only sum source sizes). A track that is *copied* counts `QFileInfo(path).size()`,
+  queried live rather than trusting `TrackInfo::fileSize`, which the in-memory queue never
+  actually populates (`PlaybackEngine::trackFromMap()` doesn't set it, and `trackList()` doesn't
+  emit it). With `convertToMp3`, a non-MP3 track counts what its MP3 will take instead:
+  `durationMs × 40` bytes (320 kbps = 40,000 bytes/s) + 1 MiB headroom for the ID3 tag and cover
+  art — the source size would badly underestimate it (an Opus file re-encoded at 320 kbps grows
+  ~2.5×). A track with no known duration falls back to its source size.
+- `Q_INVOKABLE bool ffmpegAvailable()` — an ffmpeg with the LAME encoder can be found (see "Convert
+  to MP3" below); cheap to call on every dialog open (the probe result is cached per file).
 - `Q_INVOKABLE void startExport(tracks, destFolder, prefix, replayGainNormalization = false,
-  audiophileTrimDb = 0.0)` / `Q_INVOKABLE void cancelExport()` — delegate to the worker thread
-  below. The last two parameters back Replay Gain Normalization (see its own subsection below);
-  both are captured once at click time, not live-bound, the same convention `destFolder`/`prefix`
-  already use.
-- `Q_PROPERTY`s `exporting`/`exportProgress`/`currentFileName` and signal
+  audiophileTrimDb = 0.0, convertToMp3 = false)` / `Q_INVOKABLE void cancelExport()` — delegate to
+  the worker thread below. The last three parameters back Replay Gain Normalization and Convert to
+  MP3 (see their own subsections below); all are captured once at click time, not live-bound, the
+  same convention `destFolder`/`prefix` already use.
+- `Q_PROPERTY`s `exporting`/`exportProgress`/`currentFileName`/`converting` and signal
   `exportFinished(QVariantList results)` mirror the exact shape
   `MilkdropCleanupController` already established for its own
-  scan-with-progress flow.
+  scan-with-progress flow. `converting` is true while the file being processed is converted rather
+  than copied (the dialog's "Converting:" vs "Exporting:" label). `exportProgress` is
+  `(done + fraction) × 100 / total`, where `fraction` is the share of the *current* file already
+  done — only a conversion reports anything between 0 and 1, so the bar moves smoothly through a
+  long conversion and behaves exactly as before for plain copies.
 
 ### `PlaylistExportWorker` (`playlistexportworker.h`/`.cpp`) — the actual copy
 
@@ -5999,15 +6010,17 @@ call can't be chunked with periodic `processEvents()` calls the way
 per-file stat/delete checks could, so a big enough playlist would otherwise
 visibly freeze the whole window for the duration of that one file.
 
-`runExport(tracks, destFolder, prefix, replayGainNormalization, audiophileTrimDb)`: for each
-`{filePath, title, albumArtist, artist, album}` entry in queue order, builds the zero-padded index
-width as `qMax(2, digits in tracks.size())` (2 digits for ≤99 tracks, 3 for 100-999 tracks, etc.),
-strips Windows-reserved characters (`\/:*?"<>|`) from the title, and copies to
-`prefix + paddedIndex + "_" + sanitizedTitle + "." + originalExtension`,
+`runExport(tracks, destFolder, prefix, replayGainNormalization, audiophileTrimDb, convertToMp3)`:
+for each `{filePath, title, albumArtist, artist, album, durationMs}` entry in queue order, builds
+the zero-padded index width as `qMax(2, digits in tracks.size())` (2 digits for ≤99 tracks, 3 for
+100-999 tracks, etc.), strips Windows-reserved characters (`\/:*?"<>|`) from the title, and copies
+to `prefix + paddedIndex + "_" + sanitizedTitle + "." + originalExtension` (or `.mp3` for a
+converted track),
 removing any leftover file of the same name from a previous export attempt
 first (`QFile::copy()` refuses to overwrite). Emits `progress(done, total,
-currentFileName)` after every file and `finished(results)` at the end,
-where each result is `{sourcePath, destPath, success, errorString, replayGainTagged}`.
+currentFileName, fraction, converting)` at the start of every file (and, while converting, a
+couple of times per second) and `finished(results)` at the end,
+where each result is `{sourcePath, destPath, success, errorString, replayGainTagged, converted}`.
 Cancellation (`cancelExport()`) is the same cooperative
 `std::atomic<bool>`-checked-between-iterations shape as
 `LibraryScanner::cancelScan()` — the loop simply stops before its next
@@ -6073,6 +6086,79 @@ decode that either), or an Opus file whose `OpusTags` packet shares a page with 
   code from `TagWriter`'s own table) confirming every page's CRC and every page's sequence number,
   not just that `TagReader` was happy with what `TagWriter` produced.
 
+### Convert to MP3 — re-encoding non-MP3 tracks in the exported copies
+
+An opt-in checkbox (`Convert to MP3 (Stereo|CBR|320 kbps)`, default unchecked, reset on every open)
+for destinations that can't play FLAC/Opus (a car head unit, a Minidisc recorder's MP3 mode, …).
+When checked, every exported track that is **not** an `.mp3` is converted instead of copied — always
+44.1 kHz, stereo, CBR 320 kbps — and gets the extension `.mp3`; `.mp3` sources are still copied
+byte-for-byte. The library originals are never touched: ffmpeg only reads the source and writes the
+destination file, same "the export copy is the only thing written" rule as Replay Gain.
+
+**Why an external `ffmpeg`, not the FFmpeg that ships with Qt.** The first idea was to reuse
+the FFmpeg already in the bundle. It can't be: Qt Multimedia's FFmpeg is *libraries only* (no
+command-line tool and no headers, so Topaz can't call it directly), and it has **no LAME MP3
+encoder** — checked in the shipped `avcodec-61.dll` / `libavcodec.so.61`: the Windows build has only
+the `mp3_mf` Media Foundation wrapper, the Linux build has no MP3 encoder at all. A pure-Qt route
+(`QAudioDecoder` → `QMediaRecorder`) would therefore be Windows-only, with less control over the
+output and uncertain tag/cover handling. So, exactly like the BASS libraries, **ffmpeg is supplied by
+the user and never bundled** (no licence question, no deploy-size change): `Mp3Converter::findFfmpeg()`
+looks for `ffmpeg.exe` / `ffmpeg` next to the application first, then on the system `PATH` (on Linux
+a normal `apt install ffmpeg` is enough). It is re-evaluated whenever the dialog opens, so a file
+dropped in while Topaz runs is noticed. `Mp3Converter::ffmpegUsable()` runs `ffmpeg -encoders` once
+per file (cached by path + size + mtime) and requires `libmp3lame` in the list — an ffmpeg built
+without it would fail every track, so the checkbox treats it as "not available".
+
+**`Mp3Converter` (`mp3converter.h`/`.cpp`)** — plain C++ namespace, used only on the export worker
+thread. `convert()` runs `QProcess`:
+`ffmpeg -nostdin -hide_banner -loglevel error -nostats -progress pipe:1 -y -i <src> -map 0:a:0
+-map 0:v:0? -c:v copy -c:a libmp3lame -b:a 320k -ar 44100 -ac 2 -map_metadata 0
+-map_metadata:g 0:s:a:0 -id3v2_version 3 -f mp3 <dest>`.
+- `libmp3lame -b:a 320k` is CBR; `-ar 44100 -ac 2` force the sample rate and stereo (a mono 48 kHz
+  FLAC comes out 44.1 kHz stereo). ID3v2.3 is written for the widest player/car-stereo support.
+- **Tags and cover art** are carried over by ffmpeg itself: Vorbis comments → ID3 frames, the
+  embedded picture → `APIC`. The two `-map_metadata` options matter: FLAC keeps its comments as
+  file-level metadata (`0`), but **Opus keeps them on the audio stream**, which the first mapping
+  misses — the second one (`-map_metadata:g 0:s:a:0`) merges them in (a no-op for FLAC). Found by
+  the verification run: before it, an Opus-derived MP3 had no title/artist/album at all.
+- **Cover retry.** If ffmpeg can't map/copy the picture it fails at initialisation; `convert()` then
+  retries once without `-map 0:v:0?` (the track still converts, just without a cover), but only when
+  the first attempt failed within 3 s — a later failure is a decode/disk problem and a second attempt
+  would only double the wasted time. The error text reported for a failed track is the last
+  diagnostic line of the final attempt.
+- **Progress.** `-progress pipe:1` prints `key=value` lines; `out_time_us` divided by the track's
+  `durationMs` (now sent per track by `ExportPlaylistDialog.tryExport()`) is the fraction reported to
+  `progress()`. stderr is merged into stdout so there is a single pipe to drain and ffmpeg can never
+  block on a full one. On Windows, `QProcess` already adds `CREATE_NO_WINDOW` for a GUI process
+  without a console, so no console window flashes per track.
+- **Cancel.** The read loop (`waitForReadyRead(100)`) polls the worker's cancel flag: `kill()`, wait,
+  delete the partial file, no result entry for that track (same truncation as a cancel between
+  tracks). Every failure path deletes the partial destination file; none is ever left behind.
+
+**In the worker.** `ffmpegPath` is resolved once per run. A convertible track whose ffmpeg is
+missing fails with `Conversion failed (ffmpeg not found)` instead of silently exporting a FLAC the
+user asked to have converted; a failed conversion is an ordinary failed track (`success=false`) and
+the run continues. `converted` in the result map is true only for a track that really was converted
+— it drives the dialog's summary line.
+
+**Replay Gain together with Convert.** The two options compose: the reference gain is determined
+from the *source* file (BASS decodes the FLAC/Opus), and `TagWriter::writeReplayGain()` then writes
+into the converted `.mp3` through its existing `writeMp3()` path. Verified on real files: ffmpeg's
+ID3v2.3 tag (which already carries the FLAC's old `REPLAYGAIN_TRACK_GAIN`) comes out with exactly
+one gain frame holding the new value, the peak frame added, every other frame and the cover intact,
+and the file still decodes.
+
+**Verification (non-visual, Linux container with `ffmpeg`).** A throw-away harness ran the real
+`PlaylistExportWorker` (with `QStandardPaths::setTestModeEnabled(true)`, so no real Topaz config was
+reachable) against generated files and checked with `ffprobe`: FLAC (mono 48 kHz, tags, cover) and
+Opus → `mp3` / 44100 Hz / 2 ch / `bit_rate=320000`, ID3v2.3, title/artist/album/track present, cover
+as an attached picture; an `.mp3` source passes through byte-identical; all sources byte-identical
+after the run (SHA-256); a corrupt file fails cleanly with no partial file; a source with a real
+video stream proves the cover-retry path; cancelling mid-conversion kills ffmpeg and removes the
+partial file; `ffmpegUsable()` is false for a missing path, for an ffmpeg without `libmp3lame`, and
+for one that exits non-zero. **Not verified here**: the Windows side with a real `ffmpeg.exe` (no
+ffmpeg on the dev machine; the code path differs only in the executable name) — the user's own test.
+
 ### `ExportPlaylistDialog.qml` — UI
 
 Chrome modeled on `MilkdropCleanupDialog.qml`: header + ✕ close (hidden
@@ -6118,6 +6204,20 @@ mockup's literal styling:
 - Replay Gain Normalization checkbox (same visual idiom as `SetupDialog.qml`'s Auto Loudness
   Correction checkbox) — see its own subsection above. Greyed out (opacity 0.35, `MouseArea`
   disabled) unless BASS is the active backend; reset to unchecked every time the dialog opens.
+- **Convert to MP3 (Stereo|CBR|320 kbps)** checkbox, **on the same row, right after** Replay Gain
+  (two sibling `RowLayout`s inside one outer row, so each `MouseArea { anchors.fill: parent }`
+  covers only its own checkbox). Usable only when `canConvert`: at least one track is `.flac` or
+  `.opus` (`isConvertible()`) **and** `exportController.ffmpegAvailable()` (re-read on every open).
+  Otherwise it is dimmed to 0.35 but its `MouseArea` stays enabled so the tooltip can say why ("no
+  FLAC or Opus tracks" / "needs ffmpeg with the LAME MP3 encoder: put `ffmpeg.exe` next to
+  `Topaz.exe`…", worded per platform via `Qt.platform.os`). `convertActive = convertToMp3 &&
+  canConvert` is what actually gets sent to the controller and used for the space estimate.
+  *Sizing*: the two labels sit side by side in a right column only ~492 px wide, so both are
+  measured with `TextMetrics` and the dialog is widened by the deficit (`extraCheckboxWidth`, usually
+  0) — the same "measure, don't guess" idiom as `extraLabelWidth`.
+- `requiredBytes` is no longer computed once at open: `recomputeRequired()` runs on open and again
+  whenever `convertActive` flips, so the PLAYLIST REQUIRED SPACE figure and the enough-space gate
+  follow the checkbox (see `computeExportBytes()` above).
 - The dialog is draggable by its header (`x`/`y` bindings instead of
   `anchors.centerIn`, recomputed in `onOpened`, plus a header `MouseArea`),
   same technique and same reason `SetupDialog.qml` already uses it (see
@@ -6127,10 +6227,14 @@ mockup's literal styling:
 
 **Running state**: current filename + the same thin recessed progress-bar
 visual UC-24/UC-25 already established (`Theme.surfaceContainerHigh` track,
-`Theme.primary` fill, `Behavior on width`).
+`Theme.primary` fill, `Behavior on width`). The label reads `Exporting: <file>` for a copy and
+`Converting: <file>` while a track is being converted (`exportController.converting`); the bar
+advances smoothly during a conversion (see `exportProgress` above).
 
-**Done state**: "Exported `X` of `Y` tracks" summary, with any per-file
-failures listed (source path + reason) below.
+**Done state**: "Export complete: `X` of `Y` tracks copied." summary (a converted track counts as
+exported), then — **only if at least one track was converted** — a second line "Converted to MP3
+(Stereo | CBR | 320 kbps): N tracks." (`1 track` for one), with any per-file
+failures listed (source path) below.
 
 ### Two export entry points, one dialog: `tracks` instead of `engine`
 

@@ -1,6 +1,7 @@
 #include "playlistexportworker.h"
 
 #include "loudnessanalyzer.h"
+#include "mp3converter.h"
 #include "tagwriter.h"
 #include "trackinfo.h"
 #include "volumenormalizationcache.h"
@@ -24,7 +25,8 @@ QString PlaylistExportWorker::sanitizeForFilename(const QString &name)
 }
 
 void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QString prefix,
-                                      bool replayGainNormalization, double audiophileTrimDb)
+                                      bool replayGainNormalization, double audiophileTrimDb,
+                                      bool convertToMp3)
 {
     m_cancelRequested.store(false, std::memory_order_relaxed);
 
@@ -45,6 +47,11 @@ void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QS
     if (replayGainNormalization)
         normCache = VolumeNormalizationCache::load();
 
+    // Resolved once per run (UC-26 "Convert to MP3"); empty = none found, in
+    // which case every convertible track fails with a clear message instead of
+    // the run silently exporting FLAC/Opus the user asked to have converted.
+    const QString ffmpegPath = convertToMp3 ? Mp3Converter::findFfmpeg() : QString();
+
     QVariantList results;
     for (int i = 0; i < total; ++i) {
         if (m_cancelRequested.load(std::memory_order_relaxed))
@@ -56,15 +63,22 @@ void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QS
         const QString artist       = track.value(QStringLiteral("artist")).toString();
         const QString albumArtist  = track.value(QStringLiteral("albumArtist")).toString();
         const QString album        = track.value(QStringLiteral("album")).toString();
+        const qint64  durationMs   = track.value(QStringLiteral("durationMs")).toLongLong();
 
-        emit progress(i, total, QFileInfo(sourcePath).fileName());
+        const QString sourceFileName = QFileInfo(sourcePath).fileName();
+        const QString suffix = QFileInfo(sourcePath).suffix();
+        // Already-MP3 sources are copied as they are, never re-encoded.
+        const bool wantConvert = convertToMp3
+                                 && suffix.compare(QLatin1String("mp3"), Qt::CaseInsensitive) != 0;
+
+        emit progress(i, total, sourceFileName, 0.0, wantConvert);
 
         const QString paddedIndex = QString(QStringLiteral("%1"))
                                          .arg(i + 1, digitWidth, 10, QChar('0'));
-        const QString suffix = QFileInfo(sourcePath).suffix();
+        const QString destSuffix = wantConvert ? QStringLiteral("mp3") : suffix;
         const QString destFileName = prefix + paddedIndex + QStringLiteral("_")
                                       + sanitizeForFilename(title)
-                                      + (suffix.isEmpty() ? QString() : QStringLiteral(".") + suffix);
+                                      + (destSuffix.isEmpty() ? QString() : QStringLiteral(".") + destSuffix);
         const QString trackDestPath = destDir.filePath(destFileName);
 
         // Overwrite any leftover file from a previous export attempt --
@@ -72,7 +86,29 @@ void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QS
         if (QFile::exists(trackDestPath))
             QFile::remove(trackDestPath);
 
-        const bool ok = QFile::copy(sourcePath, trackDestPath);
+        bool ok = false;
+        bool converted = false;
+        QString errorString;
+        if (wantConvert) {
+            if (ffmpegPath.isEmpty()) {
+                errorString = QStringLiteral("Conversion failed (ffmpeg not found)");
+            } else {
+                const Mp3Converter::Outcome o = Mp3Converter::convert(
+                    ffmpegPath, sourcePath, trackDestPath, durationMs, m_cancelRequested,
+                    [&](double fraction) {
+                        emit progress(i, total, sourceFileName, fraction, true);
+                    });
+                if (o.cancelled)
+                    break;   // partial file already removed; like the loop-top cancel, no result entry
+                ok = converted = o.ok;
+                if (!ok)
+                    errorString = QStringLiteral("Conversion failed (%1)").arg(o.error);
+            }
+        } else {
+            ok = QFile::copy(sourcePath, trackDestPath);
+            if (!ok)
+                errorString = QStringLiteral("Copy failed (source missing, or destination not writable)");
+        }
         bool tagged = false;
 
         // UC-26: Replay Gain Normalization. Only ever touches trackDestPath
@@ -100,10 +136,9 @@ void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QS
         result[QStringLiteral("sourcePath")]      = sourcePath;
         result[QStringLiteral("destPath")]        = trackDestPath;
         result[QStringLiteral("success")]         = ok;
-        result[QStringLiteral("errorString")] =
-            ok ? QString()
-               : QStringLiteral("Copy failed (source missing, or destination not writable)");
+        result[QStringLiteral("errorString")]     = errorString;
         result[QStringLiteral("replayGainTagged")] = tagged;
+        result[QStringLiteral("converted")]       = converted;
         results.append(result);
     }
 
