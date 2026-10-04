@@ -477,6 +477,13 @@ Rectangle {
             albumTitle:  modelData.albumTitle
             artistLabel: modelData.artistLabel
             isActive:    modelData.isActive
+            // Only while previewing the playlist that is loaded into the queue:
+            // there one card == one queue entry, in queue order, so the card at
+            // the engine's current index is the track playing now.
+            // qmllint disable missing-property
+            nowPlaying:  root.isSelectedActiveInQueue && root.engine
+                         && index === root.engine.currentIndex
+            // qmllint enable missing-property
             coverSource: modelData.coverSource ?? ""
             albumYear:   modelData.year ?? 0
             albumGenre:  modelData.genre ?? ""

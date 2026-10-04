@@ -7,7 +7,11 @@
 //   albumTitle    - string
 //   artistLabel   - string
 //   isActive      - bool   (true = primary left-accent border)
-//   albumYear     - int    (0 = unknown; year label under the cover hidden)
+//   nowPlaying    - bool   (true = whole card tinted with Theme.p10, the same
+//                           "playing now" background PlaybackQueue gives its current
+//                           row; PlaylistViewer sets it on the playing track's card
+//                           while the active playlist is the selected one)
+//   albumYear    - int    (0 = unknown; year label under the cover hidden)
 //   albumGenre    - string (empty = hidden; shown as "Genre | Year" when set --
 //                           SearchResultBrowser-only, since a genre-filtered
 //                           AlbumBrowser view doesn't need it repeated per card)
@@ -40,6 +44,7 @@ Rectangle {
     property string albumTitle:  ""
     property string artistLabel: ""
     property bool   isActive:    false
+    property bool   nowPlaying:  false
     property url    coverSource: ""
     property int    albumYear:   0   // 0 = unknown; year label hidden
     property string albumGenre:  ""  // empty = hidden; SearchResultBrowser-only
@@ -73,6 +78,15 @@ Rectangle {
     // HoverHandler does not consume press/move events, so per-track
     // MouseAreas receive them unobstructed.
     HoverHandler { id: cardHoverHandler }
+
+    // Playing-now tint -- same Theme.p10 token as PlaybackQueue's current row,
+    // laid over the card background (hover colour still shows through).
+    Rectangle {
+        anchors.fill: parent
+        radius: Theme.radiusSm
+        color: Theme.p10
+        visible: root.nowPlaying
+    }
 
     // Left accent stripe
     Rectangle {

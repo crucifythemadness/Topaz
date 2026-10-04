@@ -713,6 +713,7 @@ Topaz module
 ├── AlbumCard.qml       Single album card delegate (cover + year label + track listing; single-track drag & drop to queue; no selection; no context menus)
 │                         property var engine  (optional; used for double-click add-to-queue and drag cursor override)
 │                         property var autoPlay  (optional; gates double-click add via autoPlay.manualQueueEditingAllowed, see UC-16)
+│                         property bool nowPlaying  (default false; tints the whole card with Theme.p10 — the same "playing now" background as PlaybackQueue's current row; PlaylistViewer sets it on the playing track's card while the active playlist is selected, see UC-22)
 │                         property int albumYear  (0 = unknown, hides the label; left-aligned under the cover, Theme.labelMd, literal white)
 │                         property string albumGenre  (empty = hidden; renders as "Genre | Year" when both set — SearchResultBrowser-only, see UC-21; AlbumBrowser leaves it unset so Library-tab cards are unchanged)
 ├── PlaybackQueue.qml   Queue panel  default width 374 px, user-resizable  (bound to PlaybackEngine model; DropArea; move/remove; shows activePlaylistName in header when set; shows LOCK PLAYLIST toggle when a playlist is active)
@@ -5282,6 +5283,18 @@ regardless of *what* changed or *how* the active playlist became the
 previewed one. Both `scrollToNowPlaying()` and `refreshLiveQueue()` are
 no-ops while the user is mid-drag on the scrollbar thumb — see "Scrollbar
 drag and live-queue updates no longer fight each other" below and UC-12.
+
+**Now-playing marker.** For the same reason (one card per queue entry, in
+queue order), the `AlbumCard` delegate gets
+`nowPlaying: root.isSelectedActiveInQueue && root.engine && index === root.engine.currentIndex`.
+`AlbumCard.nowPlaying` (default `false`) lays a `Theme.p10` rectangle over the
+whole card — the same token `PlaybackQueue.qml` uses for its current row's
+background — so the playing track is marked identically in both panes. It is
+a plain binding on `currentIndexChanged`, so it follows NEXT/PREVIOUS, queue row
+clicks, auto-advance and the UC-23 crossfade midpoint swap with no extra
+signal handling, and it is `false` for every playlist that is not the
+active one (and for AlbumBrowser/SearchResultBrowser, which never set it).
+The left accent stripe (`isActive`) is unaffected.
 
 **Re-sync on every PLAYLISTS entry.** `PlaylistViewer`'s
 `onPlaylistsDataChanged` — which, since `Main.qml`'s `Loader` destroys and
