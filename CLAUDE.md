@@ -16,6 +16,13 @@ modifies, or removes a use case, a component's public API, a data flow, or a des
 decision, update the corresponding section of that document in the same change — it is
 the authoritative spec, not a historical record.
 
+**Keep `docs/Topaz User Guide.md` up to date too** — the end-user guide (Topaz 1.0.0,
+English, no developer terms), shipped as `Topaz User Guide.pdf` in both `deploy/` and
+`deploy-linux/`. Any change a *user* can see or do (a new option, a changed label, a new
+button, changed behavior) updates the matching guide section in the same change, and the
+PDF is regenerated with `bash docs/build-user-guide-pdf.sh` (see "User guide" below). Add a
+line to its "Document history" table for each new edition.
+
 ## Build
 
 Toolchain (pinned in `.vscode/settings.json`): Qt 6.10.2 mingw_64, MinGW 13.1.0, Ninja,
@@ -72,6 +79,7 @@ cp build-release/Topaz.exe build-release/libprojectM-4.dll \
 C:/Qt/6.10.2/mingw_64/bin/windeployqt6.exe --qmldir . --compiler-runtime deploy/Topaz.exe
 mkdir deploy/Topaz
 cp build-release/Topaz/qmldir build-release/Topaz/topaz.qmltypes deploy/Topaz/
+cp "docs/Topaz User Guide.pdf" deploy/
 ```
 
 `windeployqt6` pulls in every Qt DLL actually used (including the Multimedia FFmpeg
@@ -157,6 +165,7 @@ mkdir -p /out/plugins && cp -r "$QT/plugins/." /out/plugins/
 rm -rf /out/plugins/{designer,help,printsupport,sqldrivers,qmllint,qmlls,qmltooling}
 mkdir -p /out/qml && cp -r "$QT/qml/." /out/qml/
 cp /src/packaging/linux/{topaz.png,install-topaz-launcher.sh,README-Linux.txt,qt.conf,run-topaz.sh} /out/
+cp "/src/docs/Topaz User Guide.pdf" /out/
 chmod +x /out/run-topaz.sh
 '
 ```
@@ -241,6 +250,24 @@ Loudness Correction's "Consistent Background Music" strategy (UC-35); Topaz load
 And for **`ffmpeg`** (`ffmpeg.exe` / `ffmpeg`), needed only by the Export dialog's "Convert to MP3"
 option (UC-26): never bundled either (Qt's own FFmpeg is libraries-only and has no MP3 encoder);
 Topaz looks next to the executable first, then on the `PATH`, and needs the `libmp3lame` encoder.
+
+### User guide (`docs/`)
+
+`docs/Topaz User Guide.md` + `docs/images/*.png` (screenshots of the real Release build) are
+the source; `docs/Topaz User Guide.pdf` is generated but tracked (the Linux deploy recipe copies
+it from `/src`). Build: `bash docs/build-user-guide-pdf.sh` from Git Bash — pandoc runs in a
+throw-away `ubuntu:24.04` Docker container (`--from gfm`, so heading anchors match GitHub's;
+images and `docs/user-guide.css`, the A4 print stylesheet, embedded into one HTML), then headless
+Edge/Chrome prints it. Two gotchas the script already handles: the browser needs its own
+`--user-data-dir` (an open Edge window otherwise swallows the call and nothing is printed), and
+`msedge.exe` returns *before* the PDF exists, so the script waits for the file. Keep guide
+headings free of numbers and punctuation so the manual Contents links resolve identically on
+GitHub and in the PDF.
+
+**Screenshots** are taken from `deploy/Topaz.exe` with the user's stream-safe demo library
+`G:\Topaz\MP3\` (never the user's own library — the PDF is public), after setting the real
+`%LOCALAPPDATA%\Topaz` aside (rename + SHA-256 manifest, restored and verified afterwards).
+Mask any path that shows the Windows user name. Ask the user before taking over the screen.
 
 ### Editor diagnostics (VS Code Problems tab)
 

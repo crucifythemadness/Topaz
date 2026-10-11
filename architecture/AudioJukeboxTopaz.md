@@ -20,6 +20,10 @@ author:
 [GUI](https://en.wikipedia.org/wiki/Graphical_user_interface)
 [QML](https://en.wikipedia.org/wiki/QML)
 
+**End-user documentation:** `docs/Topaz User Guide.md` (with screenshots in `docs/images/`,
+shipped as `Topaz User Guide.pdf` in both deploy folders) describes Topaz from the user's point
+of view. This document is the developer-facing spec; keep both up to date (see `CLAUDE.md`).
+
 # Abbreviations and definitions of terms  
 - flac (Free Lossless Audio Codec)  
 - mp3 (formally MPEG-1 Audio Layer III or MPEG-2 Audio Layer III)
