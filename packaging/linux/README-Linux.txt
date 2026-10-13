@@ -1,19 +1,20 @@
-Topaz for Linux -- trial build
-==============================
+Topaz 1.0.0 for Linux
+=====================
 
-A self-contained Linux build of Topaz (built in Docker on Ubuntu 24.04 with
-Qt 6.10.2). It bundles its own Qt, projectM and GLEW, so nothing needs to be
-installed to run it beyond what any desktop Linux already has.
+A self-contained Linux build of Topaz (built on Ubuntu 24.04 with Qt 6.10.2).
+It bundles its own Qt, projectM and GLEW, so nothing needs to be installed to
+run it beyond what any desktop Linux already has.
 
-Status
-------
+Requirements
+------------
+- 64-bit (x86_64) desktop Linux with glibc 2.38 or newer, e.g. Ubuntu 24.04+
+  and its flavours, Linux Mint 22+, Debian 13+, Fedora 39+
+- X11 or Wayland
+- PulseAudio or PipeWire (with pipewire-pulse)
+- For Milkdrop: OpenGL 3.3 Core Profile (see below)
+
 Tested on real hardware: Linux Mint 22.2 (Cinnamon, X11, NVIDIA) and Ubuntu
 Studio (Wayland).
-Working: OS volume control, library scanning, BASS backend, AUTO PLAY,
-playlists, the Setup dialog.
-Known open item: on Linux Mint the Audio Visualizer pane opens but draws
-nothing (it works on Ubuntu Studio). Cause not yet known -- see "If something
-doesn't work" below.
 
 How to run
 ----------
@@ -21,9 +22,10 @@ How to run
 
 Do not run ./topaz-bin directly: the wrapper script sets LD_LIBRARY_PATH so
 the bundled lib/ directory is used. If the files lost their executable bit
-(common after copying from Windows or a FAT/exFAT USB stick):
+(always the case after unpacking the .7z archive, and common after copying
+from Windows or a FAT/exFAT USB stick):
 
-    chmod +x run-topaz.sh topaz-bin
+    chmod +x run-topaz.sh topaz-bin install-topaz-launcher.sh
 
 (The executable is called "topaz-bin" rather than "topaz" because it must sit
 next to a directory literally named "Topaz/", and this folder was assembled
@@ -45,13 +47,6 @@ Run it again if you move the folder. Undo with:
 Where Topaz keeps its settings
 ------------------------------
 ~/.config/Topaz/   (Topaz.config, the library cache, playlists/, ratings)
-
-Earlier test builds used ~/.config/topaz-bin/ instead. To keep that data:
-
-    mv ~/.config/topaz-bin ~/.config/Topaz
-
-(Do this while Topaz is not running, and only if ~/.config/Topaz does not
-exist yet.)
 
 Milkdrop needs OpenGL 3.3 (Core Profile)
 ----------------------------------------
@@ -109,6 +104,10 @@ What's bundled
 - qml/                 Qt's own QML modules
 - qt.conf              tells Qt where plugins/ and qml/ are
 - topaz.png, install-topaz-launcher.sh   see "App icon" above
+- Topaz User Guide.pdf the user manual
+- LICENSE              GNU General Public License v3 (Topaz itself; the
+                       bundled libraries keep their own licenses, see the
+                       project page)
 
 Assumed already present on the target system (not bundled): libx11-6,
 libxrandr2, libxrender1, libxi6, libxext6, libxkbcommon0, libxkbcommon-x11-0,
@@ -119,7 +118,8 @@ install has the equivalents).
 If something doesn't work
 --------------------------
 Run from a terminal (not a file-manager double-click) so you can see any
-message, and report what you see.
+message, and report what you see at
+https://github.com/crucifythemadness/Topaz/issues
 
 For the Audio Visualizer specifically: start Topaz from a terminal, play a
 track, open the AUDIO VISUALIZER pane, and copy everything the terminal prints
