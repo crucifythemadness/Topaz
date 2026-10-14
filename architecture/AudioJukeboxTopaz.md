@@ -7470,8 +7470,9 @@ second of pressing play. (A "first 30 s" estimate was tried and dropped: for tra
 intro it is several dB off and would only add a second correction.)
 
 **NowPlaying.** `PlaybackEngine.currentLoudnessText` is appended to the format badge:
-`MP3  |  320 KBPS  |  -1.2 dB` — only while the feature is on with this strategy and the value
-is known. The number shown (and the one actually applied to the deck) is `appliedAudiophileGain()`
+`MP3  |  320 KBPS  |  -1.2 dB` — only while the feature is on with this strategy, there is a
+current track (playing or paused; blank at "NO TRACK" — `clearQueue()` and removing the last
+playing track emit `currentLoudnessChanged`), and the value is known. The number shown (and the one actually applied to the deck) is `appliedAudiophileGain()`
 = the stored reference **plus the live Audiophile Trim** — never the bare reference.
 
 ### Strategy "Consistent Background Music" — a compressor

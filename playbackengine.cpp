@@ -314,8 +314,9 @@ static QString formatLoudnessDb(double db)
 
 QString PlaybackEngine::currentLoudnessText() const
 {
+    // No current track ("NO TRACK" in NowPlaying): never a value, for either strategy.
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
     if (loudnessAudiophile()) {
-        if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
         const auto it = m_loudnessDb.constFind(m_queue.at(m_currentIndex).filePath);
         if (it == m_loudnessDb.constEnd()) return {};
         return formatLoudnessDb(appliedAudiophileGain(it.value()));
@@ -459,9 +460,12 @@ void PlaybackEngine::removeAt(int idx)
             if (loadTrack(m_queue.size() - 1)) m_deck->play();
         } else {
             clearCoverSource();
+            m_compressorMeter.reset();   // no track left: drop the Background live estimate
+            m_compressorMeterHasData = false;
             emit currentIndexChanged();
             emit currentTrackChanged();
             emit currentRatingChanged();
+            emit currentLoudnessChanged();
             emit isPlayingChanged();
         }
     } else if (idx < m_currentIndex) {
@@ -577,12 +581,15 @@ void PlaybackEngine::clearQueue()
     m_queueFinished = false;   // cleared, not "finished" -- see addTrack()/addTracks()
     if (m_userPaused) { m_userPaused = false; emit userPausedChanged(); }   // no current track left to be paused
     clearCoverSource();
+    m_compressorMeter.reset();   // no track left: drop the Background live estimate
+    m_compressorMeterHasData = false;
     beginResetModel();
     m_queue.clear();
     endResetModel();
     emit currentIndexChanged();
     emit currentTrackChanged();
     emit currentRatingChanged();
+    emit currentLoudnessChanged();
     emit queueCountChanged();
     emit isPlayingChanged();
     if (!m_activePlaylistName.isEmpty()) {
