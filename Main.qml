@@ -466,7 +466,12 @@ ApplicationWindow {
         playbackEngine:    engine
         cleanupController: milkdropCleanupController
         backupRestoreController: backupRestoreController
+        genreScanController: genreScanController
     }
+
+    // Genre discovery for Setup -> GENRES -> SCAN FOLDERS (UC-36). Owns its
+    // own worker thread, independent of the library scanner's.
+    GenreScanController { id: genreScanController }
 
     // About Topaz dialog — opened by TopBar's rightmost (info) icon
     AboutDialog {

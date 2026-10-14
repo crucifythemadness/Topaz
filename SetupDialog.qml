@@ -8,9 +8,10 @@ import QtQuick.Dialogs
 
 // ── SetupDialog ──────────────────────────────────────────────────────────
 // Modal setup window with seven tabs:
-//   • GENRES        — add/delete genre names (up to 40) and choose which of them
-//                     (up to 30) are enabled via a per-cell checkbox to appear as
-//                     GenreBar buttons
+//   • GENRES        — add/delete genre names (up to 48) and choose which of them
+//                     (up to 40) are enabled via a per-cell checkbox to appear as
+//                     GenreBar buttons; SCAN FOLDERS discovers the genres tagged in
+//                     the monitored folders (FoundGenresDialog, see UC-36)
 //   • FILE MONITORING — add/delete monitored folders (with subfolders toggle)
 //   • PLAYBACK      — choose the playback backend (FFmpeg/BASS Audio Library) and
 //                     enable/disable crossfade and set its length (see UC-15)
@@ -46,6 +47,9 @@ Popup {
     // Main.qml -- backs the MISC tab's "Backup/Restore Topaz Environment"
     // feature, see UC-27.
     property var backupRestoreController: null
+    // Main.qml -- backs the GENRES tab's SCAN FOLDERS button / FOUND GENRES
+    // dialog (genre discovery, see UC-36).
+    property var genreScanController: null
 
     // ── Internal selection state ─────────────────────────────────────────
     property int selectedGenreIndex:  -1
@@ -60,6 +64,11 @@ Popup {
     // edit and must not trigger the auto-rescan-on-close below. Reset per
     // open session in onAboutToShow so only changes made *this* time count.
     property bool _foldersDirty: false
+    // Set when genres were added from FOUND GENRES (UC-36): their music is
+    // only in the library after a scan, so closing Setup runs one -- the same
+    // auto-rescan hook as _foldersDirty. A genre typed in by hand deliberately
+    // doesn't set it (unchanged behaviour).
+    property bool _genresDiscovered: false
 
     // Small "turning circle" busy indicator -- a dot orbiting a faint ring.
     // Stands in for the MILKDROP tab's PRESETS count while
@@ -108,7 +117,11 @@ Popup {
     // assignment, same as everywhere else in QML.
     x: Overlay.overlay ? (Overlay.overlay.width  - width)  / 2 : 0
     y: Overlay.overlay ? (Overlay.overlay.height - height) / 2 : 0
-    width:  920   // widened so genreManageGrid's cells grow ~20% for longer genre names
+    // 1096 = room for a 6th genreManageGrid column (48 genres) while keeping the
+    // cells exactly as wide as the earlier 5-column/920 px layout (168 px):
+    // 6 * 168 + 5 * 8 spacing + 2 * 24 margins. Was 920 (itself widened once so
+    // the cells grew ~20% for longer genre names).
+    width:  1096
     height: 760   // grown to fit the AUTO PLAY tab's 8th settings row (Exceptions,
                   // a single-row 3-option radio group)
     padding: 0
@@ -124,6 +137,7 @@ Popup {
         x = Overlay.overlay ? (Overlay.overlay.width  - width)  / 2 : 0
         y = Overlay.overlay ? (Overlay.overlay.height - height) / 2 : 0
         _foldersDirty = false
+        _genresDiscovered = false
         // Dialog is a persistent instance that remembers its last-selected
         // tab across close/reopen -- if it reopens directly on MILKDROP,
         // the tab-switch handler below never fires, so refresh here too.
@@ -131,11 +145,13 @@ Popup {
     }
 
     // Auto-rescan if FILE MONITORING was touched this session -- see UC-04/
-    // UC-05. closePolicy: Popup.NoAutoClose (below) means the header's ✕
-    // button is the only way this fires, so this is a single reliable hook.
+    // UC-05 -- or genres were added from FOUND GENRES (UC-36).
+    // closePolicy: Popup.NoAutoClose (below) means the header's ✕ button is
+    // the only way this fires, so this is a single reliable hook.
     onClosed: {
-        if (_foldersDirty && libraryModel) libraryModel.startFullScan()
+        if ((_foldersDirty || _genresDiscovered) && libraryModel) libraryModel.startFullScan()
         _foldersDirty = false
+        _genresDiscovered = false
     }
 
     // Dark scrim behind the dialog
@@ -357,22 +373,22 @@ Popup {
                             color: Theme.fgSurfaceVariant
                         }
 
-                        // Fixed no-scroll grid — sized to hold up to 40 configured
-                        // genres (5 columns × 8 rows). Each cell carries its own
+                        // Fixed no-scroll grid — sized to hold up to 48 configured
+                        // genres (6 columns × 8 rows). Each cell carries its own
                         // enable/disable checkbox (top right) controlling whether
-                        // that genre is one of the <= 30 shown as a GenreBar
+                        // that genre is one of the <= 40 shown as a GenreBar
                         // button — see AppConfig.enabledGenres / UC-03. The
                         // configured-genre ceiling here is intentionally higher
-                        // than GenreBar's own fixed "Grid 30" capacity.
+                        // than GenreBar's own 40-button (10 x 4) capacity.
                         Grid {
                             id: genreManageGrid
                             anchors.fill: parent
                             visible: root.appConfig !== null && root.appConfig.genres.length > 0
-                            clip: true              // defensive: beyond 40 genres, extra
+                            clip: true              // defensive: beyond 48 genres, extra
                                                      // rows clip rather than overflow —
                                                      // AppConfig.addGenre() enforces that
                                                      // ceiling so this should never trigger
-                            columns: 5
+                            columns: 6
                             rowSpacing:    8
                             columnSpacing: 8
 
@@ -447,7 +463,7 @@ Popup {
                                     }
 
                                     // Enable/disable checkbox — whether this genre
-                                    // is one of the <= 30 shown in GenreBar. Given
+                                    // is one of the <= 40 shown in GenreBar. Given
                                     // its own reserved column (see cellHover below)
                                     // rather than overlapping it with z-stacking,
                                     // so there's no ambiguity over which MouseArea
@@ -612,7 +628,7 @@ Popup {
                             }
 
                             // Inert visual placeholders for the unused slots of
-                            // the fixed 40-cell board (5 x 8). Purely decorative
+                            // the fixed 48-cell board (6 x 8). Purely decorative
                             // -- no MouseArea, so they can never intercept a
                             // click or a drag -- but they make the capacity
                             // legible and make the "no gaps" invariant
@@ -736,6 +752,50 @@ Popup {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
+
+                        // SCAN FOLDERS — genre discovery (UC-36): reads the
+                        // genre tags in the ACTIVE monitored folders and opens
+                        // FOUND GENRES to pick from. Enabled only when there is
+                        // at least one active, connected folder. The binding
+                        // reads appConfig.folders (a NOTIFYing property) as the
+                        // call's argument, so it re-evaluates whenever the
+                        // folder list changes -- a bare invokable call would
+                        // freeze after the first paint.
+                        Rectangle {
+                            id: scanGenresBtn
+                            readonly property bool canScan:
+                                root.genreScanController !== null && root.appConfig !== null
+                                && root.genreScanController.hasScannableFolder(root.appConfig.folders)
+                            width: 150; height: 32
+                            radius: Theme.radiusSm
+                            opacity: canScan ? 1.0 : 0.35
+                            color: scanGHover.containsMouse && canScan
+                                   ? Theme.primaryContainer : Theme.surfaceContainerHigh
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: qsTr("SCAN FOLDERS")
+                                font.family:        Theme.fontFamilyBody
+                                font.pixelSize:     Theme.labelSm
+                                font.weight:        Font.Bold
+                                font.letterSpacing: Theme.lsWide
+                                color: scanGHover.containsMouse && scanGenresBtn.canScan
+                                       ? Theme.fgPrimaryContainer : Theme.primary
+                            }
+                            MouseArea {
+                                id: scanGHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: scanGenresBtn.canScan ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text: scanGenresBtn.canScan
+                                    ? qsTr("Find all genres tagged in your music folders and pick the ones to add")
+                                    : qsTr("Add an active music folder in FILE MONITORING first")
+                                onClicked: if (scanGenresBtn.canScan) foundGenresDialog.open()
+                            }
+                        }
+
                         Item { Layout.fillWidth: true }
 
                         // DELETE SELECTED
@@ -812,6 +872,14 @@ Popup {
                             root.selectedGenreIndex = -1
                         }
                     }
+                }
+
+                // FOUND GENRES (UC-36), opened by SCAN FOLDERS above.
+                FoundGenresDialog {
+                    id: foundGenresDialog
+                    appConfig:      root.appConfig
+                    scanController: root.genreScanController
+                    onGenresAdded:  root._genresDiscovered = true
                 }
             } // end GENRES panel
 

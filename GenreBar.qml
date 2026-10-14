@@ -2,7 +2,8 @@
 // qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
 // qmllint disable unqualified
 
-// 3 × 10 grid of genre toggle buttons.
+// Grid of genre toggle buttons, 10 per row, up to 4 rows (40 enabled genres,
+// AppConfig.maxEnabledGenres()). The bar's height follows the number of rows.
 // Active genres are highlighted with secondaryContainer background.
 // lib.genreModel drives the button states; lib.toggleGenre() handles clicks.
 Rectangle {

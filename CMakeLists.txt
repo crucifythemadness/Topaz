@@ -152,6 +152,8 @@ qt_add_executable(topaz
     playlistexportworker.cpp
     playlistexportcontroller.h
     playlistexportcontroller.cpp
+    genrescancontroller.h
+    genrescancontroller.cpp
     backuprestorecontroller.h
     backuprestorecontroller.cpp
     # Vendored third-party (BSD-3-Clause) — see third_party/kissfft/LICENSES/
@@ -224,6 +226,7 @@ qt_add_qml_module(topaz
         ImportPlaylistDialog.qml
         ScanFoldersDialog.qml
         VolumeKnob.qml
+        FoundGenresDialog.qml
     RESOURCES
         app.ico
         InfoAbout.png

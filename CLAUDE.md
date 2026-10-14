@@ -16,12 +16,16 @@ modifies, or removes a use case, a component's public API, a data flow, or a des
 decision, update the corresponding section of that document in the same change — it is
 the authoritative spec, not a historical record.
 
-**Keep `docs/Topaz User Guide.md` up to date too** — the end-user guide (Topaz 1.0.0,
-English, no developer terms), shipped as `Topaz User Guide.pdf` in both `deploy/` and
-`deploy-linux/`. Any change a *user* can see or do (a new option, a changed label, a new
-button, changed behavior) updates the matching guide section in the same change, and the
-PDF is regenerated with `bash docs/build-user-guide-pdf.sh` (see "User guide" below). Add a
-line to its "Document history" table for each new edition.
+**The user guide is updated once per release, not per change.** `docs/Topaz User Guide.md`
+(end-user guide, English, no developer terms; shipped as `Topaz User Guide.pdf` in both
+`deploy/` and `deploy-linux/`) describes the *released* version. Any change a *user* can see
+or do (a new option, a changed label, a new button, changed behavior) instead adds an entry,
+in the same change, to **`docs/user-guide-pending.md`**: what changed, which guide sections,
+which screenshots to (re)take. Do **not** edit the guide itself mid-cycle. Right before a
+release, work through that list in one pass — guide text, one screenshot session, version
+number + a "Document history" line, PDF rebuild with `bash docs/build-user-guide-pdf.sh`
+(see "User guide" below) — then empty the list. The architecture doc is still updated with
+every change.
 
 ## Build
 
@@ -188,6 +192,14 @@ architecture doc.
 (`main.cpp` sets the X11 window icon itself, under `#ifndef Q_OS_WIN`). Edit those files
 there, not in the gitignored `deploy-linux/`.
 
+**File names must match their `#include`/`CMakeLists.txt` spelling exactly (all lower-case).**
+Windows and the Docker bind mount above are case-insensitive, so a mismatch builds fine here
+and only breaks on a real Linux checkout — the 1.0.0 release shipped `AppConfig.h/.cpp` and
+`LibraryScanner.h` while everything referenced `appconfig.*`/`libraryscanner.h`, so a Linux clone
+failed at CMake configure (fixed by renaming them). To verify, build from a copy on the container's
+*own* filesystem: `git ls-files -c -o --exclude-standard` → `tar -T` → extract inside the
+container → `cmake -B … && cmake --build …`.
+
 **Docker Desktop caveat**: an `image inspect`/`volume inspect` that "fails" does not mean the
 image/volume is gone — it also fails when the Docker engine simply isn't running (Docker
 Desktop can stop between sessions), and can even report "missing" for a minute after a
@@ -321,7 +333,7 @@ token — QML files should reference `Theme.*` rather than hardcoding values.
 | `LibraryCache` | `librarycache.h/cpp` | Atomic read/write of `Topaz.library.json` |
 | `LibraryScanner` | `libraryscanner.h/cpp` | Runs on a dedicated worker `QThread`: directory walk, genre filtering, `QFileSystemWatcher`-based runtime monitoring |
 | `LibraryModel` | `librarymodel.h/cpp` | `QAbstractListModel` + `QML_ELEMENT`; owns the `LibraryScanner` thread; exposes query invokables to QML (`filteredAlbums`, `buildLibraryTree`, etc.) |
-| `AppConfig` | `AppConfig.h/cpp` | Reads/writes `Topaz.config` JSON (genres, monitored folders, window/panel layout); auto-saves on every mutation |
+| `AppConfig` | `appconfig.h/cpp` | Reads/writes `Topaz.config` JSON (genres, monitored folders, window/panel layout); auto-saves on every mutation |
 | `PlaybackEngine` | `playbackengine.h/cpp` | `QAbstractListModel` + `QML_ELEMENT`; simultaneously the queue model *and* the playback controller (wraps `QMediaPlayer`/`QAudioOutput`) |
 | `PlaylistManager` | `playlistmanager.h/cpp` | XSPF (`.xml`) playlist file I/O, including drive-letter-stripped portable paths |
 

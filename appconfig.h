@@ -16,11 +16,11 @@ class QJsonObject;
 // Schema:
 //   {
 //     "genres":  [ "Techno", "IDM", ... ],
-//     "enabledGenres": [ "Techno", ... ],   // subset of "genres", <= 30 entries,
+//     "enabledGenres": [ "Techno", ... ],   // subset of "genres", <= 40 entries,
 //                                           // shown as buttons in GenreBar (see
 //                                           // UC-03). Missing key (older config
 //                                           // files) means "enable every genre up
-//                                           // to 30", preserving pre-existing
+//                                           // to 40", preserving pre-existing
 //                                           // behavior.
 //     "folders": [ { "volume": "MusicDrive", "relPath": "/Music", "rawPath": "D:/Music",
 //                    "includeSubfolders": true, "active": true }, ... ],
@@ -549,8 +549,10 @@ private:
     void    applyJson(const QJsonObject &root);
     QString configFilePath() const;
 
-    static constexpr int kMaxGenres        = 40;
-    static constexpr int kMaxEnabledGenres = 30;
+    // 48 = the Setup GENRES grid (6 columns x 8 rows); 40 = GenreBar's
+    // 10 buttons per row x 4 rows. See UC-03.
+    static constexpr int kMaxGenres        = 48;
+    static constexpr int kMaxEnabledGenres = 40;
 
     QStringList  m_genres;
     // Membership only -- display order is always derived fresh from m_genres'

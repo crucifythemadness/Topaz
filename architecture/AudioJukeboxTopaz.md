@@ -31,7 +31,7 @@ of view. This document is the developer-facing spec; keep both up to date (see `
 - Topaz (Project name and also the Application name)
 
 # Introduction and overview
-Topaz is an audio jukebox which is a desktop app that can play audio files (*.flac, *.mp3, and *.opus) from a queue. The queue plays the audio files according to the FIFO principle. Optionally, the user can set whether the audio files should be played with fade-in and fade-out (Fade - audio engineering) or whether the audio files should be played to the end before the next audio file is played. The user can move audio files within the queue up and down, except the audio file that is currently playing. The audio files are stored within a main folder that Topaz can scan. Topaz has an application Json Config-File were the user can set the proper main folder path via GUI. Audio files are then organized under three levels. Genre, Album Artist and Album. At the Top are 30 toggle buttons (3 rows with 10 buttons over the whole application with) that are representing the genres. A genre is active when the button is pressed and all album artists, albums and audio files under this genre are now visible and selectable. Available Genres can be configured within the application config file. The application config file will be read at startup and each available genre will be connected with one toggle button. On the left side under the genre toggle buttons is a tree control that contains all available genres. The tree control has three levels (genre, album artist, album). Right from that is a section that can contain all albums, each with the cover and all the audio files, from a selected Genre or a selected Album artist. Alternatively the user can also just select one Album. Right from that is antother section with the audio file queue. The queue should display the Number when the Audio file will be played, the Album name, the Artist, the Name of the Audio file and the Audio file bitrate. Right from that is antother section that contains the cover and detail information of the audio file that is currently playing. All together we have 4 sections that are under the big genre toggle buttons. Each Audio file that Topaz played will be stored and saved automatically in a Json playlist file. The possibility to manage playlist files is in the section on the right side were the details of the currently playing Audio file are. The User can start a new playlist with a given name or the User can load an already existing playlist. That means that at the application startup the user has to decide to create a new playlist or load an exisisting playlist. If the User loads an existing playlist, Topaz will automatically start playing the first audio file from that playlist. Albums or Audio Files can be add to the queue via context menu (mouse right click) or via drag and drop. Topaz should be an application that has a moderate memory consumption. That means that unnecessary Album covers and Audio Files (ID3-Tag Informations) in Memory has to be unloaded.
+Topaz is an audio jukebox which is a desktop app that can play audio files (*.flac, *.mp3, and *.opus) from a queue. The queue plays the audio files according to the FIFO principle. Optionally, the user can set whether the audio files should be played with fade-in and fade-out (Fade - audio engineering) or whether the audio files should be played to the end before the next audio file is played. The user can move audio files within the queue up and down, except the audio file that is currently playing. The audio files are stored within a main folder that Topaz can scan. Topaz has an application Json Config-File were the user can set the proper main folder path via GUI. Audio files are then organized under three levels. Genre, Album Artist and Album. At the Top are up to 40 toggle buttons (up to 4 rows with 10 buttons over the whole application width; originally 30 in 3 rows) that are representing the genres. A genre is active when the button is pressed and all album artists, albums and audio files under this genre are now visible and selectable. Available Genres can be configured within the application config file. The application config file will be read at startup and each available genre will be connected with one toggle button. On the left side under the genre toggle buttons is a tree control that contains all available genres. The tree control has three levels (genre, album artist, album). Right from that is a section that can contain all albums, each with the cover and all the audio files, from a selected Genre or a selected Album artist. Alternatively the user can also just select one Album. Right from that is antother section with the audio file queue. The queue should display the Number when the Audio file will be played, the Album name, the Artist, the Name of the Audio file and the Audio file bitrate. Right from that is antother section that contains the cover and detail information of the audio file that is currently playing. All together we have 4 sections that are under the big genre toggle buttons. Each Audio file that Topaz played will be stored and saved automatically in a Json playlist file. The possibility to manage playlist files is in the section on the right side were the details of the currently playing Audio file are. The User can start a new playlist with a given name or the User can load an already existing playlist. That means that at the application startup the user has to decide to create a new playlist or load an exisisting playlist. If the User loads an existing playlist, Topaz will automatically start playing the first audio file from that playlist. Albums or Audio Files can be add to the queue via context menu (mouse right click) or via drag and drop. Topaz should be an application that has a moderate memory consumption. That means that unnecessary Album covers and Audio Files (ID3-Tag Informations) in Memory has to be unloaded.
 
 # Essential requirements  
 - Topaz will be a Qt application (GUI with QML or partially with QML)
@@ -144,10 +144,10 @@ User clicks an album row in `LibraryTree`:
 | **Precondition** | Setup dialog is open on the GENRES tab. |
 | **Trigger** | User interacts with genre management controls. |
 
-Two related but distinct lists are involved: `AppConfig.genres` (up to 40, the full
+Two related but distinct lists are involved: `AppConfig.genres` (up to 48, the full
 configured set — drives library scanning/filtering via
 `LibraryModel::startFullScan()`/`startStatCheck()`, and is what the SetupDialog grid
-manages) and `AppConfig.enabledGenres` (a subset of it, up to 30, the set actually
+manages) and `AppConfig.enabledGenres` (a subset of it, up to 40, the set actually
 shown as `GenreBar` buttons). Deliberately kept separate so hiding a genre's button
 never excludes its tracks from the scanned library — only from the `GenreBar` filter
 row.
@@ -158,8 +158,8 @@ row.
 2. User presses **Enter** or clicks **ADD**.
 3. `SetupDialog.doAddGenre()` calls `appConfig.addGenre(name)`.
 4. `AppConfig` performs a case-insensitive duplicate check, rejects the add if
-   `genres` is already at its 40-entry ceiling, otherwise appends the name to
-   `m_genres`. If fewer than 30 genres are currently enabled, the new genre is
+   `genres` is already at its 48-entry ceiling, otherwise appends the name to
+   `m_genres`. If fewer than 40 genres are currently enabled, the new genre is
    also added to `m_enabledGenreSet` (so it behaves exactly as before for anyone
    under the enabled cap — new genres just work). Emits `genresChanged` (and
    `enabledGenresChanged` if newly enabled), auto-saves to `Topaz.config`.
@@ -174,7 +174,7 @@ row.
 1. In the SetupDialog GENRES grid, each cell has a small checkbox in its top-right
    corner reflecting `appConfig.isGenreEnabled(name)`.
 2. User clicks the checkbox → `appConfig.setGenreEnabled(name, !current)`.
-3. If enabling and `enabledGenres` is already at its 30-entry cap, the call is
+3. If enabling and `enabledGenres` is already at its 40-entry cap, the call is
    rejected (returns `false`, no state change) — the checkbox simply doesn't
    flip. Unchecked checkboxes are visually dimmed and their cursor reverts to
    the default arrow once the cap is reached, so the "why didn't this work"
@@ -222,22 +222,29 @@ selection-index remapping).
 
 - Duplicate names (case-insensitive) are silently ignored.
 - Genre names are stored in their original casing and displayed upper-cased in `GenreBar`.
-- **Configured genres** (`AppConfig.genres`): capped at 40 (`addGenre()` silently
-  rejects beyond that, same convention as the duplicate check). The GENRES tab in
-  `SetupDialog` lays out all configured genres in a fixed 5-column × 8-row grid
-  (40 cells) sized to always fit without a scrollbar.
+- **Configured genres** (`AppConfig.genres`): capped at **48** (`kMaxGenres`;
+  `addGenre()` silently rejects beyond that, same convention as the duplicate check).
+  The GENRES tab in `SetupDialog` lays out all configured genres in a fixed
+  **6-column × 8-row** grid (48 cells) sized to always fit without a scrollbar. (Was
+  40 / 5 columns; the 6th column came with widening `SetupDialog` from 920 to 1096 px,
+  which keeps every cell exactly as wide as before — 168 px.)
 - **Enabled genres** (`AppConfig.enabledGenres`, persisted separately as
-  `enabledGenres` in `Topaz.config`): capped at 30, matching `GenreBar`'s own fixed
-  "Grid 30" (3 rows × 10 columns) capacity exactly, so it can never receive more
-  entries than it has room for. Display order always follows `genres`' order —
+  `enabledGenres` in `Topaz.config`): capped at **40** (`kMaxEnabledGenres`), matching
+  `GenreBar`'s capacity of 10 buttons per row × up to 4 rows, so it can never receive
+  more entries than it has room for. `GenreBar` sizes itself to its rows: up to 30
+  enabled genres it stays at the familiar 3 rows, a 31st adds the 4th. (Was 30 / 3
+  rows; raised because a 4K display at low scaling has room for a 4th row.) Display order always follows `genres`' order —
   membership is tracked as a plain set (`QSet<QString>`), never a separately
   ordered list, so it can't desync from add/remove/reorder of the configured list.
   The user controls that order directly by dragging genre cells in the GENRES
   grid — see UC-33.
 - **Migration**: config files predating this feature have no `enabledGenres` key.
-  On load, `AppConfig` treats that as "enable every configured genre, up to 30" —
-  every pre-existing install keeps showing exactly the `GenreBar` buttons it did
-  before, until the user configures more than 30 and starts using the checkboxes.
+  On load, `AppConfig` treats that as "enable every configured genre, up to the
+  enabled cap (40)" — every pre-existing install keeps showing exactly the `GenreBar`
+  buttons it did before, until the user configures more and starts using the checkboxes.
+- **Discovering genres**: instead of typing names, **SCAN FOLDERS** (left of DELETE
+  SELECTED) reads the genre tags in the monitored folders and lets the user pick from
+  them — see **UC-36**.
 
 ---
 
@@ -458,7 +465,10 @@ anyway. `LibraryScanner::scanningFolder(path)` instead reuses a checkpoint that 
 fires once per directory `discoverAudioFiles()` visits (every configured root AND every recursive
 subfolder) — folders are dominated by files roughly 6-12x in a typical Genre/Artist/Album layout,
 so this stays cheap regardless of library size. `discoverAudioFiles()` lost its `const` qualifier
-to emit this. (An earlier version of this feature also showed a live "recently scanned files"
+to emit this. (Since UC-36 the walk itself is the static `LibraryScanner::listAudioFiles(dir,
+recursive, cancel, onFolder)`, shared with the genre discovery scan; `discoverAudioFiles()` is now
+a one-line wrapper passing this scan's cancel flag and an `onFolder` callback that emits
+`scanningFolder` — library-scan behaviour unchanged.) (An earlier version of this feature also showed a live "recently scanned files"
 feed via a `scanningFiles(fileNames)` signal riding the same ~200-file chunk checkpoint
 `scanProgress` already used — removed on user feedback: they didn't want to see it. Deleted
 rather than left dormant, per the same no-dead-code discipline as everywhere else in this file.)
@@ -576,7 +586,7 @@ making the track invisible to every genre-scoped view (`filteredAlbums`,
 5. Updated library is emitted via `scanCompleted` → `LibraryModel::
    onScanCompleted()` applies the new track list **and** calls
    `AppConfig::refreshFolderAvailability()` (a one-line `emit
-   foldersChanged()`, `AppConfig.h`) so Setup Dialog's FILE MONITORING
+   foldersChanged()`, `appconfig.h`) so Setup Dialog's FILE MONITORING
    list — if open — immediately shows the folder as disconnected/missing
    (or reconnected) instead of only reflecting reality after the next
    restart. This is the *only* non-edit source of `foldersChanged`;
@@ -707,7 +717,8 @@ Topaz module
 │                         mute button); a drag through the bottom gap sticks at 0/100 instead of flipping (jumps
 │                         > 50 are refused); WheelHandler over the whole knob, 2 % per 120-unit notch, small touchpad
 │                         deltas accumulated.
-├── GenreBar.qml        3 × 10 genre toggle grid  (reads lib.genreModel, calls lib.toggleGenre)
+├── GenreBar.qml        genre toggle grid, 10 per row, up to 4 rows / 40 buttons (reads lib.genreModel, calls lib.toggleGenre)
+├── FoundGenresDialog.qml  FOUND GENRES — pick genres discovered by Setup → GENRES → SCAN FOLDERS (GenreScanController), see UC-36
 ├── LibraryTree.qml     Left sidebar  default width 286 px, user-resizable  (flat virtualised ListView; flatRows JS array; no nested Repeaters)
 ├── SearchPanel.qml     Replaces LibraryTree in the same SplitView slot when SEARCH is active — see UC-21 (independent of LibraryData; property SearchData searchData)
 ├── PlaylistsPanel.qml  Replaces LibraryTree/SearchPanel in the same SplitView slot when PLAYLISTS is active — see UC-22 (independent of LibraryData/SearchData; property PlaylistsData playlistsData; playlist row disabled when active in queue)
@@ -760,6 +771,7 @@ work), not just with track count.
 | `LibraryScanner` | `libraryscanner.h/cpp` | Worker: directory walk, parallel tag-reading (`QtConcurrent`/`QThreadPool`), genre filter, QFileSystemWatcher |
 | `LibraryModel` | `librarymodel.h/cpp` | QAbstractListModel + Q_INVOKABLE query helpers exposed to QML |
 | `PlaylistManager` | `playlistmanager.h/cpp` | XSPF playlist file creation; path-portability helpers; `listPlaylists()` for the PLAYLISTS tab (see UC-22) |
+| `GenreScanController` | `genrescancontroller.h/cpp` | Setup → GENRES → SCAN FOLDERS: reads the genre tag of every file in the ACTIVE monitored folders on its own worker thread (`GenreScanWorker`) and reports `[{name, count}]` live — see UC-36 |
 | `Mp3Converter` | `mp3converter.h/cpp` | Export's "Convert to MP3": locates a user-supplied `ffmpeg` and converts one file to 44.1 kHz / stereo / CBR 320 kbps MP3 (tags + cover carried over), with progress and cancel — see UC-26 |
 | `SystemVolumeController` | `systemvolumecontroller.h/cpp` | OS master-volume and mute control with live sync: Core Audio COM on Windows, native libpulse (PulseAudio / PipeWire) on Linux |
 
@@ -5570,8 +5582,8 @@ matching `ratingId` — a UUIDv5 hash of `albumArtist;artist;album;title`
 (`TrackInfo::computeRatingId()`, `trackinfo.h`) that never encodes genre.
 This was **deliberately designed without any genre-enabled dependency**
 after confirming that `LibraryScanner` filters scanned files only against
-`AppConfig.genres()` (the full configured list, up to 40) and never
-`AppConfig.enabledGenres()` (the GenreBar-shown subset, up to 30) — see
+`AppConfig.genres()` (the full configured list, up to 48) and never
+`AppConfig.enabledGenres()` (the GenreBar-shown subset, up to 40) — see
 `libraryscanner.cpp`'s filter logic. A track in a genre that's configured
 but currently *disabled* in GenreBar is still fully scanned and present in
 `LibraryModel`/`Topaz.library.json`, so checking existence against the
@@ -7508,3 +7520,94 @@ reference+Trim each time and `currentLoudnessText` reflects it live, confirmed t
 gain ramps to `kCompMakeupDb + backgroundTrimDb`, and confirmed `Topaz.volumeNormalization.json` is
 completely unaffected by any Trim change — only the untouched reference entry from the earlier round
 remained in it throughout.
+
+---
+
+## UC-36 Discover Genres From the Monitored Folders (Setup → GENRES → SCAN FOLDERS)
+
+| Field | Detail |
+|-------|--------|
+| **Goal** | Instead of typing every genre exactly as it is tagged, the user lets Topaz read the genre tags of all files in the monitored folders, sees every genre found (with its track count), and picks the ones to add to GENRES. |
+| **Actor** | User |
+| **Precondition** | At least one FILE MONITORING folder is ticked ACTIVE and its drive is connected. |
+| **Trigger** | User clicks **SCAN FOLDERS** in Setup → GENRES (left of DELETE SELECTED). |
+
+### Why a scan of its own
+`Topaz.library.json` only holds files whose genre is **already configured** (UC-05 filters by
+genre), so the library can never reveal a new genre — every file's tags must be read. This is
+a separate, read-only pass; it never touches the library or its cache.
+
+### Normal Flow
+1. **SCAN FOLDERS** is enabled only while `genreScanController.hasScannableFolder(appConfig.folders)`
+   is true. The binding passes `appConfig.folders` (a NOTIFYing property) as the argument, so it
+   re-evaluates on every folder change — a bare invokable call would freeze after the first paint
+   (see the "QML invokable-binding" gotcha). Disabled: dimmed, tooltip "Add an active music folder
+   in FILE MONITORING first".
+2. Click → `FoundGenresDialog.qml` opens (modal, over Setup) and calls
+   `genreScanController.startScan(appConfig.folders)`.
+3. `GenreScanController` keeps only entries that are **ACTIVE** (default true) and **available**
+   (connected volume, non-empty path) — user decision: an unticked folder is excluded from Topaz
+   anyway, so its genres would show no music — and honours **SUBFOLDERS**.
+4. `GenreScanWorker::runScan()` (own `QThread`) lists the files with
+   `LibraryScanner::listAudioFiles()` — the library scan's own walk, so both scans see exactly
+   the same `*.mp3/*.flac/*.opus` files; a `QSet` drops duplicates from overlapping folders. Then
+   it reads the tags with `TagReader::read(path, false)` (no cover) in chunks of
+   `LibraryScanner::kTagReadChunkSize` (200) over a `QThreadPool` of
+   `LibraryScanner::tagReadThreadCount()` (min(idealThreadCount, 4)) — the same chunking and pool
+   size as `readTagsParallel()`.
+5. `TrackInfo.genre` is already the **first** genre of a multi-genre tag (`TagReader::firstGenre`,
+   UC-05) — exactly the value the library matches against, so a picked genre is guaranteed to match.
+   Genres are tallied case-insensitively (key = lower-cased name; the spelling first seen is shown
+   and added — same duplicate rule as `AppConfig::addGenre`); files without a genre tag are counted
+   separately.
+6. After **every chunk** the worker emits `progress(done, total, genres, withoutGenre)` with the
+   full, case-insensitively sorted `[{name, count}]` list → the dialog shows new genres while the
+   scan is still running. `FoundGenresDialog` syncs a `ListModel` **incrementally** from that list
+   (genres only ever get added during a scan): existing chips keep their delegates and the grid
+   doesn't jump back to the top on every update, which reassigning a JS-array model would do.
+7. The dialog footer shows the progress bar and "Scanning… n / m files · k genres" (before the
+   first chunk: "Looking for audio files…", since listing has no total yet) and a **STOP** button.
+   Once done: "k genres found · n new · s free slots" (+ "x files without a genre tag").
+8. Genres already in GENRES are dimmed and not selectable ("already in GENRES"). New ones can be
+   picked at any time — even mid-scan — up to the free slots (`maxGenres()` − configured); once the
+   selection fills them, the remaining chips dim and the footer says so.
+9. **ADD SELECTED (n)** calls `appConfig.addGenre()` for each picked genre in alphabetical order
+   (new genres are enabled for GenreBar automatically while fewer than 40 are enabled — existing
+   `addGenre` behaviour), closes, and emits `genresAdded(count)`. `SetupDialog` sets
+   `_genresDiscovered`, and its existing auto-rescan-on-close hook (UC-04's `_foldersDirty`) now
+   fires for either flag → **closing Setup starts a library scan**, so the new genres have music
+   right away (user decision). A genre typed in by hand still doesn't trigger a scan.
+
+### Threading and cancellation
+- Its **own worker thread**, not `LibraryScanner`'s: it must not wait behind a running library
+  scan, and must not trigger the library's scan signals (`scanning`, `scanningFolder`, the Visual
+  Folder Scanning dialog). Same controller/worker shape as `PlaylistExportController` (queued
+  signals, detach-on-timeout destructor).
+- **STOP / ✕**: `cancelScan()` sets an atomic flag checked per folder while listing and per chunk
+  while reading; the genres found so far are kept and can still be added. The flag is reset by the
+  **controller** right before it queues a scan (`GenreScanWorker::resetCancel()`), not by
+  `runScan()` itself — otherwise a STOP pressed before the worker picked the scan up would be
+  wiped out.
+- **Reopen while a scan winds down**: `startScan()` during a running scan cancels it and starts the
+  new one as soon as the old one has finished (its late progress reports are ignored).
+
+### Controller API (`GenreScanController`, `QML_ELEMENT`, one instance in `Main.qml`)
+| Member | |
+|---|---|
+| `startScan(folders)` / `cancelScan()` | see above |
+| `hasScannableFolder(folders)` | drives the SCAN FOLDERS button |
+| `scanning`, `listing`, `cancelled` | state |
+| `filesDone`, `filesTotal`, `progress` (0–100) | progress |
+| `genres` (`[{name, count}]`), `filesWithoutGenre` | results, updated live |
+| `scanFinished()` | once per scan |
+
+### Verification (non-visual, Linux container, real files)
+A throw-away harness ran the real `GenreScanController` (QStandardPaths test mode) against
+generated MP3/FLAC/Opus files with known tags: `Rock`/`rock`/`Rock/Pop`/`ROCK;Metal` merge into
+one "Rock" = 4; `Jazz;Blues` counts as Jazz; second genres never appear; deep subfolders found;
+a non-recursive folder's subfolder ignored; an INACTIVE and an unavailable folder skipped; a file
+without a genre counted; sorted case-insensitively; progress monotonic and ending at 100; 650
+files read in 4 chunks with 5 live genre updates; STOP during listing and during tag reading
+(stops at the 200-file chunk boundary, keeps what it found); a restart during a scan reports
+exactly one finish, for the new scan; `listAudioFiles()` returns exactly the audio files a plain
+directory walk finds. **Not verified here**: the dialog's look and behaviour — the user's test.

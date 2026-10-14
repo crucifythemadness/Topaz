@@ -68,15 +68,16 @@ static inline QString albumKey(const TrackInfo &t)
     return t.genre.trimmed().toLower() + QChar('|') + t.albumArtist + QChar('|') + t.album;
 }
 
-// Files handled per QtConcurrent::blockingMapped() batch — small enough to
-// keep cancellation checks and scanProgress updates feeling responsive
-// (close to the old per-file cadence), large enough to amortize thread-pool
-// dispatch overhead.
-static constexpr int kTagReadChunkSize = 200;
-
-QList<QFileInfo> LibraryScanner::discoverAudioFiles(const QString &dirPath, bool recursive)
+int LibraryScanner::tagReadThreadCount()
 {
-    emit scanningFolder(dirPath);
+    return qMin(QThread::idealThreadCount(), 4);
+}
+
+QList<QFileInfo> LibraryScanner::listAudioFiles(const QString &dirPath, bool recursive,
+                                                 const std::atomic<bool> &cancel,
+                                                 const std::function<void(const QString &)> &onFolder)
+{
+    if (onFolder) onFolder(dirPath);
 
     QList<QFileInfo> result;
     const QDir::Filters dirFilter =
@@ -86,11 +87,11 @@ QList<QFileInfo> LibraryScanner::discoverAudioFiles(const QString &dirPath, bool
     const QFileInfoList entries = dir.entryInfoList(dirFilter);
 
     for (const QFileInfo &fi : entries) {
-        if (m_cancelRequested.load(std::memory_order_relaxed)) return result;
+        if (cancel.load(std::memory_order_relaxed)) return result;
 
         if (fi.isDir()) {
             if (recursive)
-                result.append(discoverAudioFiles(fi.absoluteFilePath(), true));
+                result.append(listAudioFiles(fi.absoluteFilePath(), true, cancel, onFolder));
             continue;
         }
 
@@ -99,6 +100,12 @@ QList<QFileInfo> LibraryScanner::discoverAudioFiles(const QString &dirPath, bool
             result.append(fi);
     }
     return result;
+}
+
+QList<QFileInfo> LibraryScanner::discoverAudioFiles(const QString &dirPath, bool recursive)
+{
+    return listAudioFiles(dirPath, recursive, m_cancelRequested,
+                          [this](const QString &folder) { emit scanningFolder(folder); });
 }
 
 QList<TrackInfo> LibraryScanner::readTagsParallel(const QStringList &paths, QThreadPool &pool,
@@ -302,7 +309,7 @@ void LibraryScanner::performScan(QStringList genres, QVariantList folders,
     //    conservatively — this is disk-I/O-bound work, and concurrent random
     //    reads can be net slower than sequential on spinning/external drives.
     QThreadPool pool;
-    pool.setMaxThreadCount(qMin(QThread::idealThreadCount(), 4));
+    pool.setMaxThreadCount(tagReadThreadCount());
 
     int       done  = result.size();
     const int total = discovered.size();

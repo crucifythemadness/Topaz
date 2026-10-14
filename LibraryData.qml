@@ -21,7 +21,7 @@ Item {
     }
 
     // Rebuild the genre toggle model from the persisted config. Sourced from
-    // enabledGenres (<= 30, see UC-03) rather than the full genres list, so
+    // enabledGenres (<= 40, see UC-03) rather than the full genres list, so
     // GenreBar only ever shows the subset the user chose to activate in
     // SetupDialog -- the full list still drives library scanning separately.
     function rebuildGenreModel() {

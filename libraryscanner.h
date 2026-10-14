@@ -7,6 +7,7 @@
 #include <QStringList>
 #include <QVariantList>
 #include <atomic>
+#include <functional>
 
 class QFileInfo;
 class QFileSystemWatcher;
@@ -55,6 +56,24 @@ public:
     // to completion. Not a slot: a queued call would never be processed while
     // the worker thread is busy inside a long-running scan loop.
     void cancelScan() { m_cancelRequested.store(true, std::memory_order_relaxed); }
+
+    // ── Shared with GenreScanController (UC-36) ──────────────────────────
+    // So the genre discovery scan sees exactly the same files, in the same
+    // way, as a library scan -- one definition instead of two copies.
+    //
+    // Recursively lists every *.mp3/*.flac/*.opus file under dirPath. Pure
+    // filesystem listing, no tag reads. Stops early (returning what it has)
+    // once `cancel` is true. `onFolder` (optional) is called once per
+    // directory visited, before its entries are listed.
+    static QList<QFileInfo> listAudioFiles(const QString &dirPath, bool recursive,
+                                           const std::atomic<bool> &cancel,
+                                           const std::function<void(const QString &)> &onFolder = {});
+    // Files handed to QtConcurrent per batch -- small enough to keep
+    // cancellation and progress responsive, large enough to amortize dispatch.
+    static constexpr int kTagReadChunkSize = 200;
+    // Size of the tag-reading QThreadPool: min(idealThreadCount, 4). Bounded
+    // conservatively -- this is disk-I/O-bound work.
+    static int tagReadThreadCount();
 
 public slots:
     // Called once when the thread starts – creates watcher + debounce timer.
@@ -131,11 +150,10 @@ private:
                       QList<TrackInfo> existingCache,
                       const QString &scanOnlyFolderPath = QString());
 
-    // Recursively lists every *.mp3/*.flac/*.opus file under dirPath. Pure
-    // filesystem listing, no tag reads — stays sequential (fast compared to
-    // TagReader::read(), so parallelizing it wouldn't move the needle).
-    // Not const: emits scanningFolder() once per directory visited (Visual
-    // Folder Scanning, Setup > MISC).
+    // listAudioFiles() (above) with this scan's cancel flag, emitting
+    // scanningFolder() once per directory visited (Visual Folder Scanning,
+    // Setup > MISC). Stays sequential: listing is fast compared to
+    // TagReader::read(), so parallelizing it wouldn't move the needle.
     QList<QFileInfo> discoverAudioFiles(const QString &dirPath, bool recursive);
 
     // Reads tags (no cover) for every path in `paths` in parallel over `pool`,
