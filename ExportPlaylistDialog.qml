@@ -972,8 +972,11 @@ Popup {
         })
         const trim = (root.replayGainNormalization && root.appConfig)
                      ? root.appConfig.audiophileTrimDb : 0.0
+        // Stored "Always measure instead of using ReplayGain / R128 tag"
+        // (Setup > PLAYBACK) -- honoured like the stored Trim above.
+        const alwaysMeasure = root.appConfig ? root.appConfig.loudnessAlwaysMeasure : false
         root.exportController.startExport(tracks, root.destFolder, root.prefixText,
                                            root.replayGainNormalization, trim,
-                                           root.convertActive)
+                                           root.convertActive, alwaysMeasure)
     }
 }

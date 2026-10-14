@@ -1478,6 +1478,7 @@ what "configured" means — absent means that pane has never been positioned yet
 | `loudnessStrategy` / `setLoudnessStrategy(strategy)` | `"audiophile"` (default: per-track gain) or `"background"` (compressor); ignored for any other value; auto-saves; NOTIFY `loudnessSettingsChanged`. Set from `SetupDialog`'s PLAYBACK tab radios (UC-35). |
 | `audiophileTrimDb` / `setAudiophileTrimDb(db)` | Manual "Trim" for the Audiophile strategy (default `0.0`); clamped to `[-15, 15]`, snapped to the nearest `0.5`; auto-saves; NOTIFY `loudnessSettingsChanged`. Added on top of the automatic reference gain live — never written to `Topaz.volumeNormalization.json` (UC-35). |
 | `backgroundTrimDb` / `setBackgroundTrimDb(db)` | Manual "Trim" for the Consistent Background Music strategy (default `0.0`); same clamp/snap/NOTIFY as above. Added to the compressor's make-up gain live (UC-35). |
+| `loudnessAlwaysMeasure` / `setLoudnessAlwaysMeasure(on)` | "Always measure instead of using ReplayGain / R128 tag" (default `false`); auto-saves; NOTIFY `loudnessSettingsChanged`. Audiophile strategy skips the tag tier and tag-sourced cache entries; also honoured by UC-26's Replay Gain Normalization export (UC-35). |
 | `bassFxAvailable()` | `true` if `bass_fx.dll` (Linux: `libbass_fx.so`) is present next to the executable — needed by the "Consistent Background Music" strategy; never bundled, like the other BASS libraries (UC-35). |
 | `autoPlayQueueHorizon` / `setAutoPlayQueueHorizon(tracks)` | How many tracks the (still-unimplemented) AUTO PLAY feature should keep filled into `PlaybackQueue` as a lookahead (default `5`); clamped to `[1, 15]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Queue Horizon"); not yet consumed by any queue-filling logic (see UC-14). |
 | `autoPlayTitleAddingIntervalSeconds` / `setAutoPlayTitleAddingIntervalSeconds(seconds)` | Polling interval, in seconds, the (still-unimplemented) AUTO PLAY feature should use to add one new track at a time to the queue (default `30`); clamped to `[5, 90]`; auto-saves. Set from `SetupDialog`'s AUTO PLAY tab slider ("Title Adding"); not yet consumed by any poller (see UC-14). |
@@ -6066,7 +6067,10 @@ not re-read live during the run.
 is the cache → tag → measure fallback extracted out of the worker-thread-bound `process()` method
 into a pure, stateless static function, so `PlaylistExportWorker` (its own separate thread) can call
 it synchronously with zero duplicated logic — the two features can never disagree about what "the
-reference" for a file is. `VolumeNormalizationCache::load()` runs once at the start of the whole
+reference" for a file is. That includes UC-35's "Always measure instead of using ReplayGain /
+R128 tag" option: `tryExport()` passes the stored `appConfig.loudnessAlwaysMeasure` as
+`startExport(..., alwaysMeasure)` → `runExport()` → `determineReferenceGain(..., alwaysMeasure)`,
+regardless of whether Auto Loudness Correction is currently on. `VolumeNormalizationCache::load()` runs once at the start of the whole
 export (not per track); any newly discovered/measured entries are merged in and saved once at the
 end, so exporting also usefully warms the same cache normal playback reads from. A track with no
 determinable reference (decode failure, corrupt file) is still copied successfully, just left
@@ -7432,6 +7436,22 @@ in this order (the first that yields a value wins):
 The result is clamped to [−20, +10] dB, limited so the known peak × gain never exceeds 1.0
 (no clipping), rounded to 0.01 dB, **stored in the JSON** (source `"tag"` or `"measured"`,
 in memory, flushed debounced ~3 s / every 20 s of work / on shutdown) and then used.
+
+**"Always measure instead of using ReplayGain / R128 tag"** (toggle switch right under the
+Audiophile Trim slider; `AppConfig.loudnessAlwaysMeasure` / `setLoudnessAlwaysMeasure(on)`,
+persisted as `playback.loudnessAlwaysMeasure`, default `false`; interactive only while the
+checkbox is on and this strategy is selected, dimmed otherwise). When on, tier 2 is skipped and
+tier 1 also ignores entries whose `source` is `"tag"`, so every track ends up `"measured"` —
+for one consistent scale across a library whose tags may come from other taggers (ReplayGain
+1.0's older model, album gain stored as track gain, stale values after a re-encode). Topaz can't
+fix such tags (it never writes to source files), so this is the only way to bypass them. The
+flag travels with each `LoudnessAnalyzer::Request` (`alwaysMeasure`, captured on the GUI thread
+in `requestLoudness()`; a still-queued job is updated on re-request), so the worker never reads
+`AppConfig`. On a change, `applyLoudnessSettings()` clears `m_loudnessDb` and re-requests the
+queue, so the playing track is re-determined and ramps to the new value. Switching it **off**
+again does not restore tag values: existing `"measured"` entries win at tier 1 (deleting
+`Topaz.volumeNormalization.json` starts over). UC-26's Replay Gain Normalization export honours
+the *stored* flag too, even while the feature is off (same rule as the stored Trim).
 
 **When it runs.** `PlaybackEngine::requestLoudness()` is called for every track as it enters
 the queue (`addTrack`, `addTracks`, the queue-replacing crossfade of UC-23) — user, AUTO PLAY

@@ -36,6 +36,42 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
 - **Screenshots:** retake `setup-genres.png` (6-column grid, SCAN FOLDERS button); new
   `found-genres.png` (FOUND GENRES with the demo library, ideally mid-scan or with a selection).
 
+### Setup → PLAYBACK: "Always measure instead of using ReplayGain / R128 tag" (UC-35)
+> **IMPORTANT — describe this carefully.** Audiophile users will want to know exactly where
+> the level Topaz applies comes from. Write it in plain words (no developer terms), but
+> precisely; a small table or numbered list is fine.
+
+- **What changed:** a new toggle switch under **Auto Loudness Correction → Audiophile/Critical
+  Listening**, right below its Trim slider. Off by default.
+- **What the guide must explain:**
+  1. **How Topaz finds a track's level, option OFF (default)** — the first that applies wins:
+     a) a value Topaz worked out earlier and remembered (only while the file is unchanged);
+     b) otherwise a ReplayGain / R128 tag already in the file (track gain, not album gain);
+     c) otherwise Topaz measures the track itself (EBU R128 / ReplayGain 2.0 method, target
+        −18 LUFS) and remembers the result. Opus R128 tags are converted to that same target.
+  2. **What the option does, ON:** tags in the files are ignored; every track is measured by
+     Topaz itself. *Why you might want it:* tags written by other programs may use the older
+     ReplayGain 1.0 method, may hold album gain instead of track gain, or may be out of date after
+     a remaster/re-encode — so the levels across a library can be inconsistent. With the option on,
+     everything is on one consistent scale. Measuring is fast (a few tenths of a second per
+     track), but the first pass over a large library takes a while in the background. Your audio
+     files are never changed.
+  3. **When it has an effect:** only with the BASS Audio Library, Auto Loudness Correction on and
+     *Audiophile/Critical Listening* selected — greyed out otherwise. Trim is still added on top.
+  4. **Switching it ON:** values that came from tags are re-measured automatically; the playing
+     track adjusts smoothly within a moment. No need to delete anything.
+     **Switching it OFF again does not bring the tag values back:** tracks already measured keep
+     their measured value. To start over completely, delete `Topaz.volumeNormalization.json`
+     (in `%LOCALAPPDATA%\Topaz\` on Windows, `~/.config/Topaz/` on Linux) while Topaz is closed.
+  5. **Export:** the Export dialog's *Replay Gain Normalization* follows this setting as well —
+     even while Auto Loudness Correction is off. With the option on, an exported copy gets the
+     measured value (+ Trim), not the value from the original file's tag.
+- **Guide sections:** *Setup reference → PLAYBACK → Auto Loudness Correction* (main text, items
+  1–4; also mention in the Audiophile description that tags are used "unless Always measure is
+  on"); *Exporting a playlist → Replay Gain Normalization* (item 5, short, link back).
+- **Screenshots:** retake the PLAYBACK tab screenshot (Auto Loudness Correction on, Audiophile
+  selected, the new toggle visible).
+
 ### Release housekeeping
 - Title page "Version 1.0.0" and the text "Topaz 1.0.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.

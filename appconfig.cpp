@@ -329,6 +329,14 @@ void AppConfig::setBackgroundTrimDb(double db)
     save();
 }
 
+void AppConfig::setLoudnessAlwaysMeasure(bool on)
+{
+    if (m_loudnessAlwaysMeasure == on) return;
+    m_loudnessAlwaysMeasure = on;
+    emit loudnessSettingsChanged();
+    save();
+}
+
 bool AppConfig::bassFxAvailable() const
 {
     const QString dir = QCoreApplication::applicationDirPath();
@@ -793,6 +801,7 @@ void AppConfig::applyJson(const QJsonObject &root)
                                                                     : QStringLiteral("audiophile");
     m_audiophileTrimDb = qBound(-15.0, playback[QStringLiteral("audiophileTrimDb")].toDouble(0.0), 15.0);
     m_backgroundTrimDb = qBound(-15.0, playback[QStringLiteral("backgroundTrimDb")].toDouble(0.0), 15.0);
+    m_loudnessAlwaysMeasure = playback[QStringLiteral("loudnessAlwaysMeasure")].toBool(false);
 
     const QJsonObject autoPlay = root[QStringLiteral("autoPlay")].toObject();
     m_autoPlayQueueHorizon   = autoPlay[QStringLiteral("queueHorizon")].toInt(5);
@@ -983,6 +992,7 @@ void AppConfig::save()
     playback[QStringLiteral("loudnessStrategy")]       = m_loudnessStrategy;
     playback[QStringLiteral("audiophileTrimDb")]       = m_audiophileTrimDb;
     playback[QStringLiteral("backgroundTrimDb")]       = m_backgroundTrimDb;
+    playback[QStringLiteral("loudnessAlwaysMeasure")]  = m_loudnessAlwaysMeasure;
     root[QStringLiteral("playback")] = playback;
 
     QJsonObject autoPlay;

@@ -448,6 +448,9 @@ private:
     // switching it off have anything to undo (keeps a never-used feature
     // completely inert -- no deck calls at all).
     bool               m_loudnessWasActive = false;
+    // Last seen AppConfig::loudnessAlwaysMeasure: a change drops m_loudnessDb
+    // so the queue's references are determined again (applyLoudnessSettings).
+    bool               m_loudnessAlwaysMeasure = false;
     LoudnessAnalyzer  *m_loudness      = nullptr;
     QHash<QString, double> m_loudnessDb;
     QString            m_deckPath[2];

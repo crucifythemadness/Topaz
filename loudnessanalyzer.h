@@ -75,7 +75,9 @@ private:
 // request() (non-blocking) and receives loudnessReady() (queued). For each
 // requested track the worker determines the static gain in this order:
 //   1. Topaz.volumeNormalization.json (valid only while the file size matches)
-//   2. a ReplayGain / R128 tag in the file (TagReader::readReplayGain)
+//   2. a ReplayGain / R128 tag in the file (TagReader::readReplayGain) --
+//      skipped, together with tag-sourced cache entries, when the request's
+//      alwaysMeasure is set (AppConfig::loudnessAlwaysMeasure)
 //   3. an own measurement: one BASS *decode* pass over the file, K-weighted
 //      gated loudness, gain = -18 LUFS - loudness.
 // A new result is stored in the JSON (in memory, flushed debounced) and then
@@ -101,6 +103,7 @@ public:
         QUuid   id;          // TrackInfo::computeNormalizationId()
         QString genre;       // stored for readability only
         qint64  fileSize = 0;
+        bool    alwaysMeasure = false;   // AppConfig::loudnessAlwaysMeasure, captured on the GUI thread
     };
 
     // ReplayGain 2.0 reference level.
@@ -150,11 +153,13 @@ public:
     // is read-only here -- the caller decides whether/when to persist a
     // freshly-measured entry (see storeEntry()/VolumeNormalizationCache::save()).
     // shouldContinue defaults to always-continue (the export use case has no
-    // preemption concept, unlike the worker's urgent-queue).
+    // preemption concept, unlike the worker's urgent-queue). alwaysMeasure
+    // (Setup "Always measure instead of using ReplayGain / R128 tag") skips
+    // tier 2 and also ignores cached entries whose source is "tag".
     static ReferenceResult determineReferenceGain(
         const QString &filePath, const QUuid &id, qint64 fileSize,
         const QHash<QUuid, VolumeNormalizationCache::Entry> &cache,
-        const ContinueFn &shouldContinue = {});
+        const ContinueFn &shouldContinue = {}, bool alwaysMeasure = false);
 
 signals:
     // Emitted from the worker thread (queued to receivers on the GUI thread).

@@ -80,12 +80,13 @@ public:
 
     // tracks: [{filePath, title, albumArtist, artist, album, durationMs}, ...]
     // in queue order (see PlaybackEngine::trackList()). No-op if an export is
-    // already running. replayGainNormalization/audiophileTrimDb/convertToMp3:
-    // see PlaylistExportWorker::runExport()'s doc comment (UC-26) -- all
-    // captured once here, at click time, not live-bound.
+    // already running. replayGainNormalization/audiophileTrimDb/convertToMp3/
+    // alwaysMeasure: see PlaylistExportWorker::runExport()'s doc comment
+    // (UC-26) -- all captured once here, at click time, not live-bound.
     Q_INVOKABLE void startExport(const QVariantList &tracks, const QString &destFolder,
                                   const QString &prefix, bool replayGainNormalization = false,
-                                  double audiophileTrimDb = 0.0, bool convertToMp3 = false);
+                                  double audiophileTrimDb = 0.0, bool convertToMp3 = false,
+                                  bool alwaysMeasure = false);
 
     // Cooperative cancel -- see PlaylistExportWorker::cancelExport().
     Q_INVOKABLE void cancelExport();
@@ -103,7 +104,7 @@ signals:
     // Commands → worker thread (queued so they execute on the worker's event loop).
     void _requestExport(QVariantList tracks, QString destFolder, QString prefix,
                          bool replayGainNormalization, double audiophileTrimDb,
-                         bool convertToMp3);
+                         bool convertToMp3, bool alwaysMeasure);
 
 private slots:
     void onWorkerProgress(int done, int total, const QString &currentFileName,

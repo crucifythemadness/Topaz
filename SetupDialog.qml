@@ -1486,7 +1486,7 @@ Popup {
                                             cursorShape: loudnessBlock.correctionOn ? Qt.PointingHandCursor : Qt.ArrowCursor
                                             ToolTip.visible: containsMouse
                                             ToolTip.delay:   600
-                                            ToolTip.text:    "Sets each track to the same level: uses a ReplayGain tag when the file has one, otherwise measures the track once and remembers the result.\n" +
+                                            ToolTip.text:    "Sets each track to the same level: uses a ReplayGain tag when the file has one (unless \"Always measure\" is on), otherwise measures the track once and remembers the result.\n" +
                                                              "K-weighted gated loudness (EBU R128 / ReplayGain 2.0 method, reference target -18 LUFS)"
                                             onClicked: {
                                                 if (!root.appConfig || audiophileStrategyBlock.selected) return
@@ -1600,6 +1600,68 @@ Popup {
                                                 font.family:    Theme.fontFamilyMono
                                                 font.pixelSize: Theme.labelSm
                                                 color: Theme.fgSurfaceVariant
+                                            }
+                                        }
+                                    }
+
+                                    // Always measure: skips the ReplayGain / R128 tag tier
+                                    // (LoudnessAnalyzer::determineReferenceGain). Toggle switch
+                                    // copied from the Crossfade one below. Also honoured by the
+                                    // Export's Replay Gain Normalization (stored value).
+                                    RowLayout {
+                                        id: alwaysMeasureRow
+                                        Layout.leftMargin: 28
+                                        Layout.fillWidth: true
+                                        spacing: 12
+                                        opacity: audiophileStrategyBlock.selected ? 1.0 : 0.35
+
+                                        readonly property bool usable:
+                                            loudnessBlock.correctionOn && audiophileStrategyBlock.selected
+                                        readonly property bool alwaysMeasureOn:
+                                            root.appConfig !== null && root.appConfig.loudnessAlwaysMeasure
+
+                                        Text {
+                                            text: "Always measure instead of using ReplayGain / R128 tag"
+                                            font.family:    Theme.fontFamilyBody
+                                            font.pixelSize: Theme.titleMd
+                                            font.weight:    Font.Medium
+                                            color: Theme.fgSurface
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                ToolTip.visible: containsMouse
+                                                ToolTip.delay:   600
+                                                ToolTip.text:    qsTr("Ignores ReplayGain / R128 tags in your files and measures every track itself, for one consistent level across the whole library. Your audio files are never changed.")
+                                            }
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Rectangle {
+                                            id: alwaysMeasureTrack
+                                            width: 48; height: 24
+                                            radius: 12
+                                            color: alwaysMeasureRow.alwaysMeasureOn ? Theme.secondary : Theme.outlineVariant
+
+                                            Rectangle {
+                                                width: 18; height: 18
+                                                radius: 9
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                x: alwaysMeasureRow.alwaysMeasureOn ? 27 : 3
+                                                color: Theme.fgSurface
+                                                Behavior on x { NumberAnimation { duration: 120 } }
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                enabled: alwaysMeasureRow.usable
+                                                cursorShape: alwaysMeasureRow.usable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                                onClicked: {
+                                                    if (root.appConfig)
+                                                        root.appConfig.setLoudnessAlwaysMeasure(
+                                                            !root.appConfig.loudnessAlwaysMeasure)
+                                                }
                                             }
                                         }
                                     }
@@ -1830,9 +1892,13 @@ Popup {
                     }
 
                     // ── Length row ─────────────────────────────────────
+                    // Negative top margin pulls it up from the panel's 40 px
+                    // section spacing to 16 px, so it reads as belonging to the
+                    // Crossfade switch above.
                     ColumnLayout {
                         Layout.fillWidth: true
                         Layout.leftMargin: 24
+                        Layout.topMargin: -24
                         spacing: 8
                         opacity: parent.crossfadeOn ? 1.0 : 0.35
 

@@ -26,7 +26,7 @@ QString PlaylistExportWorker::sanitizeForFilename(const QString &name)
 
 void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QString prefix,
                                       bool replayGainNormalization, double audiophileTrimDb,
-                                      bool convertToMp3)
+                                      bool convertToMp3, bool alwaysMeasure)
 {
     m_cancelRequested.store(false, std::memory_order_relaxed);
 
@@ -118,7 +118,8 @@ void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QS
             const QUuid id = TrackInfo::computeNormalizationId(albumArtist, artist, album, title);
             const qint64 fileSize = QFileInfo(sourcePath).size();
             const LoudnessAnalyzer::ReferenceResult ref =
-                LoudnessAnalyzer::determineReferenceGain(sourcePath, id, fileSize, normCache);
+                LoudnessAnalyzer::determineReferenceGain(sourcePath, id, fileSize, normCache,
+                                                         {}, alwaysMeasure);
             if (ref.ok) {
                 const double finalGainDb = ref.gainDb + audiophileTrimDb;
                 tagged = TagWriter::writeReplayGain(trackDestPath, finalGainDb, ref.peak);

@@ -183,7 +183,8 @@ bool PlaylistExportController::ffmpegAvailable() const
 
 void PlaylistExportController::startExport(const QVariantList &tracks, const QString &destFolder,
                                             const QString &prefix, bool replayGainNormalization,
-                                            double audiophileTrimDb, bool convertToMp3)
+                                            double audiophileTrimDb, bool convertToMp3,
+                                            bool alwaysMeasure)
 {
     if (m_exporting) return;
 
@@ -195,7 +196,7 @@ void PlaylistExportController::startExport(const QVariantList &tracks, const QSt
     emit currentFileNameChanged();
 
     emit _requestExport(tracks, destFolder, prefix, replayGainNormalization, audiophileTrimDb,
-                         convertToMp3);
+                         convertToMp3, alwaysMeasure);
 }
 
 void PlaylistExportController::cancelExport()

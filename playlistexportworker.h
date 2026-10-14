@@ -52,9 +52,12 @@ public slots:
     // determined is still copied successfully, just left untagged. Any newly
     // discovered/measured entries are merged back into
     // Topaz.volumeNormalization.json once, at the end of the whole export.
+    // alwaysMeasure (AppConfig::loudnessAlwaysMeasure, the stored value even
+    // while Auto Loudness Correction is off): skips the existing-tag tier and
+    // tag-sourced cache entries, same as playback.
     void runExport(QVariantList tracks, QString destFolder, QString prefix,
                     bool replayGainNormalization, double audiophileTrimDb,
-                    bool convertToMp3);
+                    bool convertToMp3, bool alwaysMeasure);
 
 signals:
     // fraction: 0..1 share of the CURRENT file already done (only a conversion

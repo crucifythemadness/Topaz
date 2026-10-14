@@ -35,7 +35,8 @@ class QJsonObject;
 //                   "audioBackend": "ffmpeg",
 //                   "autoLoudnessCorrection": false,
 //                   "loudnessStrategy": "audiophile",
-//                   "audiophileTrimDb": 0.0, "backgroundTrimDb": 0.0 },
+//                   "audiophileTrimDb": 0.0, "backgroundTrimDb": 0.0,
+//                   "loudnessAlwaysMeasure": false },
 //                  // autoLoudnessCorrection/loudnessStrategy: Setup > PLAYBACK,
 //                  // BASS only (UC-35). Strategy is "audiophile" (per-track gain)
 //                  // or "background" (compressor); anything else reads as
@@ -43,6 +44,8 @@ class QJsonObject;
 //                  // on top of the automatic one, [-15, 15], 0.5 dB steps,
 //                  // default 0 -- never written to Topaz.volumeNormalization.json,
 //                  // only ever applied live (PlaybackEngine).
+//                  // loudnessAlwaysMeasure: "audiophile" ignores ReplayGain /
+//                  // R128 tags and always measures (default false).
 //                  // Object/key names match the PLAYBACK tab and the
 //                  // crossfadeEnabled/crossfadeSeconds Q_PROPERTYs exactly. Used
 //                  // to be called "crossfade"/"enabled"/"seconds" -- kept that way
@@ -164,6 +167,9 @@ class AppConfig : public QObject
     // of the automatic one. Never written to Topaz.volumeNormalization.json.
     Q_PROPERTY(double  audiophileTrimDb READ audiophileTrimDb NOTIFY loudnessSettingsChanged)
     Q_PROPERTY(double  backgroundTrimDb READ backgroundTrimDb NOTIFY loudnessSettingsChanged)
+    // Audiophile strategy: skip the ReplayGain / R128 tag tier and always
+    // measure (also honoured by the Export's Replay Gain Normalization, UC-26).
+    Q_PROPERTY(bool    loudnessAlwaysMeasure READ loudnessAlwaysMeasure NOTIFY loudnessSettingsChanged)
 
     // ── AUTO PLAY settings ────────────────────────────────────────────────
     Q_PROPERTY(int  autoPlayQueueHorizon             READ autoPlayQueueHorizon             NOTIFY autoPlayQueueHorizonChanged)
@@ -268,6 +274,7 @@ public:
     QString loudnessStrategy()       const { return m_loudnessStrategy;       }
     double  audiophileTrimDb() const { return m_audiophileTrimDb; }
     double  backgroundTrimDb() const { return m_backgroundTrimDb; }
+    bool    loudnessAlwaysMeasure() const { return m_loudnessAlwaysMeasure; }
 
     int  autoPlayQueueHorizon()            const { return m_autoPlayQueueHorizon;            }
     int  autoPlayTitleAddingIntervalSeconds() const { return m_autoPlayTitleAddingIntervalSeconds; }
@@ -413,6 +420,7 @@ public:
     // setCrossfadeSeconds()'s convention.
     Q_INVOKABLE void setAudiophileTrimDb(double db);
     Q_INVOKABLE void setBackgroundTrimDb(double db);
+    Q_INVOKABLE void setLoudnessAlwaysMeasure(bool on);
 
     // ── AUTO PLAY operations ─────────────────────────────────────────────
     // Clamped to [1, 15].
@@ -583,6 +591,7 @@ private:
     QString m_loudnessStrategy = QStringLiteral("audiophile");
     double  m_audiophileTrimDb = 0.0;
     double  m_backgroundTrimDb = 0.0;
+    bool    m_loudnessAlwaysMeasure = false;
 
     int  m_autoPlayQueueHorizon             = 5;
     int  m_autoPlayTitleAddingIntervalSeconds = 30;

@@ -151,6 +151,11 @@ void LoudnessAnalyzer::request(const Request &r, bool urgent)
 
     QMutexLocker l(&m_mutex);
     if (m_queued.contains(r.id)) {
+        // A still-waiting job takes over the latest "always measure" setting
+        // (it may have been toggled since the job was queued).
+        for (auto *q : { &m_urgentQueue, &m_normalQueue })
+            for (Job &j : *q)
+                if (j.r.id == r.id) j.r.alwaysMeasure = r.alwaysMeasure;
         if (urgent) {
             // Promote an already-queued normal job (an in-flight one is
             // already being worked on; nothing to do for it).
@@ -277,7 +282,7 @@ void LoudnessAnalyzer::process(const Job &job)
             // (its progress is discarded; it goes back to the queue).
             if (!job.urgent && hasUrgentPending()) return false;
             return true;
-        });
+        }, r.alwaysMeasure);
 
     if (result.aborted) {
         // fall through: neither stored nor emitted, requeued below.
@@ -301,13 +306,16 @@ void LoudnessAnalyzer::process(const Job &job)
 LoudnessAnalyzer::ReferenceResult LoudnessAnalyzer::determineReferenceGain(
     const QString &filePath, const QUuid &id, qint64 fileSize,
     const QHash<QUuid, VolumeNormalizationCache::Entry> &cache,
-    const ContinueFn &shouldContinue)
+    const ContinueFn &shouldContinue, bool alwaysMeasure)
 {
     ReferenceResult result;
 
-    // 1. Cached value -- valid only for the same file (size).
+    // 1. Cached value -- valid only for the same file (size). With
+    // alwaysMeasure, a value that came from a tag is ignored too, so it gets
+    // re-measured (and overwritten as "measured") without deleting the JSON.
     const auto it = cache.constFind(id);
-    if (it != cache.constEnd() && it->fileSize == fileSize) {
+    if (it != cache.constEnd() && it->fileSize == fileSize
+        && !(alwaysMeasure && it->source == QStringLiteral("tag"))) {
         result.ok     = true;
         result.gainDb = it->dB;
         result.peak   = it->peak;
@@ -315,8 +323,9 @@ LoudnessAnalyzer::ReferenceResult LoudnessAnalyzer::determineReferenceGain(
         return result;
     }
 
-    // 2. ReplayGain / R128 tag.
-    const TagReader::ReplayGain rg = TagReader::readReplayGain(filePath);
+    // 2. ReplayGain / R128 tag -- skipped entirely with alwaysMeasure.
+    const TagReader::ReplayGain rg = alwaysMeasure ? TagReader::ReplayGain{}
+                                                   : TagReader::readReplayGain(filePath);
     if (rg.valid) {
         result.ok     = true;
         result.gainDb = limitGain(rg.trackGainDb, rg.trackPeak);

@@ -972,6 +972,7 @@ void PlaybackEngine::requestLoudness(const TrackInfo &t, bool urgent)
     // fileSize stays 0: the worker stats the file itself, so a big playlist
     // load never does filesystem I/O (possibly on a slow volume) on this thread.
     r.id = TrackInfo::computeNormalizationId(t.albumArtist, t.artist, t.album, t.title);
+    r.alwaysMeasure = m_appConfig && m_appConfig->loudnessAlwaysMeasure();
     m_loudness->request(r, urgent);
 }
 
@@ -1015,6 +1016,15 @@ void PlaybackEngine::applyLoudnessSettings()
     const bool audiophile = loudnessAudiophile();
     if (!background && !audiophile && !m_loudnessWasActive) return;   // never used: nothing to undo
     if (background || audiophile) m_loudnessWasActive = true;
+
+    // "Always measure" toggled: the known references may have come from a
+    // tag, so forget them; the decks keep their current gain until the
+    // re-request below delivers the new value (one smooth ramp).
+    const bool alwaysMeasure = m_appConfig && m_appConfig->loudnessAlwaysMeasure();
+    if (alwaysMeasure != m_loudnessAlwaysMeasure) {
+        m_loudnessAlwaysMeasure = alwaysMeasure;
+        m_loudnessDb.clear();
+    }
 
     const float backgroundTrim = m_appConfig ? float(m_appConfig->backgroundTrimDb()) : 0.0f;
 
