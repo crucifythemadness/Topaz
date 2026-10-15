@@ -175,7 +175,12 @@ void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QS
     QString m3uFileName;
     bool    m3uOk = false;
     if (createM3u && !cancelled) {
-        QString base = sanitizeForFilename(playlistName);
+        // NowPlaying passes the playlist's FILE name ("Road Trip.xml") -- drop
+        // the extension, or the result would be "Road Trip.xml.m3u".
+        QString name = playlistName;
+        if (name.endsWith(QStringLiteral(".xml"), Qt::CaseInsensitive))
+            name.chop(4);
+        QString base = sanitizeForFilename(name);
         if (base.isEmpty()) base = QStringLiteral("Topaz Playlist");
         m3uFileName = base + QStringLiteral(".m3u");
         m3uOk = writeM3u(destDir.filePath(m3uFileName), m3uLines);

@@ -2317,6 +2317,7 @@ the AUTO PLAY gating, are unchanged.
 | Artist | `engine.currentArtist` (artist with fallback to albumArtist) |
 | Format badge | `engine.currentFormat` + `engine.currentBitrate` KBPS |
 | Rating (stars) | `engine.currentRating` (0-10); set by clicking a star, calls `engine.setCurrentRating(n)`. Same row as the format badge — stars right-aligned, format badge left-aligned (see UC-14). Hidden entirely when no track is loaded (`NO TRACK` state). Filled stars use a hardcoded blue (`#00A6ED`) — a deliberate, one-off exception to the theme palette, not a `Theme.*` token. |
+| Badge / rating row layout (1.1.0) | `badgeStarsRow.starsInline`: the trash bin + 10 stars stay right-aligned on the format-badge line when `formatBadge + loudness badge + 16 + trash bin + 12 + stars` fits the row width; otherwise they move to a second line below the badge, **left aligned** (trash bin at x 0, stars after it) and the row grows from 26 to 64 px. Decided by available space, not screen resolution (user decision), because the badges' width varies (VBR/CBR prefix, loudness badge) and NowPlaying is resizable; at the default 359 px with loudness on, they used to cover ~4 stars. Stars/trash bin are positioned with `x`/`y` bindings, not anchors. |
 | Delete rating (trash-bin) | Rendered immediately left of the star row whenever a track is loaded. Active only with a rating and Setup → MISC "Modify the Rating …" on (`AppConfig.modifyCurrentRatingEnabled`, default on); off = stars and trash bin visible but disabled (stars still show the rating). Calls `engine.deleteCurrentRating()` after a "DELETE RATING" confirmation. See UC-29. |
 | Elapsed time | `engine.positionString` ("M:SS") |
 | Total time | `engine.durationString` ("M:SS") |
@@ -6194,7 +6195,9 @@ destination folder, so one export serves both kinds.
 - **Name:** `ExportPlaylistDialog.playlistName`, set by the opener next to `tracks`:
   `engine.activePlaylistName` from NowPlaying's EXPORT (only active with an active playlist), or
   `playlistsData.selectedDisplayName` from PlaylistViewer's. It is sanitized with the same
-  `sanitizeForFilename()` as the track names; empty → `Topaz Playlist.m3u`. An existing file of that
+  `sanitizeForFilename()` as the track names, after dropping a trailing `.xml` (NowPlaying passes
+  the playlist *file* name — without this the file was `Road Trip.xml.m3u`, found while shooting the
+  1.1.0 guide); empty → `Topaz Playlist.m3u`. An existing file of that
   name is overwritten, like the track copies.
 - **Content** (`PlaylistExportWorker::runExport()`, after the track loop): `#EXTM3U`, then per
   *successfully* exported track, in order, `#EXTINF:<seconds>,<artist> - <title>` (`-1` if the
@@ -6207,7 +6210,9 @@ destination folder, so one export serves both kinds.
   `finished(results, m3uFileName, m3uOk)` feeds the controller properties `m3uFileName` / `m3uOk`
   (NOTIFY `m3uResultChanged`, set before `exportFinished()`), so the per-track `results` list and
   its counts stay unchanged. The results screen adds "M3U playlist created: <name>.m3u", or an
-  error line.
+  error line. The results `ColumnLayout` ends with a `Layout.fillHeight` spacer that is visible only
+  while the failure list is hidden, so the summary lines stay stacked at the top (without it, the
+  layout spread the spare height and the M3U line floated far below "Export complete").
 
 ### Convert to MP3 — re-encoding non-MP3 tracks in the exported copies
 

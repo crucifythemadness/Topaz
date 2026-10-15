@@ -408,9 +408,21 @@ Rectangle {
                 Item { width: 1; height: 12 }   // replaces the row's old height-based +12 gap
 
                 // Format/bitrate badge (left) + rating stars (right) — same row
+                // when everything fits; otherwise the trash bin + stars move to
+                // a second line below the badge, left aligned. Decided by the
+                // space actually available (NowPlaying width, badge widths --
+                // the "CBR"/"VBR" prefix and the loudness badge make them
+                // vary), not by screen resolution, so they can never overlap.
                 Item {
+                    id: badgeStarsRow
                     width:  parent.width - 32
-                    height: 26
+                    height: starsInline ? 26 : 26 + 6 + 32
+
+                    readonly property real badgesWidth:
+                        (formatBadge.visible ? formatBadge.width : 0)
+                        + (loudnessBadge.visible ? 8 + loudnessBadge.width : 0)
+                    readonly property bool starsInline:
+                        badgesWidth + 16 + deleteRatingBtn.width + 12 + ratingStarsRow.width <= width
 
                     // Star rating — click star N to set the rating to N (1-10).
                     // Persists immediately to Topaz.rating.json; refreshed whenever
@@ -421,7 +433,10 @@ Rectangle {
                     // below is dimmed).
                     Row {
                         id: ratingStarsRow
-                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                        x: badgeStarsRow.starsInline ? parent.width - width
+                                                     : deleteRatingBtn.width + 12
+                        y: badgeStarsRow.starsInline ? (26 - height) / 2
+                                                     : 26 + 6 + (32 - height) / 2
                         spacing: 3
                         // Only show a rating to give when a track is actually loaded.
                         visible: root.engine && root.engine.currentTitle.length > 0
@@ -472,10 +487,10 @@ Rectangle {
                         // with no current track loaded (app startup, empty
                         // queue).
                         visible: ratingStarsRow.visible
-                        anchors {
-                            right: ratingStarsRow.left; rightMargin: 12
-                            verticalCenter: parent.verticalCenter
-                        }
+                        // 12 px left of the stars, centred on the stars' line
+                        // (inline: the 26 px badge line; wrapped: the second line).
+                        x: ratingStarsRow.x - 12 - width
+                        y: badgeStarsRow.starsInline ? (26 - height) / 2 : 26 + 6
                         width: 32; height: 32
                         radius: Theme.radiusFull
 
@@ -511,7 +526,7 @@ Rectangle {
                     // Format badge
                     Rectangle {
                         id: formatBadge
-                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                        anchors { left: parent.left; top: parent.top }
                         height: 26
                         width:  contentRow.implicitWidth + 8   // 4px padding each side
                         radius: Theme.radiusFull
@@ -558,8 +573,9 @@ Rectangle {
                     // badge, same style as PlaylistsPanel.qml's "IN QUEUE" badge
                     // (including its literal #FF1744 @ ~35% opacity color).
                     Rectangle {
+                        id: loudnessBadge
                         visible: root.engine && root.engine.currentLoudnessText.length > 0
-                        anchors { left: formatBadge.right; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                        anchors { left: formatBadge.right; leftMargin: 8; verticalCenter: formatBadge.verticalCenter }
                         height: 20
                         width:  loudnessLabel.implicitWidth + 16
                         radius: Theme.radiusFull

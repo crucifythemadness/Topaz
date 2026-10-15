@@ -867,6 +867,7 @@ Popup {
                 }
 
                 ScrollView {
+                    id: failedTracksView
                     Layout.fillWidth:  true
                     Layout.fillHeight: true
                     clip: true
@@ -901,6 +902,14 @@ Popup {
                             }
                         }
                     }
+                }
+
+                // Takes the spare height while there is no failure list, so
+                // the summary lines above stay together at the top instead of
+                // being spread over the whole dialog.
+                Item {
+                    Layout.fillHeight: true
+                    visible: !failedTracksView.visible
                 }
             }
         }

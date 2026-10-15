@@ -769,7 +769,12 @@ Popup {
                             width: 150; height: 32
                             radius: Theme.radiusSm
                             opacity: canScan ? 1.0 : 0.35
-                            color: scanGHover.containsMouse && canScan
+                            // Own hover flag instead of containsMouse: that one
+                            // stays true after the modal FOUND GENRES closes
+                            // (stuck-hover gotcha); foundGenresDialog.onClosed
+                            // resets this.
+                            property bool hovered: false
+                            color: hovered && canScan
                                    ? Theme.primaryContainer : Theme.surfaceContainerHigh
 
                             Text {
@@ -779,15 +784,17 @@ Popup {
                                 font.pixelSize:     Theme.labelSm
                                 font.weight:        Font.Bold
                                 font.letterSpacing: Theme.lsWide
-                                color: scanGHover.containsMouse && scanGenresBtn.canScan
+                                color: scanGenresBtn.hovered && scanGenresBtn.canScan
                                        ? Theme.fgPrimaryContainer : Theme.primary
                             }
                             MouseArea {
                                 id: scanGHover
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                onEntered: scanGenresBtn.hovered = true
+                                onExited:  scanGenresBtn.hovered = false
                                 cursorShape: scanGenresBtn.canScan ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                ToolTip.visible: containsMouse
+                                ToolTip.visible: scanGenresBtn.hovered
                                 ToolTip.delay:   600
                                 ToolTip.text: scanGenresBtn.canScan
                                     ? qsTr("Find all genres tagged in your music folders and pick the ones to add")
@@ -880,6 +887,9 @@ Popup {
                     appConfig:      root.appConfig
                     scanController: root.genreScanController
                     onGenresAdded:  root._genresDiscovered = true
+                    // containsMouse freezes true after a modal popup closes
+                    // (stuck-hover gotcha) -- clear SCAN FOLDERS' own flag.
+                    onClosed:       scanGenresBtn.hovered = false
                 }
             } // end GENRES panel
 
