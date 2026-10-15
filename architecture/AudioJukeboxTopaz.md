@@ -1418,6 +1418,9 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     "libraryTreeWidth":   286,
     "playbackQueueWidth": 374,
     "nowPlayingWidth":    359,
+    "fullscreenLibraryTreeWidth":   0,
+    "fullscreenPlaybackQueueWidth": 0,
+    "fullscreenNowPlayingWidth":    0,
     "playback": {
         "crossfadeEnabled": false,
         "crossfadeSeconds": 5.0,
@@ -1488,7 +1491,8 @@ what "configured" means — absent means that pane has never been positioned yet
 | `clearFolders()` | Remove all folders; auto-saves. |
 | `setFolderSubfolders(index, flag)` | Toggle the includeSubfolders flag; auto-saves. |
 | `setFolderActive(index, flag)` | Toggle whether this folder is scanned at all (default `true`); auto-saves. Takes effect on the next scan, not immediately — see UC-04/UC-05. |
-| `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. |
+| `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth, fullscreen = false)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. `fullscreen` selects the panel-width set written: windowed (`libraryTreeWidth`/`playbackQueueWidth`/`nowPlayingWidth`) or full screen (below). |
+| `fullscreenLibraryTreeWidth` / `fullscreenPlaybackQueueWidth` / `fullscreenNowPlayingWidth` | Full-screen mode's own panel widths (1.1.0), default `0` = not set yet; NOTIFY `panelWidthsChanged`. Written by `saveLayout(..., true)`, applied by `Main.qml`'s `applyPanelWidths()` — see "Layout persistence". |
 | `windowX` / `windowY` / `windowScreenName` / `windowPositionConfigured` / `saveWindowPosition(x, y, screenName)` | Persist the main window's last windowed (non-fullscreen) position and which monitor it was on; same debounce timer and calling convention as `saveLayout` above (called alongside it). `windowPositionConfigured` distinguishes "never positioned yet" (fresh config) from "restore to this position", same convention as `bigCoverPaneConfigured` below. `windowScreenName` is also consulted on startup to pick which monitor `Window.FullScreen` lands on — see UC-28. |
 | `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s PLAYBACK tab toggle (see UC-15). |
 | `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 12.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s PLAYBACK tab slider. |
@@ -1728,6 +1732,21 @@ overwritten (fullscreen collapses `x`/`y` to the screen origin and `width`/
 `height` to the screen resolution, which must not clobber the last windowed
 geometry) — `windowScreenName` is the one exception, refreshed regardless of
 fullscreen state, since monitor identity is meaningful in both modes.
+
+**Panel widths per mode (1.1.0).** Windowed and full-screen mode each keep their own three panel
+widths: windowed in `libraryTreeWidth`/`playbackQueueWidth`/`nowPlayingWidth` (the pre-1.1.0 keys,
+so no migration), full screen in `fullscreenLibraryTreeWidth`/`fullscreenPlaybackQueueWidth`/
+`fullscreenNowPlayingWidth` (`0` = not set yet). Before, both modes shared one set, so the last
+adjustment won for both, and F11 only resized AlbumBrowser. `Main.qml` tracks
+`layoutFullscreen` (the mode whose widths are applied); `onVisibilityChanged` acts only on a real
+windowed ↔ full-screen flip (ignoring `Hidden`/`Minimized`; `Maximized` counts as windowed). That
+includes the start-up show, and on it `applyPanelWidths(full)` assigns the stored set to each
+panel's `SplitView.preferredWidth` **imperatively**, since a splitter drag writes
+`preferredWidth` itself and severs the declarative `appConfig.*Width` bindings (which remain only
+as the windowed start-up values). A full-screen width of `0` keeps the current width, so the
+first full-screen use behaves exactly as before 1.1.0. `saveLayoutTimer` passes
+`root.layoutFullscreen` (not `visibility`, so a minimised full-screen window still saves to its
+own set) as `saveLayout()`'s `fullscreen` argument.
 Nothing is persisted at all until `settleTimer` (~1.2 s after the window is
 shown) has fired (`Main.layoutSettled`), so transient startup geometry — a DPI
 re-scale, a `SplitView` squeeze — can never overwrite what the user configured.

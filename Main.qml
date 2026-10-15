@@ -38,6 +38,34 @@ ApplicationWindow {
     // the user configured.
     property bool layoutSettled: false
 
+    // Windowed and full-screen mode each keep their own panel widths
+    // (AppConfig libraryTreeWidth/... vs. fullscreenLibraryTreeWidth/...).
+    // layoutFullscreen = the mode whose widths are currently applied; only a
+    // real windowed <-> full-screen flip switches the set (Hidden/Minimized/
+    // Maximized don't count), which also covers the start-up show.
+    property bool layoutFullscreen: false
+    onVisibilityChanged: {
+        if (root.visibility === Window.Hidden || root.visibility === Window.Minimized)
+            return
+        const full = (root.visibility === Window.FullScreen)
+        if (full === root.layoutFullscreen) return
+        root.layoutFullscreen = full
+        root.applyPanelWidths(full)
+    }
+
+    // Assigned imperatively: a splitter drag writes SplitView.preferredWidth
+    // itself, so the declarative bindings below stop tracking appConfig after
+    // the first drag. A full-screen width of 0 (never set) keeps the current
+    // width -- the first full-screen use behaves exactly as before.
+    function applyPanelWidths(full) {
+        const lib   = full ? appConfig.fullscreenLibraryTreeWidth   : appConfig.libraryTreeWidth
+        const queue = full ? appConfig.fullscreenPlaybackQueueWidth : appConfig.playbackQueueWidth
+        const np    = full ? appConfig.fullscreenNowPlayingWidth    : appConfig.nowPlayingWidth
+        if (lib   > 0) libraryTreePanel.SplitView.preferredWidth   = lib
+        if (queue > 0) playbackQueuePanel.SplitView.preferredWidth = queue
+        if (np    > 0) nowPlayingPanel.SplitView.preferredWidth    = np
+    }
+
     // F11 toggles between fullscreen and windowed.
     Shortcut {
         sequence: "F11"
@@ -700,10 +728,14 @@ ApplicationWindow {
                          ? root.width  : appConfig.windowWidth
             const winH = (root.visibility !== Window.FullScreen)
                          ? root.height : appConfig.windowHeight
+            // Panel widths go into the set of the applied mode (see
+            // applyPanelWidths()) -- layoutFullscreen, not visibility, so a
+            // full-screen window that gets minimised still saves to its own set.
             appConfig.saveLayout(winW, winH,
                                  libraryTreePanel.width,
                                  playbackQueuePanel.width,
-                                 nowPlayingPanel.width)
+                                 nowPlayingPanel.width,
+                                 root.layoutFullscreen)
 
             const posX = (root.visibility !== Window.FullScreen) ? root.x : appConfig.windowX
             const posY = (root.visibility !== Window.FullScreen) ? root.y : appConfig.windowY

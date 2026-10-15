@@ -133,6 +133,11 @@ class AppConfig : public QObject
     Q_PROPERTY(int libraryTreeWidth   READ libraryTreeWidth   NOTIFY panelWidthsChanged)
     Q_PROPERTY(int playbackQueueWidth READ playbackQueueWidth NOTIFY panelWidthsChanged)
     Q_PROPERTY(int nowPlayingWidth    READ nowPlayingWidth    NOTIFY panelWidthsChanged)
+    // Full-screen mode's own panel widths (the three above are windowed
+    // mode's). 0 = not set yet -- Main.qml then keeps the current widths.
+    Q_PROPERTY(int fullscreenLibraryTreeWidth   READ fullscreenLibraryTreeWidth   NOTIFY panelWidthsChanged)
+    Q_PROPERTY(int fullscreenPlaybackQueueWidth READ fullscreenPlaybackQueueWidth NOTIFY panelWidthsChanged)
+    Q_PROPERTY(int fullscreenNowPlayingWidth    READ fullscreenNowPlayingWidth    NOTIFY panelWidthsChanged)
 
     // Startup fullscreen/windowed preference (Setup > MISC). Default false
     // (Windowed) -- see Main.qml's `visibility` binding.
@@ -265,6 +270,9 @@ public:
     int libraryTreeWidth()     const { return m_libraryTreeWidth;   }
     int playbackQueueWidth()   const { return m_playbackQueueWidth; }
     int nowPlayingWidth()      const { return m_nowPlayingWidth;    }
+    int fullscreenLibraryTreeWidth()   const { return m_fullscreenLibraryTreeWidth;   }
+    int fullscreenPlaybackQueueWidth() const { return m_fullscreenPlaybackQueueWidth; }
+    int fullscreenNowPlayingWidth()    const { return m_fullscreenNowPlayingWidth;    }
     bool startFullscreen()     const { return m_startFullscreen;   }
     bool visualFolderScanning() const { return m_visualFolderScanning; }
     bool modifyCurrentRatingEnabled() const { return m_modifyCurrentRatingEnabled; }
@@ -377,11 +385,14 @@ public:
     // Call from QML via a debounce timer on resize events.
     // windowWidth/windowHeight should be the actual window dimensions; pass
     // the stored values (appConfig.windowWidth/Height) when in fullscreen to
-    // avoid overwriting with the screen resolution.
+    // avoid overwriting with the screen resolution. fullscreen selects which
+    // set of panel widths is written (windowed: libraryTreeWidth/...,
+    // full screen: fullscreenLibraryTreeWidth/...).
     Q_INVOKABLE void saveLayout(int windowWidth, int windowHeight,
                                 int libraryTreeWidth,
                                 int playbackQueueWidth,
-                                int nowPlayingWidth);
+                                int nowPlayingWidth,
+                                bool fullscreen = false);
 
     // Persists the main window's last windowed (non-fullscreen) position and
     // which monitor it was on -- same calling convention as
@@ -582,6 +593,9 @@ private:
     int m_libraryTreeWidth   = 286;
     int m_playbackQueueWidth = 374;
     int m_nowPlayingWidth    = 359;
+    int m_fullscreenLibraryTreeWidth   = 0;   // 0 = not set yet
+    int m_fullscreenPlaybackQueueWidth = 0;
+    int m_fullscreenNowPlayingWidth    = 0;
     bool m_startFullscreen   = false;
     bool m_visualFolderScanning = false;
     bool m_modifyCurrentRatingEnabled = true;

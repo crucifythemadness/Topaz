@@ -120,6 +120,16 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
   for the transport and playlist buttons still match after retaking the screenshot.
 - **Screenshots:** retake every screenshot that shows the NowPlaying panel.
 
+### Panel sizes remembered separately for window and full screen
+- **What changed:** the widths of the left panel (Library / Search / Playlists), the queue and
+  NowPlaying are now remembered **separately** for the normal window and for full-screen mode
+  (F11). Switching with F11 restores the sizes you last used in that mode, also after a restart.
+  The first time you use full screen after the update, the panels keep their current sizes;
+  adjust them once and Topaz remembers them. (Before, both modes shared one set of sizes.)
+- **Guide sections:** wherever resizing the panels / F11 full screen is explained (the main
+  window overview and the Full Screen description in *Setup reference → MISC* "Start Topaz in
+  Full Screen"): one or two sentences. No screenshots needed.
+
 ### Release housekeeping
 - Title page "Version 1.0.0" and the text "Topaz 1.0.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.

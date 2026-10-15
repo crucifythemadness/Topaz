@@ -241,13 +241,19 @@ void AppConfig::setFolderSubfolders(int index, bool includeSubfolders)
 
 void AppConfig::saveLayout(int windowWidth, int windowHeight,
                             int libraryTreeWidth, int playbackQueueWidth,
-                            int nowPlayingWidth)
+                            int nowPlayingWidth, bool fullscreen)
 {
     m_windowWidth        = windowWidth;
     m_windowHeight       = windowHeight;
-    m_libraryTreeWidth   = libraryTreeWidth;
-    m_playbackQueueWidth = playbackQueueWidth;
-    m_nowPlayingWidth    = nowPlayingWidth;
+    if (fullscreen) {
+        m_fullscreenLibraryTreeWidth   = libraryTreeWidth;
+        m_fullscreenPlaybackQueueWidth = playbackQueueWidth;
+        m_fullscreenNowPlayingWidth    = nowPlayingWidth;
+    } else {
+        m_libraryTreeWidth   = libraryTreeWidth;
+        m_playbackQueueWidth = playbackQueueWidth;
+        m_nowPlayingWidth    = nowPlayingWidth;
+    }
     save();
 }
 
@@ -783,6 +789,9 @@ void AppConfig::applyJson(const QJsonObject &root)
     m_libraryTreeWidth   = root[QStringLiteral("libraryTreeWidth")].toInt(286);
     m_playbackQueueWidth = root[QStringLiteral("playbackQueueWidth")].toInt(374);
     m_nowPlayingWidth    = root[QStringLiteral("nowPlayingWidth")].toInt(359);
+    m_fullscreenLibraryTreeWidth   = root[QStringLiteral("fullscreenLibraryTreeWidth")].toInt(0);
+    m_fullscreenPlaybackQueueWidth = root[QStringLiteral("fullscreenPlaybackQueueWidth")].toInt(0);
+    m_fullscreenNowPlayingWidth    = root[QStringLiteral("fullscreenNowPlayingWidth")].toInt(0);
     m_startFullscreen    = root[QStringLiteral("startFullscreen")].toBool(false);
     m_visualFolderScanning = root[QStringLiteral("visualFolderScanning")].toBool(false);
     // Default true; the 1.0.0 key "deleteCurrentRatingEnabled" is ignored (see appconfig.h).
@@ -980,6 +989,9 @@ void AppConfig::save()
     root[QStringLiteral("libraryTreeWidth")]   = m_libraryTreeWidth;
     root[QStringLiteral("playbackQueueWidth")] = m_playbackQueueWidth;
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;
+    root[QStringLiteral("fullscreenLibraryTreeWidth")]   = m_fullscreenLibraryTreeWidth;
+    root[QStringLiteral("fullscreenPlaybackQueueWidth")] = m_fullscreenPlaybackQueueWidth;
+    root[QStringLiteral("fullscreenNowPlayingWidth")]    = m_fullscreenNowPlayingWidth;
     root[QStringLiteral("startFullscreen")]    = m_startFullscreen;
     root[QStringLiteral("visualFolderScanning")] = m_visualFolderScanning;
     root[QStringLiteral("modifyCurrentRatingEnabled")] = m_modifyCurrentRatingEnabled;
