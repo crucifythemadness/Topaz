@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21)
 # CMAKE_PROJECT_VERSION_PATCH from the top-level project() call (us, once
 # FetchContent'd as a subdirectory), and an unset patch component makes that
 # substitution expand to nothing, breaking their generated version.h.
-project(Topaz VERSION 1.0.0 LANGUAGES CXX C)
+project(Topaz VERSION 1.1.0 LANGUAGES CXX C)
 
 # RC (Windows resource compiler, for app.rc's icon) is MinGW/MSVC-only --
 # Linux's cmake has no RC language support at all, so it can't be declared

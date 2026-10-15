@@ -1,4 +1,4 @@
-Topaz 1.0.0 for Linux
+Topaz 1.1.0 for Linux
 =====================
 
 A self-contained Linux build of Topaz (built on Ubuntu 24.04 with Qt 6.10.2).
