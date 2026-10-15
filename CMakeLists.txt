@@ -268,6 +268,17 @@ endif()
 # with the one place it's actually declared.
 target_compile_definitions(topaz PRIVATE TOPAZ_VERSION_STRING="${PROJECT_VERSION}")
 
+# Build date for the same dialog: a generated header, refreshed on every build
+# but only rewritten when the day changed (see cmake/WriteBuildDate.cmake).
+add_custom_target(topaz_build_date
+    COMMAND ${CMAKE_COMMAND} -DOUT=${CMAKE_CURRENT_BINARY_DIR}/topaz_build_date.h
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/WriteBuildDate.cmake
+    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/topaz_build_date.h
+    COMMENT "Refreshing topaz_build_date.h"
+    VERBATIM)
+add_dependencies(topaz topaz_build_date)
+target_include_directories(topaz PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
 # MinGW/COFF objects cap out at ~32k sections. The QML AOT compiler generates
 # one function per binding/handler, and SetupDialog.qml (by far this repo's
 # largest QML file, seven Setup tabs' worth of UI) crossed that ceiling --
