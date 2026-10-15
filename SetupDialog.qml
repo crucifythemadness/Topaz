@@ -1300,14 +1300,23 @@ Popup {
                                         { value: "bass",    label: "BASS Audio Library" }
                                     ]
 
-                                    delegate: RowLayout {
-                                        spacing: 8
+                                    // Item + inner RowLayout (not a bare RowLayout): the
+                                    // MouseArea below must NOT be a layout child, or
+                                    // its anchors.fill triggers Qt's "anchors on an
+                                    // item managed by a layout" runtime warning.
+                                    delegate: Item {
+                                        implicitWidth:  backendRadioInner.implicitWidth
+                                        implicitHeight: backendRadioInner.implicitHeight
 
                                         readonly property bool selected:
                                             root.appConfig !== null
                                             && root.appConfig.audioBackend === modelData.value
 
                                         onXChanged: if (modelData.value === "bass") backendRadioRow.bassX = x
+
+                                        RowLayout {
+                                        id: backendRadioInner
+                                        spacing: 8
 
                                         Rectangle {
                                             width: 18; height: 18
@@ -1330,6 +1339,7 @@ Popup {
                                             font.family:    Theme.fontFamilyBody
                                             font.pixelSize: Theme.labelXl
                                             color: Theme.fgSurface
+                                        }
                                         }
 
                                         MouseArea {
@@ -1390,10 +1400,16 @@ Popup {
                                 bassSelected && root.appConfig.autoLoudnessCorrection
 
                             // Checkbox -- same visual idiom as the GENRES /
-                            // Milkdrop-cleanup checkboxes.
-                            RowLayout {
-                                spacing: 10
+                            // Milkdrop-cleanup checkboxes. Item + inner RowLayout so
+                            // the MouseArea is not a layout child (see backendRadioInner).
+                            Item {
+                                implicitWidth:  loudnessCheckInner.implicitWidth
+                                implicitHeight: loudnessCheckInner.implicitHeight
                                 opacity: loudnessBlock.bassSelected ? 1.0 : 0.35
+
+                                RowLayout {
+                                id: loudnessCheckInner
+                                spacing: 10
 
                                 Rectangle {
                                     width: 18; height: 18
@@ -1417,6 +1433,7 @@ Popup {
                                     font.family:    Theme.fontFamilyBody
                                     font.pixelSize: Theme.labelXl
                                     color: Theme.fgSurface
+                                }
                                 }
 
                                 MouseArea {
@@ -1453,7 +1470,13 @@ Popup {
                                         root.appConfig !== null
                                         && root.appConfig.loudnessStrategy === "audiophile"
 
-                                    RowLayout {
+                                    // Item + inner RowLayout: see backendRadioInner.
+                                    Item {
+                                        implicitWidth:  audiophileRadioInner.implicitWidth
+                                        implicitHeight: audiophileRadioInner.implicitHeight
+
+                                        RowLayout {
+                                        id: audiophileRadioInner
                                         spacing: 8
 
                                         Rectangle {
@@ -1477,6 +1500,7 @@ Popup {
                                             font.family:    Theme.fontFamilyBody
                                             font.pixelSize: Theme.labelXl
                                             color: Theme.fgSurface
+                                        }
                                         }
 
                                         MouseArea {
@@ -1676,7 +1700,13 @@ Popup {
                                         root.appConfig !== null
                                         && root.appConfig.loudnessStrategy === "background"
 
-                                    RowLayout {
+                                    // Item + inner RowLayout: see backendRadioInner.
+                                    Item {
+                                        implicitWidth:  backgroundRadioInner.implicitWidth
+                                        implicitHeight: backgroundRadioInner.implicitHeight
+
+                                        RowLayout {
+                                        id: backgroundRadioInner
                                         spacing: 8
 
                                         Rectangle {
@@ -1700,6 +1730,7 @@ Popup {
                                             font.family:    Theme.fontFamilyBody
                                             font.pixelSize: Theme.labelXl
                                             color: Theme.fgSurface
+                                        }
                                         }
 
                                         MouseArea {
@@ -2469,12 +2500,18 @@ Popup {
                                     { value: "playPauseAndSelect", label: "Play/Pause & Select another Track allowed" }
                                 ]
 
-                                delegate: RowLayout {
-                                    spacing: 8
+                                // Item + inner RowLayout: see backendRadioInner.
+                                delegate: Item {
+                                    implicitWidth:  transportAccessInner.implicitWidth
+                                    implicitHeight: transportAccessInner.implicitHeight
 
                                     readonly property bool selected:
                                         root.appConfig !== null
                                         && root.appConfig.autoPlayTransportAccess === modelData.value
+
+                                    RowLayout {
+                                    id: transportAccessInner
+                                    spacing: 8
 
                                     Rectangle {
                                         width: 18; height: 18
@@ -2497,6 +2534,7 @@ Popup {
                                         font.family:    Theme.fontFamilyBody
                                         font.pixelSize: Theme.labelXl
                                         color: Theme.fgSurface
+                                    }
                                     }
 
                                     MouseArea {
@@ -2594,12 +2632,18 @@ Popup {
                                     { value: "several",               label: "Several times" }
                                 ]
 
-                                delegate: RowLayout {
-                                    spacing: 8
+                                // Item + inner RowLayout: see backendRadioInner.
+                                delegate: Item {
+                                    implicitWidth:  songRepeatInner.implicitWidth
+                                    implicitHeight: songRepeatInner.implicitHeight
 
                                     readonly property bool selected:
                                         root.appConfig !== null
                                         && root.appConfig.autoPlaySongRepeat === modelData.value
+
+                                    RowLayout {
+                                    id: songRepeatInner
+                                    spacing: 8
 
                                     Rectangle {
                                         width: 18; height: 18
@@ -2622,6 +2666,7 @@ Popup {
                                         font.family:    Theme.fontFamilyBody
                                         font.pixelSize: Theme.labelXl
                                         color: Theme.fgSurface
+                                    }
                                     }
 
                                     MouseArea {
@@ -4553,12 +4598,18 @@ Popup {
                                       label: "Artist ascending → Album ascending" }
                                 ]
 
-                                delegate: RowLayout {
-                                    spacing: 8
+                                // Item + inner RowLayout: see backendRadioInner.
+                                delegate: Item {
+                                    implicitWidth:  sortOrderInner.implicitWidth
+                                    implicitHeight: sortOrderInner.implicitHeight
 
                                     readonly property bool selected:
                                         root.appConfig !== null
                                         && root.appConfig.albumBrowserSortOrder === modelData.value
+
+                                    RowLayout {
+                                    id: sortOrderInner
+                                    spacing: 8
 
                                     Rectangle {
                                         width: 18; height: 18
@@ -4581,6 +4632,7 @@ Popup {
                                         font.family:    Theme.fontFamilyBody
                                         font.pixelSize: Theme.labelXl
                                         color: Theme.fgSurface
+                                    }
                                     }
 
                                     MouseArea {

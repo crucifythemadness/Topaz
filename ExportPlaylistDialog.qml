@@ -625,9 +625,18 @@ Popup {
                         // BASS Audio Library is the active backend -- the
                         // reference-value lookup's fallback (a fresh measurement
                         // for a track never analyzed before) needs BASS.
-                        RowLayout {
-                            spacing: 10
+                        // Item + inner RowLayout (here and in the two checkboxes
+                        // below): the MouseArea must NOT be a layout child, or its
+                        // anchors.fill triggers Qt's "anchors on an item managed by
+                        // a layout" runtime warning.
+                        Item {
+                            implicitWidth:  replayGainInner.implicitWidth
+                            implicitHeight: replayGainInner.implicitHeight
                             opacity: root.bassAudioActive ? 1.0 : 0.35
+
+                            RowLayout {
+                            id: replayGainInner
+                            spacing: 10
 
                             Rectangle {
                                 width: 18; height: 18
@@ -652,6 +661,7 @@ Popup {
                                 font.pixelSize: Theme.labelLg
                                 color: Theme.fgSurface
                             }
+                            }
 
                             MouseArea {
                                 anchors.fill: parent
@@ -668,7 +678,12 @@ Popup {
                         // ── Create M3U Playlist (UC-26) ───────────────────
                         // Always usable: writes "<playlistName>.m3u" next to
                         // the exported files (PlaylistExportWorker::runExport()).
-                        RowLayout {
+                        Item {
+                            implicitWidth:  m3uInner.implicitWidth
+                            implicitHeight: m3uInner.implicitHeight
+
+                            RowLayout {
+                            id: m3uInner
                             spacing: 10
 
                             Rectangle {
@@ -694,6 +709,7 @@ Popup {
                                 font.pixelSize: Theme.labelLg
                                 color: Theme.fgSurface
                             }
+                            }
 
                             MouseArea {
                                 anchors.fill: parent
@@ -714,9 +730,14 @@ Popup {
                         // ffmpeg with the LAME encoder was found (Mp3Converter).
                         // The MouseArea stays enabled when the box is unusable
                         // so its tooltip can say why.
-                        RowLayout {
-                            spacing: 10
+                        Item {
+                            implicitWidth:  convertInner.implicitWidth
+                            implicitHeight: convertInner.implicitHeight
                             opacity: root.canConvert ? 1.0 : 0.35
+
+                            RowLayout {
+                            id: convertInner
+                            spacing: 10
 
                             Rectangle {
                                 width: 18; height: 18
@@ -740,6 +761,7 @@ Popup {
                                 font.family:    Theme.fontFamilyBody
                                 font.pixelSize: Theme.labelLg
                                 color: Theme.fgSurface
+                            }
                             }
 
                             MouseArea {
