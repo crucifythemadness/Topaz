@@ -108,6 +108,18 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
 - **Screenshots:** the NowPlaying screenshot(s) showing an MP3 badge now include "CBR" / "VBR" —
   retake them.
 
+### NowPlaying: new Play/Pause, Previous and Next buttons
+- **What changed:** only the look. The buttons are bigger and redesigned: a large round Play/Pause
+  button in the Topaz purple-to-turquoise colours with a soft glow, flanked by round Previous and
+  Next buttons that light up turquoise when you point at them. They work exactly as before, and
+  Play/Pause still blinks while a track is paused. The playlist buttons (NEW, LOAD, EXPORT,
+  REMOVE) sit a little lower. The progress bar's colour now runs from purple at the start to
+  turquoise at the end of the track (before, the whole colour sweep was squeezed into the part
+  already played).
+- **Guide sections:** the NowPlaying overview (numbered callouts): check the callout positions
+  for the transport and playlist buttons still match after retaking the screenshot.
+- **Screenshots:** retake every screenshot that shows the NowPlaying panel.
+
 ### Release housekeeping
 - Title page "Version 1.0.0" and the text "Topaz 1.0.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.

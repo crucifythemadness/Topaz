@@ -2254,6 +2254,21 @@ blinking) at the reset position, matching "blinks until the user resumes
 playback or a different track plays" literally: rewinding the same track
 is neither of those.
 
+### Design note — transport button look (1.1.0)
+
+The three buttons are drawn, not typed: the Unicode glyphs (⏮ ⏸/▶ ⏭) used before depended on
+font fallback and rendered differently (emoji-like) on Windows and Linux. A `TransportIcon`
+inline component in `NowPlaying.qml` (a `Canvas`, same technique as `VolumeKnob.qml`, so no extra
+QML module to deploy) paints `play` / `pause` / `next` / `prev` (`prev` = `next` mirrored) with
+round-joined strokes, in a theme colour. Play/Pause is the hero button: a 64 px circle filled
+with the same `Theme.primary` → `Theme.secondary` gradient as the progress bar's played portion,
+dark `Theme.fgPrimary` icon, a soft `Theme.s10`/`s20` halo behind it (grows on hover), and
+hover/press scale feedback. Previous/Next are 48 px ghost circles (`surfaceContainerHighest`,
+`ov20` border) that turn `Theme.secondary` on hover. The row is 100 px high; the playlist buttons
+below follow in the same `Column` with their unchanged 16 px gap. The paused blink above animates
+the whole Play/Pause item (circle + halo) and is otherwise unchanged; all click handlers, incl.
+the AUTO PLAY gating, are unchanged.
+
 ### Normal Flow — Next / Previous
 
 - **Next** (⏭): `engine.next()` → loads `m_currentIndex + 1`, calls `play()`.

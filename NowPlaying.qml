@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 // qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
 // qmllint disable unqualified
 import QtQuick.Controls
@@ -85,6 +85,69 @@ Rectangle {
         Connections {
             target: label
             function onTextChanged() { marqueeRoot.restart() }
+        }
+    }
+
+    // Vector transport icon (play / pause / next / prev) for the transport
+    // buttons -- drawn instead of Unicode glyphs (⏮ ⏸ ⏭), which depend on font
+    // fallback and render differently (emoji-like) on Windows vs. Linux. Rounded
+    // corners via a round-joined stroke of the same colour; "prev" is "next"
+    // mirrored. Canvas, like VolumeKnob.qml -- no extra QML module needed.
+    component TransportIcon: Canvas {
+        id: icon
+        property string kind:  "play"
+        property color  color: "white"
+
+        onKindChanged:  requestPaint()
+        onColorChanged: requestPaint()
+        onWidthChanged: requestPaint()
+
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            const s = Math.min(icon.width, icon.height)
+            if (s <= 0) return
+            const c = icon.color
+            const rgba = "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + ","
+                       + Math.round(c.b * 255) + "," + c.a + ")"
+            ctx.fillStyle   = rgba
+            ctx.strokeStyle = rgba
+            ctx.lineJoin    = "round"
+            ctx.lineWidth   = s * 0.09          // rounds the triangle corners
+            ctx.translate((icon.width - s) / 2, (icon.height - s) / 2)
+
+            function triangle(x0, y0, x1, y1, x2, y2) {
+                ctx.beginPath()
+                ctx.moveTo(x0 * s, y0 * s)
+                ctx.lineTo(x1 * s, y1 * s)
+                ctx.lineTo(x2 * s, y2 * s)
+                ctx.closePath()
+                ctx.fill()
+                ctx.stroke()
+            }
+            function bar(x, y, w, h) {
+                ctx.beginPath()
+                ctx.roundedRect(x * s, y * s, w * s, h * s, s * 0.06, s * 0.06)
+                ctx.fill()
+            }
+
+            if (icon.kind === "pause") {
+                bar(0.24, 0.17, 0.17, 0.66)
+                bar(0.59, 0.17, 0.17, 0.66)
+                return
+            }
+            if (icon.kind === "prev") {             // mirror of "next"
+                ctx.translate(s, 0)
+                ctx.scale(-1, 1)
+            }
+            if (icon.kind === "play") {
+                // Optically centred: a triangle's visual centre sits left
+                // of its bounding box's, so the box is shifted right.
+                triangle(0.30, 0.18, 0.84, 0.50, 0.30, 0.82)
+            } else {                                 // next / prev
+                triangle(0.18, 0.20, 0.64, 0.50, 0.18, 0.80)
+                bar(0.68, 0.20, 0.13, 0.60)
+            }
         }
     }
 
@@ -571,15 +634,25 @@ Rectangle {
                             radius: 2
                             color:  Theme.surfaceContainerHighest
 
-                            // Played portion
-                            Rectangle {
+                            // Played portion: a window (clip) onto ONE gradient laid
+                            // out over the full track width, so each spot keeps its
+                            // colour and the gradient is revealed as the track plays
+                            // (purple at the start, turquoise only near the end).
+                            // Before, the gradient was squeezed into the played part.
+                            Item {
                                 width: parent.width * progressBar.progress
                                 height: parent.height
-                                radius: 2
-                                gradient: Gradient {
-                                    orientation: Gradient.Horizontal
-                                    GradientStop { position: 0.0; color: Theme.primary }
-                                    GradientStop { position: 1.0; color: Theme.secondary }
+                                clip: true
+
+                                Rectangle {
+                                    width: progressBar.width
+                                    height: parent.height
+                                    radius: 2
+                                    gradient: Gradient {
+                                        orientation: Gradient.Horizontal
+                                        GradientStop { position: 0.0; color: Theme.primary }
+                                        GradientStop { position: 1.0; color: Theme.secondary }
+                                    }
                                 }
                             }
                         }
@@ -623,20 +696,41 @@ Rectangle {
             }
 
             // ── Transport controls ─────────────────────────────────────────
+            // Play/Pause is the hero: a 64 px circle filled with the same
+            // primary -> secondary gradient as the progress bar's played
+            // portion right above it, with a soft secondary halo behind it.
+            // Previous/Next are 48 px ghost circles that light up in the
+            // secondary colour on hover. Icons are vector-drawn
+            // (TransportIcon above). Row height 100 fits the halo; the
+            // playlist buttons below simply move down (same Column, same
+            // 16 px topPadding gap).
             Item {
                 width:  parent.width
-                height: 60
+                height: 100
 
                 Row {
                     anchors.centerIn: parent
-                    spacing: 28
+                    spacing: 32
 
                     // Previous
-                    Text {
+                    Rectangle {
+                        id: prevBtn
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "\u23EE"
-                        font.pixelSize: 20
-                        color: prevHover.containsMouse ? Theme.fgSurface : Theme.fgSurfaceVariant
+                        width: 48; height: 48
+                        radius: 24
+                        color: prevHover.containsMouse ? Theme.surfaceBright : Theme.surfaceContainerHighest
+                        border.width: 1
+                        border.color: prevHover.containsMouse ? Theme.secondary : Theme.ov20
+                        scale: prevHover.pressed ? 0.92 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+
+                        TransportIcon {
+                            anchors.centerIn: parent
+                            width: 22; height: 22
+                            kind: "prev"
+                            color: prevHover.containsMouse ? Theme.secondary : Theme.fgSurfaceVariant
+                        }
+
                         MouseArea {
                             id: prevHover; anchors.fill: parent
                             hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -648,19 +742,16 @@ Rectangle {
                     }
 
                     // Play/Pause (primary action)
-                    Rectangle {
+                    Item {
                         id: playPauseBtn
-                        width: 44; height: 44
-                        radius: 22
-                        color: playHover.containsMouse ? Theme.surfaceBright
-                                                       : Theme.surfaceContainerHighest
                         anchors.verticalCenter: parent.verticalCenter
+                        width: 84; height: 84
 
                         // Blinks while the current track is manually paused
                         // (see UC-07) -- stops the instant playback resumes
                         // or a different track becomes current, never for
                         // any other "not playing" state (e.g. the queue
-                        // having finished naturally).
+                        // having finished naturally). Halo included.
                         readonly property bool userPaused: root.engine && root.engine.userPaused
 
                         SequentialAnimation on opacity {
@@ -671,15 +762,41 @@ Rectangle {
                         }
                         onUserPausedChanged: if (!userPaused) opacity = 1.0   // animation.stop() can land mid-fade
 
-                        Text {
+                        // Soft halo -- a little larger and brighter on hover.
+                        Rectangle {
                             anchors.centerIn: parent
-                            text: (root.engine && root.engine.isPlaying) ? "\u23F8" : "\u25B6"
-                            font.pixelSize: 18
-                            color: Theme.fgSurface
+                            width:  playHover.containsMouse ? 84 : 78
+                            height: width
+                            radius: width / 2
+                            color:  playHover.containsMouse ? Theme.s20 : Theme.s10
+                            Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutQuad } }
+                            Behavior on color { ColorAnimation  { duration: 160 } }
+                        }
+
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 64; height: 64
+                            radius: 32
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: Theme.primary }
+                                GradientStop { position: 1.0; color: Theme.secondary }
+                            }
+                            scale: playHover.pressed ? 0.94 : (playHover.containsMouse ? 1.05 : 1.0)
+                            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+
+                            TransportIcon {
+                                anchors.centerIn: parent
+                                width: 30; height: 30
+                                kind: (root.engine && root.engine.isPlaying) ? "pause" : "play"
+                                color: Theme.fgPrimary
+                            }
                         }
 
                         MouseArea {
-                            id: playHover; anchors.fill: parent
+                            id: playHover
+                            anchors.centerIn: parent
+                            width: 64; height: 64   // the circle, not the halo
                             hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 var playAllowed = !root.autoPlay || root.autoPlay.playPauseAllowed
@@ -689,11 +806,24 @@ Rectangle {
                     }
 
                     // Next
-                    Text {
+                    Rectangle {
+                        id: nextBtn
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "\u23ED"
-                        font.pixelSize: 20
-                        color: nextHover.containsMouse ? Theme.fgSurface : Theme.fgSurfaceVariant
+                        width: 48; height: 48
+                        radius: 24
+                        color: nextHover.containsMouse ? Theme.surfaceBright : Theme.surfaceContainerHighest
+                        border.width: 1
+                        border.color: nextHover.containsMouse ? Theme.secondary : Theme.ov20
+                        scale: nextHover.pressed ? 0.92 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+
+                        TransportIcon {
+                            anchors.centerIn: parent
+                            width: 22; height: 22
+                            kind: "next"
+                            color: nextHover.containsMouse ? Theme.secondary : Theme.fgSurfaceVariant
+                        }
+
                         MouseArea {
                             id: nextHover; anchors.fill: parent
                             hoverEnabled: true; cursorShape: Qt.PointingHandCursor
