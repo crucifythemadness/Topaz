@@ -1,6 +1,6 @@
 # Topaz User Guide
 
-**Topaz Jukebox — Version 1.0.0** · for Windows 10/11 and Linux
+**Topaz Jukebox — Version 1.1.0** · for Windows 10/11 and Linux
 
 ![Topaz with a playlist playing](images/main-window.png)
 
@@ -10,13 +10,30 @@ files, organizes them by **Genre → Artist → Album**, plays them from a **que
 **AUTO PLAY** mode, crossfades, loudness correction, a bar visualizer, **Milkdrop**
 visuals, and detachable panes for a second screen.
 
-This guide explains everything you can do with Topaz 1.0.0, step by step. The screenshots
-were taken with Topaz 1.0.0 on Windows; on Linux Topaz looks the same apart from fonts and
+This guide explains everything you can do with Topaz 1.1.0, step by step. The screenshots
+were taken with Topaz 1.1.0 on Windows; on Linux Topaz looks the same apart from fonts and
 the window frame.
 
 | Document history | |
 |---|---|
 | October 2026 | First edition, for Topaz 1.0.0 |
+| October 2026 | Second edition, for Topaz 1.1.0 — see [What is new in this version](#what-is-new-in-this-version) |
+
+### What is new in this version
+
+- **Let Topaz find your genres:** Setup → GENRES → **SCAN FOLDERS** lists every genre in your
+  music folders; pick the ones you want. Up to 48 genres and 40 genre buttons.
+- **Always measure** loudness instead of trusting ReplayGain / R128 tags (Audiophile loudness
+  correction).
+- **Create M3U Playlist** when exporting — for car stereos that read playlist files.
+- **VBR / CBR** shown for MP3s in NowPlaying, with the correct average bitrate for VBR files.
+- **Modify the Rating …** (Setup → MISC) can now lock your ratings against accidental clicks.
+- **Redesigned** Play/Pause, Previous and Next buttons.
+- **Panel sizes** are remembered separately for the window and for full screen.
+- **Fine-tune a pane's position** with the arrow keys.
+
+The first start of 1.1.0 re-reads your MP3 files once in the background (for the bitrate
+information); the library stays usable meanwhile.
 
 ---
 
@@ -105,32 +122,9 @@ genres you want to see.
 Setting it up takes three steps, all in the **Setup** dialog. Open it with the **gear icon
 ⚙** in the top-right corner.
 
-### Step 1: add your genres
+### Step 1: add your music folders
 
-Topaz organizes music by the **genre tag** of each file. Only genres you add here appear in
-Topaz.
-
-1. On the **GENRES** tab, type a genre name — exactly as it appears in your files' genre
-   tags, upper/lower case doesn't matter — and press **Enter** or click **ADD**.
-2. Repeat for every genre you want.
-
-![Setup → GENRES with two genres](images/setup-genres.png)
-
-Good to know:
-
-- A file counts for **exactly one** genre. If a tag holds several genres (for example
-  `Rock/Pop` or `Rock;Pop`), Topaz uses the **first** one.
-- Files whose genre is not in this list are ignored. This is deliberate: you decide which
-  parts of a large collection Topaz shows.
-- Up to **40** genres can be configured. The checkbox in each cell decides whether that genre
-  gets a button in the genre bar of the main window (up to **30** buttons). Unticking it only
-  hides the button — the genre's music stays in the library.
-- Drag a genre cell to another position to change the order of the genre buttons.
-- Select a cell and click **DELETE SELECTED** to remove a genre, or **DELETE ALL** to start over.
-
-### Step 2: add your music folders
-
-1. Switch to the **FILE MONITORING** tab and click **ADD FOLDER**.
+1. On the **FILE MONITORING** tab, click **ADD FOLDER**.
 2. Choose the folder that holds your music.
 
 ![Setup → FILE MONITORING with one music folder](images/setup-file-monitoring.png)
@@ -141,11 +135,55 @@ Good to know:
   is dimmed. It comes back by itself when the drive is connected again — even under a
   different drive letter.
 
+### Step 2: add your genres
+
+Topaz organizes music by the **genre tag** of each file. Only genres you add here appear in
+Topaz.
+
+#### The easy way: let Topaz find your genres
+
+1. Switch to the **GENRES** tab and click **SCAN FOLDERS** (bottom left). It is available as
+   soon as at least one music folder is ticked **ACTIVE** and connected.
+2. The **FOUND GENRES** window reads the genre tags of all files in your active folders. Every
+   genre appears right away with its number of tracks while the scan is still running; a
+   progress bar and **STOP** are at the bottom (STOP keeps what was found so far).
+3. Click the genres you want — you don't have to wait for the scan to finish. Genres you have
+   already added are dimmed ("already in GENRES"). You can pick as many as there are free
+   places.
+4. Click **ADD SELECTED**.
+
+![FOUND GENRES with the genres of the music folders](images/found-genres.png)
+
+Genres are shown exactly as they are written in your files (for a tag with several genres,
+the first one). Files without any genre tag are counted at the bottom. The scan only reads
+your files, it never changes them.
+
+#### Typing a genre by hand
+
+1. On the **GENRES** tab, type a genre name — exactly as it appears in your files' genre
+   tags, upper/lower case doesn't matter — and press **Enter** or click **ADD**.
+2. Repeat for every genre you want.
+
+![Setup → GENRES](images/setup-genres.png)
+
+Good to know:
+
+- A file counts for **exactly one** genre. If a tag holds several genres (for example
+  `Rock/Pop` or `Rock;Pop`), Topaz uses the **first** one.
+- Files whose genre is not in this list are ignored. This is deliberate: you decide which
+  parts of a large collection Topaz shows.
+- Up to **48** genres can be configured. The checkbox in each cell decides whether that genre
+  gets a button in the genre bar of the main window (up to **40** buttons, 10 per row — with
+  more than 30, a fourth row appears). Unticking it only hides the button — the genre's music
+  stays in the library.
+- Drag a genre cell to another position to change the order of the genre buttons.
+- Select a cell and click **DELETE SELECTED** to remove a genre, or **DELETE ALL** to start over.
+
 ### Step 3: scan
 
-Close the Setup dialog with the **✕**. Because the folder list changed, Topaz **scans
-automatically**. You can always start a scan yourself with **SCAN FOLDERS** in the
-bottom-right corner.
+Close the Setup dialog with the **✕**. Because the folder list or the genres changed, Topaz
+**scans automatically** — also right after you added genres from FOUND GENRES. You can always
+start a scan yourself with **SCAN FOLDERS** in the bottom-right corner of the main window.
 
 While Topaz is running it also watches your folders: music added or removed there shows up
 by itself after a couple of seconds.
@@ -172,7 +210,7 @@ Your library is now ready. Click a genre button to see it.
 | 5 | **Album Browser** | Album cards with cover, year and all tracks |
 | 6 | **Queue** | What plays next |
 | 7 | **NowPlaying** | Cover, title, artist and genre of the current track. Click the cover for the Big Cover pane. |
-| 8 | **Format · rating** | File format and bitrate (plus the loudness correction, when used) · your rating, 1–10 stars |
+| 8 | **Format · rating** | File format and bitrate (plus the loudness correction, when used) · your rating, 1–10 stars. For MP3s the bitrate says **VBR** (variable — the average is shown) or **CBR** (constant), for example `MP3 \| VBR 182 KBPS`. |
 | 9 | **Seek bar and transport** | Elapsed/total time, seek, Previous · Play/Pause · Next |
 | 10 | **Playlist buttons** | + NEW · LOAD · EXPORT · REMOVE |
 | 11 | **Bottom bar** | AUTO PLAY · AUDIO VISUALIZER · MILKDROP · TAG INFORMATION · SCAN FOLDERS |
@@ -183,6 +221,9 @@ Your library is now ready. Click a genre button to see it.
   takes up whatever space is left.
 - Every list has a **scrollbar thumb** on its right edge that you can drag with the mouse.
 - Topaz remembers the panel widths, the window size and position, and the monitor it was on.
+  The panel widths are remembered **separately** for the normal window and for full screen
+  (**F11**): each mode gets back the sizes you last used in it. The first time you use full
+  screen, the panels keep their current sizes until you adjust them.
 
 ---
 
@@ -248,22 +289,31 @@ The track playing is highlighted, and the queue scrolls along so that it always 
 
 ## Playback
 
-Use the controls in NowPlaying:
+Use the controls in NowPlaying — the large round **Play/Pause** button in the middle, with
+**Previous** and **Next** on either side (they light up turquoise when you point at them):
 
 - **Play/Pause** — while you have paused, the button **blinks**.
 - **Previous** — restarts the current track; pressed within the first 3 seconds it jumps to the
   previous track.
 - **Next** — jumps to the next track.
-- **Seek** — click or drag the seek bar.
+- **Seek** — click or drag the seek bar. Its colour runs from purple at the start to turquoise
+  at the end of the track.
 
 ### Rating tracks
 
-Click one of the **10 stars** to rate the current track. Ratings are stored separately from
-the library, so they survive any rescan. AUTO PLAY can use them (see [AUTO PLAY](#auto-play)).
+Click one of the **10 stars** to rate the current track, or click another star to change the
+rating. Ratings are stored separately from the library, so they survive any rescan. AUTO PLAY
+can use them (see [AUTO PLAY](#auto-play)).
 
-To remove a rating completely, turn on **Delete the Rating for the Track currently playing**
-in Setup → MISC. A trash-bin icon then appears left of the stars; it asks for confirmation
-before deleting.
+To remove a rating completely, click the **trash-bin icon** left of the stars; it asks for
+confirmation before deleting. (It is dimmed when the track has no rating.)
+
+When NowPlaying is too narrow for the format badge and the stars side by side, the trash bin and
+the stars move to their own line just below the format badge.
+
+**Protecting your ratings:** turn **off** *Modify the Rating for the Track currently playing*
+in Setup → MISC. The stars then still show each track's rating, but neither the stars nor the
+trash bin can be clicked — useful at a party, or when others use Topaz. It is on by default.
 
 ### System volume and mute
 
@@ -358,21 +408,29 @@ the PLAYLISTS tab (exports the previewed playlist).
    `GND_01_Monster In Paradise.mp3`. Files are always numbered in playlist order.
 3. Optional: **Replay Gain Normalization** — writes a Replay Gain tag into each **copy**, so
    players that support Replay Gain play all tracks at the same loudness. It uses the same
-   reference value and Trim as Auto Loudness Correction (Audiophile). Available only when
-   BASS is the active playback engine.
-4. Optional: **Convert to MP3 (Stereo|CBR|320 kbps)** — every FLAC or Opus track is converted
+   reference value and Trim as Auto Loudness Correction (Audiophile) — including the
+   **Always measure** setting (see [Where the loudness value comes from](#where-the-loudness-value-comes-from)),
+   even while Auto Loudness Correction itself is switched off. Available only when BASS is the
+   active playback engine.
+4. Optional: **Create M3U Playlist** (right of Replay Gain) — also writes a playlist file named
+   after the playlist, for example `Road Trip.m3u`, into the destination folder. It lists the
+   exported tracks in order. Why: some car stereos play the numbered files of a folder in
+   order, others read a playlist file — with both on the stick, either kind of car stereo
+   works.
+5. Optional: **Convert to MP3 (Stereo|CBR|320 kbps)** (below Create M3U Playlist) — every FLAC or Opus track is converted
    to an MP3 (44.1 kHz, stereo, constant 320 kbps) while it is copied; MP3 tracks are copied
    as they are. Tags and cover art are carried over. This needs **ffmpeg** (see
    [Optional extras](#optional-extras-you-can-add-yourself)). The checkbox is dimmed when the
    playlist contains no FLAC/Opus tracks or ffmpeg isn't found — its tooltip says which.
-   With it ticked, the required space is recalculated for the MP3 sizes.
-5. Click **EXPORT**.
+   With it ticked, the required space is recalculated for the MP3 sizes. The M3U playlist
+   then lists the new MP3 file names.
+6. Click **EXPORT**.
 
 ![Export in progress](images/export-running.png)
 
 The progress bar shows how far the export is; **STOP** cancels it. At the end Topaz reports
-how many tracks were copied — and, if any were converted, how many were converted to MP3.
-Any track that failed is listed.
+how many tracks were copied — and, if any were converted, how many were converted to MP3, and
+whether the M3U playlist was created. Any track that failed is listed.
 
 ![Export finished](images/export-done.png)
 
@@ -451,14 +509,53 @@ Tracks are mastered at very different loudness. Auto Loudness Correction evens t
 **without ever changing a file**.
 
 - **Audiophile/Critical Listening** — one fixed correction per track, based on its measured
-  loudness (or an existing Replay Gain tag). The dynamics stay untouched. The correction is
-  measured once and remembered; NowPlaying shows the value applied, for example `-10.9 dB`.
+  loudness (or an existing ReplayGain / R128 tag, unless **Always measure** is on — see below).
+  The dynamics stay untouched. The correction is determined once and remembered; NowPlaying
+  shows the value applied, for example `-10.9 dB`.
 - **Consistent Background Music** — a gentle compressor that keeps everything at a similar
   level, for background listening. Needs BASS_FX.
 - **Trim** (each strategy has its own, −15 to +15 dB in 0.1 dB steps) — your own adjustment on
   top. The automatic Audiophile level is fairly quiet by design (it follows the Replay Gain
   standard); raise Trim if you want it louder. Unlike the automatic correction, a large
   positive Trim can clip on very loud peaks.
+- **Always measure instead of using ReplayGain / R128 tag** (switch below the Audiophile Trim,
+  off by default) — see the next section.
+
+#### Where the loudness value comes from
+
+With *Audiophile/Critical Listening*, Topaz needs one loudness value per track. The target is
+the ReplayGain 2.0 reference level of **−18 LUFS** (measured the EBU R128 way).
+
+**Always measure OFF (the default)** — Topaz uses the first of these that applies:
+
+1. **A value it worked out before** and remembered — as long as the file has not changed.
+2. **A ReplayGain / R128 tag already in the file** — the *track* gain (never the album gain).
+   An Opus file's R128 tag is converted to the same −18 LUFS target.
+3. **Its own measurement** of the track — then remembered for next time.
+
+**Always measure ON** — the tags in your files are ignored, and every track is measured by
+Topaz itself. Why you might want that: tags written by other programs may use the older
+ReplayGain 1.0 method, may hold the album gain instead of the track gain, or may be out of date
+after a remaster or re-encode. Then the levels across your library don't match. With Always
+measure on, every track is on **one consistent scale**. Measuring is fast — a few tenths of a
+second per track — but the first pass over a large library takes a while; it runs in the
+background, starting with the track playing and the next one.
+
+Good to know:
+
+- The switch has an effect only with the **BASS Audio Library**, Auto Loudness Correction on
+  and *Audiophile/Critical Listening* selected; otherwise it is greyed out. **Trim** is still
+  added on top.
+- **Switching it on:** values that came from tags are measured again automatically; the track
+  playing adjusts smoothly within a moment. There is nothing to delete.
+- **Switching it off again does not bring the tag values back:** tracks that were measured keep
+  their measured value. To start completely from scratch, close Topaz and delete
+  `Topaz.volumeNormalization.json` in Topaz's data folder (see
+  [Where Topaz keeps its data](#where-topaz-keeps-its-data)).
+- **Export:** *Replay Gain Normalization* in the Export dialog follows this switch too — even
+  while Auto Loudness Correction is off. With it on, an exported copy gets Topaz's measured
+  value (plus Trim), not the value from the original file's tag.
+- Your audio files are never changed — all values live in `Topaz.volumeNormalization.json`.
 
 ### Hi-Res badge
 
@@ -483,6 +580,11 @@ Working with panes:
 
 - **Move** a pane by dragging it anywhere; **resize** it at its edges (the Big Cover keeps
   its square shape).
+- **Fine-tune** a pane's position with the keyboard: click the pane — a thin **turquoise
+  frame** shows it is selected — then the **arrow keys** move it **1 pixel** at a time, with
+  **Shift** 10 pixels; holding a key keeps it moving. Only the selected pane moves, even with
+  several open. **Esc** or **Enter** ends fine-tuning, and so does clicking somewhere else or
+  4 seconds without a key press. (Not while Milkdrop is in full screen with F10.)
 - **Right-click** a pane to close it (or click its button in the bottom bar again).
 - **Double-click** the Big Cover or Milkdrop pane to move it across its screen: centered → right
   edge → left edge → back where it was.
@@ -499,7 +601,8 @@ needs a graphics driver with OpenGL 3.3 or newer.
 
 ### Full screen
 
-- **F11** switches the main window between full screen and a normal window.
+- **F11** switches the main window between full screen and a normal window. Each mode
+  remembers its own panel widths.
 - **Start Topaz in Full Screen** (Setup → MISC) starts Topaz that way, on the monitor it was
   last on.
 - In full screen the **mouse pointer hides** after 5 seconds without movement and comes back
@@ -517,11 +620,19 @@ Every option of the Setup dialog in one place. All changes are saved immediately
 
 ### GENRES
 
-See [Step 1: add your genres](#step-1-add-your-genres).
+See [Step 2: add your genres](#step-2-add-your-genres).
+
+| Control | Meaning |
+|---|---|
+| **Genre cells** (6 × 8) | Your genres. Drag a cell to change the order of the genre buttons. |
+| **Checkbox in a cell** | Whether the genre gets a button in the genre bar (up to 40) |
+| **ADD** | Adds the genre typed in the field (or press **Enter**) |
+| **SCAN FOLDERS** | Opens FOUND GENRES: the genres found in your active music folders, to pick from. Not the same as SCAN FOLDERS in the main window's bottom bar, which scans the library. |
+| **DELETE SELECTED** · **DELETE ALL** | Remove the selected genre · all genres |
 
 ### FILE MONITORING
 
-See [Step 2: add your music folders](#step-2-add-your-music-folders).
+See [Step 1: add your music folders](#step-1-add-your-music-folders).
 
 ### PLAYBACK
 
@@ -569,7 +680,7 @@ See [AUTO PLAY settings](#auto-play-settings).
 | **Backup Topaz Environment** · **Restore Topaz Environment** | See [Maintenance and backup](#maintenance-and-backup) |
 | **Start Topaz in Full Screen** | Takes effect on the next start |
 | **Visual Folder Scanning** | Shows the SCAN FOLDERS progress window during scans |
-| **Delete the Rating for the Track currently playing** | Shows a trash-bin icon next to the rating stars |
+| **Modify the Rating for the Track currently playing** | On (default): the rating of the playing track can be set, changed (stars) and deleted (trash bin). Off: the rating is shown but locked. See [Rating tracks](#rating-tracks). |
 | **Album Browser & Search Result Sort Order** | *Artist → Year (newest first) → Album*, or *Artist → Album* |
 
 ---
@@ -619,11 +730,12 @@ about your library.
 **The library stays empty.**
 Check, in this order: the genre buttons are **active** (lit) · the genre is configured in Setup →
 GENRES, spelled like the files' genre tags · the music folder is in FILE MONITORING with
-**ACTIVE** ticked · then click **SCAN FOLDERS**.
+**ACTIVE** ticked · then click **SCAN FOLDERS** in the bottom bar.
 
 **Some tracks are missing.**
 Their genre tag probably doesn't match a configured genre. Remember that Topaz uses only the
-**first** genre of a multi-genre tag.
+**first** genre of a multi-genre tag. Setup → GENRES → **SCAN FOLDERS** shows every genre exactly
+as it is spelled in your files.
 
 **"BASS Audio Library" can't be used.**
 The BASS files are missing next to `Topaz.exe` / `topaz-bin`, or Topaz hasn't been restarted
@@ -661,8 +773,9 @@ day.
 |---|---|
 | **F11** | Main window: full screen on/off |
 | **F10** | Milkdrop pane: full screen on/off |
-| **Enter** | Setup → GENRES: add the typed genre · New Playlist: OK |
-| **Esc** | New Playlist: cancel |
+| **Enter** | Setup → GENRES: add the typed genre · New Playlist: OK · selected pane: end fine-tuning |
+| **Esc** | New Playlist: cancel · selected pane: end fine-tuning |
+| **Arrow keys** · **Shift + arrow keys** | Selected pane (click it first): move it 1 px · 10 px |
 
 ### Mouse
 
@@ -677,8 +790,10 @@ day.
 | Queue header — ✕ | click | empty the queue |
 | NowPlaying — cover | click | open the Big Cover pane |
 | NowPlaying — stars | click | rate the track (1–10) |
+| NowPlaying — trash bin | click | delete the track's rating |
 | Volume knob | drag / mouse wheel / click the speaker | set the system volume / mute |
 | Any pane | drag / drag the edges | move / resize |
+| Any pane | click | select it for fine-tuning with the arrow keys |
 | Any pane | right-click | close the pane |
 | Big Cover / Milkdrop pane | double-click | move across the screen |
 | Tag Information pane | double-click | full width on/off |

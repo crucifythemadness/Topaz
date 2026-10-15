@@ -55,8 +55,8 @@ Get the latest version from the **[Releases page](https://github.com/crucifythem
 
 | Platform | File |
 |---|---|
-| Windows 10/11 (64-bit) | `Topaz-1.0.0-Windows-x64.7z` |
-| Linux (64-bit, x86_64) | `Topaz-1.0.0-Linux-x64.7z` |
+| Windows 10/11 (64-bit) | `Topaz-1.1.0-Windows-x64.7z` |
+| Linux (64-bit, x86_64) | `Topaz-1.1.0-Linux-x64.7z` |
 
 ## Windows
 
@@ -71,7 +71,7 @@ Get the latest version from the **[Releases page](https://github.com/crucifythem
 
 Topaz needs no installer.
 
-1. Download `Topaz-1.0.0-Windows-x64.7z`.
+1. Download `Topaz-1.1.0-Windows-x64.7z`.
 2. Unpack it to any folder you like — your hard disk, another drive or a USB stick.
    Windows 11 can open `.7z` files directly (right-click → **Extract All**). On Windows 10,
    use the free [7-Zip](https://www.7-zip.org/).
@@ -104,11 +104,11 @@ else.
 
 ### Installation
 
-1. Download `Topaz-1.0.0-Linux-x64.7z` and unpack it to any folder in your home directory:
+1. Download `Topaz-1.1.0-Linux-x64.7z` and unpack it to any folder in your home directory:
 
    ```sh
    sudo apt install 7zip        # Ubuntu/Mint/Debian; on older releases: p7zip-full
-   7z x Topaz-1.0.0-Linux-x64.7z
+   7z x Topaz-1.1.0-Linux-x64.7z
    ```
 
 2. Make the start scripts executable (7-Zip archives don't keep Linux file permissions):
