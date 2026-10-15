@@ -3852,6 +3852,21 @@ A frameless (`flags: Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowH
 - **Close**: the same whole-pane `MouseArea`'s right-click emits `closeRequested()`.
   The pane does not close itself — the owner (the `Loader` in `Main.qml`) decides
   what "closed" means, currently just `bigCoverPaneOpen = false`.
+- **Keyboard fine-tuning (1.1.0)**: a left press selects the pane (`selectForFineTune()`:
+  `requestActivate()`, keyboard focus to an invisible `keyTarget` Item, `fineTuneSelected = true`,
+  shown by a 2 px `Theme.secondary` outline drawn above everything). The arrow keys then nudge it
+  1 px and Shift+arrow 10 px (`keyTarget`'s `Keys.onPressed` → `nudge(dx, dy)`, auto-repeat while
+  held), for pixel-exact placement that a mouse drag makes fiddly. Not clamped, same as a drag.
+  The selection ends on Esc/Enter, when the pane loses OS focus (`onActiveFocusItemChanged` →
+  `activeFocusItem === null`, the reliable signal per the transient-chain note), or 4 s after the
+  last click/arrow. The generic `keyboardMoveEnabled` (default `true`) gates it; `MilkdropWindow`
+  binds it to `!_isFullscreen`. **Why not `Shortcut`:** the first version used eight window-scoped
+  `Shortcut`s and failed as soon as two panes were open. The panes are transient children of the
+  main window, Qt resolves a window-scoped `Shortcut` against the whole transient chain, and so
+  two panes' identical arrow shortcuts made every key *ambiguous* and neither fired. Plain key
+  focus goes only to the OS focus window's active item, so exactly one pane reacts. The x/y change
+  goes through the persistence hook below like any drag. All four panes (Big Cover, Tag
+  Information, Audio Visualizer, Milkdrop) get it from the shared base.
 - **Persistence hook**: `onXChanged`/`onYChanged`/`onWidthChanged`/`onHeightChanged`
   restart a 500ms debounce `Timer` (same pattern as `Main.qml`'s `saveLayoutTimer`)
   that emits `geometrySettled(x, y, width, height, screenName)`. `FloatingPane.qml`

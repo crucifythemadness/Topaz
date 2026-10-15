@@ -27,9 +27,15 @@ import QtQuick.Window
 //     interactive gesture to the OS window manager, so there's no way to
 //     constrain intermediate frames of it, which is why locking requires a
 //     completely different, manually-tracked mechanism.
+//   - Left-click selects the pane for fine-tuning (thin turquoise outline);
+//     the arrow keys then nudge it by 1 px, Shift+arrow by 10 px, for
+//     pixel-exact placement; holding a key repeats. Esc/Enter, clicking
+//     elsewhere, or 4 s without input ends it. No clamping, same as a mouse
+//     drag. Disabled while keyboardMoveEnabled is false (MilkdropWindow:
+//     during its F10 fullscreen).
 //   - Any settled change to x/y/width/height (debounced 500ms, same pattern
 //     as Main.qml's saveLayoutTimer) emits geometrySettled() for the owner to
-//     persist.
+//     persist -- including an arrow-key nudge.
 Window {
     id: pane
 
@@ -51,6 +57,65 @@ Window {
     // pane) — see "Aspect-locked resize" below. Generic on purpose: any
     // future FloatingPane subclass can opt in, not just square ones.
     property real fixedAspectRatio: 0
+
+    // ── Keyboard fine-tuning (see "Interaction" above) ───────────────────
+    // A left press selects the pane (fineTuneSelected + turquoise outline +
+    // keyboard focus on keyTarget); arrows then nudge it 1 px, Shift+arrows
+    // 10 px. Real per-window key focus, NOT Shortcut: the panes are transient
+    // children of the main window, and Qt resolves a window-scoped Shortcut
+    // against the whole transient chain -- with two panes open every arrow
+    // matched two identical Shortcuts, Qt reported it as ambiguous and
+    // neither fired. Selection ends on Esc/Enter, when the pane loses OS
+    // focus (onActiveFocusItemChanged below), or after 4 s of no input.
+    // keyboardMoveEnabled: generic on/off -- the owner decides when moving
+    // makes no sense (MilkdropWindow: during its F10 fullscreen).
+    property bool keyboardMoveEnabled: true
+    property bool fineTuneSelected: false
+    onKeyboardMoveEnabledChanged: { if (!keyboardMoveEnabled) fineTuneSelected = false }
+
+    function nudge(dx, dy) {
+        pane.x += dx
+        pane.y += dy
+    }
+    function selectForFineTune() {
+        if (!pane.keyboardMoveEnabled) return
+        pane.requestActivate()
+        keyTarget.forceActiveFocus()
+        pane.fineTuneSelected = true
+        fineTuneTimer.restart()
+    }
+
+    Item {
+        id: keyTarget
+        focus: true
+        Keys.onPressed: (event) => {
+            if (!pane.fineTuneSelected || !pane.keyboardMoveEnabled) return
+            const step = (event.modifiers & Qt.ShiftModifier) ? 10 : 1
+            switch (event.key) {
+            case Qt.Key_Left:  pane.nudge(-step, 0); break
+            case Qt.Key_Right: pane.nudge( step, 0); break
+            case Qt.Key_Up:    pane.nudge(0, -step); break
+            case Qt.Key_Down:  pane.nudge(0,  step); break
+            case Qt.Key_Escape:
+            case Qt.Key_Return:
+            case Qt.Key_Enter:
+                pane.fineTuneSelected = false
+                event.accepted = true
+                return
+            default:
+                return   // leave every other key alone (e.g. Milkdrop's F10)
+            }
+            event.accepted = true
+            fineTuneTimer.restart()
+        }
+    }
+
+    Timer {
+        id: fineTuneTimer
+        interval: 4000
+        repeat: false
+        onTriggered: pane.fineTuneSelected = false
+    }
 
     // Kiosk mode -- driven by the owner (Main.qml: true exactly while the main
     // window is fullscreen), never set by the pane itself. While true the pane
@@ -87,7 +152,12 @@ Window {
         kioskBurstTimer.n = 0
         kioskBurstTimer.restart()
     }
-    onActiveFocusItemChanged: { if (activeFocusItem === null) kioskBurst() }
+    onActiveFocusItemChanged: {
+        if (activeFocusItem === null) {
+            kioskBurst()
+            fineTuneSelected = false   // clicked elsewhere: fine-tuning ends
+        }
+    }
 
     Timer {
         id: kioskBurstTimer
@@ -196,7 +266,10 @@ Window {
 
         property bool _moveStarted: false
 
-        onPressed: (mouse) => { _moveStarted = false }
+        onPressed: (mouse) => {
+            _moveStarted = false
+            if (mouse.button === Qt.LeftButton) pane.selectForFineTune()
+        }
         onPositionChanged: (mouse) => {
             pane.mouseMoved()
             // Only start the native move once real movement is seen while the
@@ -368,6 +441,17 @@ Window {
         onPositionChanged: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.updateAspectResize(bottomLeftGrip, mouse, true, false, true, true)
         }
+    }
+
+    // Fine-tuning selection outline (see selectForFineTune()): drawn above
+    // every content item and grip, takes no mouse input.
+    Rectangle {
+        anchors.fill: parent
+        z: 1000
+        visible: pane.fineTuneSelected
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.secondary
     }
 
     // ── Geometry persistence hook ────────────────────────────────────────

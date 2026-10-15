@@ -75,6 +75,8 @@ FloatingPane {
     // pressed (manually dragged, or a result of double-clicking) is exactly
     // what gets restored on the second press.
     property bool _isFullscreen: false
+    // Arrow-key nudging (FloatingPane) only makes sense for a windowed pane.
+    keyboardMoveEnabled: !_isFullscreen
     property real _preFullscreenX: 0
     property real _preFullscreenY: 0
     property real _preFullscreenWidth: 0

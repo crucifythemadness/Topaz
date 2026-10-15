@@ -141,6 +141,17 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
   reasoning) and update the position of "Convert to MP3".
 - **Screenshots:** retake the EXPORT PLAYLIST dialog screenshot (new checkbox, taller dialog).
 
+### Detachable panes: fine-tune the position with the arrow keys
+- **What changed:** click a pane (Big Cover, Tag Information, Audio Visualizer or Milkdrop) to
+  select it for fine-tuning: a thin **turquoise frame** shows which one. The **arrow keys** then
+  move it **1 pixel** at a time; with **Shift** held, 10 pixels; holding a key keeps it moving.
+  Works with several panes open, since only the selected one moves. The frame (and fine-tuning)
+  ends with **Esc** or **Enter**, by clicking somewhere else, or by itself after 4 seconds without
+  a key press. The new position is remembered like after dragging with the mouse. (Not while
+  Milkdrop is in full screen with F10.)
+- **Guide sections:** the section on the detachable panes (moving/resizing them), plus the
+  keyboard-shortcut overview if the guide has one. No screenshots needed.
+
 ### Release housekeeping
 - Title page "Version 1.0.0" and the text "Topaz 1.0.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.
