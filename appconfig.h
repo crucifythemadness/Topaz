@@ -142,10 +142,13 @@ class AppConfig : public QObject
     // see ScanFoldersDialog.qml/LibraryModel's currentScanFolder/recentScanFiles.
     Q_PROPERTY(bool visualFolderScanning READ visualFolderScanning NOTIFY visualFolderScanningChanged)
 
-    // Opt-in for NowPlaying's delete-current-rating trash-bin button
-    // (Setup > MISC). Default false -- the button doesn't render in
-    // NowPlaying at all until this is turned on. See UC-29.
-    Q_PROPERTY(bool deleteCurrentRatingEnabled READ deleteCurrentRatingEnabled NOTIFY deleteCurrentRatingEnabledChanged)
+    // "Modify the Rating for the Track currently playing" (Setup > MISC).
+    // Default true. Off: NowPlaying's stars and trash-bin button stay
+    // visible (the stars still show the rating) but are disabled, and
+    // PlaybackEngine refuses rating changes. JSON key
+    // "modifyCurrentRatingEnabled"; the 1.0.0 key "deleteCurrentRatingEnabled"
+    // (trash bin only) is deliberately not migrated. See UC-29.
+    Q_PROPERTY(bool modifyCurrentRatingEnabled READ modifyCurrentRatingEnabled NOTIFY modifyCurrentRatingEnabledChanged)
 
     // Sort order for AlbumBrowser/Search result album cards (Setup > MISC).
     // "artistYearAlbum" (default) = Artist asc -> Year desc -> Album asc;
@@ -264,7 +267,7 @@ public:
     int nowPlayingWidth()      const { return m_nowPlayingWidth;    }
     bool startFullscreen()     const { return m_startFullscreen;   }
     bool visualFolderScanning() const { return m_visualFolderScanning; }
-    bool deleteCurrentRatingEnabled() const { return m_deleteCurrentRatingEnabled; }
+    bool modifyCurrentRatingEnabled() const { return m_modifyCurrentRatingEnabled; }
     QString albumBrowserSortOrder() const { return m_albumBrowserSortOrder; }
 
     bool    crossfadeEnabled() const { return m_crossfadeEnabled; }
@@ -390,7 +393,7 @@ public:
 
     Q_INVOKABLE void setStartFullscreen(bool enabled);
     Q_INVOKABLE void setVisualFolderScanning(bool enabled);
-    Q_INVOKABLE void setDeleteCurrentRatingEnabled(bool enabled);
+    Q_INVOKABLE void setModifyCurrentRatingEnabled(bool enabled);
     // Ignores anything other than "artistYearAlbum"/"artistAlbum" (no-op) --
     // same validation convention as setAutoPlaySongRepeat().
     Q_INVOKABLE void setAlbumBrowserSortOrder(const QString &mode);
@@ -527,7 +530,7 @@ signals:
     void panelWidthsChanged();
     void startFullscreenChanged();
     void visualFolderScanningChanged();
-    void deleteCurrentRatingEnabledChanged();
+    void modifyCurrentRatingEnabledChanged();
     void albumBrowserSortOrderChanged();
     void crossfadeChanged();
     void audioBackendChanged();
@@ -581,7 +584,7 @@ private:
     int m_nowPlayingWidth    = 359;
     bool m_startFullscreen   = false;
     bool m_visualFolderScanning = false;
-    bool m_deleteCurrentRatingEnabled = false;
+    bool m_modifyCurrentRatingEnabled = true;
     QString m_albumBrowserSortOrder = QStringLiteral("artistYearAlbum");
 
     bool    m_crossfadeEnabled = false;

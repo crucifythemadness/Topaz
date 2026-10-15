@@ -181,12 +181,13 @@ public:
 
     // Sets the rating (1-10) for the currently playing track and persists it
     // immediately to Topaz.rating.json via RatingCache::setRating(). No-op if no
-    // track is loaded or the value is out of range.
+    // track is loaded, the value is out of range, or AppConfig's
+    // modifyCurrentRatingEnabled is off (rating locked, UC-29).
     Q_INVOKABLE void setCurrentRating(int rating);
 
     // Permanently removes the currently playing track's rating (if any) and
-    // resets currentRating to 0. No-op if there's no current track or it has
-    // no rating to delete.
+    // resets currentRating to 0. No-op if there's no current track, it has
+    // no rating to delete, or modifyCurrentRatingEnabled is off.
     Q_INVOKABLE void deleteCurrentRating();
 
     // ── Queue management (callable from QML) ──────────────────────────────

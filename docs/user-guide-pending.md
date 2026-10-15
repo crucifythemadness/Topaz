@@ -72,6 +72,26 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
 - **Screenshots:** retake the PLAYBACK tab screenshot (Auto Loudness Correction on, Audiophile
   selected, the new toggle visible).
 
+### Setup → MISC: "Modify the Rating for the Track currently playing" (UC-29)
+- **What changed:** the option *Delete the Rating for the Track currently playing* is renamed
+  **Modify the Rating for the Track currently playing** and now covers the rating as a whole.
+  It is **on by default**.
+  - **On:** click a star to set or change the rating of the track currently playing; the
+    trash-bin icon next to the stars deletes it (after a confirmation).
+  - **Off:** the stars and the trash-bin icon are still shown — the stars still show the
+    track's rating — but they can't be clicked. Use this to protect your ratings from
+    accidental clicks (e.g. at a party, or when others use Topaz).
+  - The trash-bin icon is now always shown next to the stars (dimmed when there is no rating
+    to delete, or when the option is off). In 1.0.0 it was hidden unless the option was on.
+  - Note for upgrading users: the old option setting is not carried over — everyone starts
+    with the new option **on**.
+- **Guide sections:** *Rating tracks* (rewrite the "To remove a rating completely, turn on …"
+  sentence: the trash bin is always there; mention locking with the option off); *Setup
+  reference → MISC* table (new name + description: "Lets you change or delete the rating of the
+  playing track; when off, the rating is shown but locked").
+- **Screenshots:** retake the MISC tab screenshot (new label). The NowPlaying screenshot now
+  shows the trash-bin icon next to the stars — retake if the current one doesn't.
+
 ### Release housekeeping
 - Title page "Version 1.0.0" and the text "Topaz 1.0.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.

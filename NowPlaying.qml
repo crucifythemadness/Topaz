@@ -352,12 +352,19 @@ Rectangle {
                     // Star rating — click star N to set the rating to N (1-10).
                     // Persists immediately to Topaz.rating.json; refreshed whenever
                     // NowPlaying starts a new track (see PlaybackEngine.currentRating).
+                    // Setup > MISC "Modify the Rating for the Track currently
+                    // playing" off (UC-29): the stars still show the rating in
+                    // full colour, but no hover, no click (and the trash bin
+                    // below is dimmed).
                     Row {
                         id: ratingStarsRow
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         spacing: 3
                         // Only show a rating to give when a track is actually loaded.
                         visible: root.engine && root.engine.currentTitle.length > 0
+
+                        readonly property bool editable:
+                            !root.appConfig || root.appConfig.modifyCurrentRatingEnabled
 
                         Repeater {
                             model: 10
@@ -378,6 +385,7 @@ Rectangle {
                                 MouseArea {
                                     id: starMA
                                     anchors.fill: parent
+                                    enabled: ratingStarsRow.editable
                                     hoverEnabled: true
                                     cursorShape:  Qt.PointingHandCursor
                                     onClicked: {
@@ -389,19 +397,18 @@ Rectangle {
                     }
 
                     // Permanently deletes the currently playing track's
-                    // rating -- opt-in via Setup > MISC ("Delete the Rating
-                    // for the Track currently playing"), hidden entirely
-                    // when that setting is off. Same visual twin as
-                    // PlaylistViewer.qml's deletePlaylistBtn/DELETE
-                    // PLAYLIST flow, same 12px gap to its anchor sibling.
+                    // rating. Always shown with the stars; dimmed and inert
+                    // while there is no rating or Setup > MISC "Modify the
+                    // Rating for the Track currently playing" is off (UC-29).
+                    // Same visual twin as PlaylistViewer.qml's
+                    // deletePlaylistBtn/DELETE PLAYLIST flow, same 12px gap
+                    // to its anchor sibling.
                     Rectangle {
                         id: deleteRatingBtn
-                        // Subset of ratingStarsRow's own visibility condition
-                        // -- never show this with no current track loaded
-                        // (app startup, empty queue), same moment the stars
-                        // themselves are hidden.
-                        visible: root.appConfig && root.appConfig.deleteCurrentRatingEnabled
-                                 && root.engine && root.engine.currentTitle.length > 0
+                        // Same visibility as ratingStarsRow -- never shown
+                        // with no current track loaded (app startup, empty
+                        // queue).
+                        visible: ratingStarsRow.visible
                         anchors {
                             right: ratingStarsRow.left; rightMargin: 12
                             verticalCenter: parent.verticalCenter
@@ -409,9 +416,10 @@ Rectangle {
                         width: 32; height: 32
                         radius: Theme.radiusFull
 
-                        readonly property bool active: root.engine && root.engine.currentRating > 0
+                        readonly property bool active: ratingStarsRow.editable
+                                                       && root.engine && root.engine.currentRating > 0
 
-                        color: deleteRatingHover.containsMouse ? Theme.surfaceContainerHighest : "transparent"
+                        color: deleteRatingHover.containsMouse && active ? Theme.surfaceContainerHighest : "transparent"
                         opacity: active ? 1.0 : 0.35
 
                         Image {

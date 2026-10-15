@@ -1394,7 +1394,7 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     "windowX": 100, "windowY": 100, "windowScreenName": "DISPLAY1",
     "windowPositionConfigured": true,
     "startFullscreen":    false,
-    "deleteCurrentRatingEnabled": false,
+    "modifyCurrentRatingEnabled": true,
     "libraryTreeWidth":   286,
     "playbackQueueWidth": 374,
     "nowPlayingWidth":    359,
@@ -2263,7 +2263,7 @@ is neither of those.
 | Artist | `engine.currentArtist` (artist with fallback to albumArtist) |
 | Format badge | `engine.currentFormat` + `engine.currentBitrate` KBPS |
 | Rating (stars) | `engine.currentRating` (0-10); set by clicking a star, calls `engine.setCurrentRating(n)`. Same row as the format badge — stars right-aligned, format badge left-aligned (see UC-14). Hidden entirely when no track is loaded (`NO TRACK` state). Filled stars use a hardcoded blue (`#00A6ED`) — a deliberate, one-off exception to the theme palette, not a `Theme.*` token. |
-| Delete rating (trash-bin) | Opt-in via Setup → MISC (`AppConfig.deleteCurrentRatingEnabled`, default off) — rendered immediately left of the star row when enabled, hidden entirely otherwise. Calls `engine.deleteCurrentRating()` after a "DELETE RATING" confirmation. See UC-29. |
+| Delete rating (trash-bin) | Rendered immediately left of the star row whenever a track is loaded. Active only with a rating and Setup → MISC "Modify the Rating …" on (`AppConfig.modifyCurrentRatingEnabled`, default on); off = stars and trash bin visible but disabled (stars still show the rating). Calls `engine.deleteCurrentRating()` after a "DELETE RATING" confirmation. See UC-29. |
 | Elapsed time | `engine.positionString` ("M:SS") |
 | Total time | `engine.durationString` ("M:SS") |
 | Progress ratio | `engine.position / engine.duration` |
@@ -6813,29 +6813,37 @@ filled the main display. `FloatingPane.currentScreenRect()` now returns the
 logical rect of the screen containing the pane's center (fallback: largest
 overlap, then the first screen), and all of them use it.
 
-## UC-29 Delete Rating for the Currently Playing Track (NowPlaying + MISC Tab)
+## UC-29 Modify / Delete Rating for the Currently Playing Track (NowPlaying + MISC Tab)
 
 | Field | Detail |
 |-------|--------|
-| **Goal** | Let the user permanently clear a track's rating, closing a real gap: `setCurrentRating()` only accepts 1-10, so before this there was no way to un-rate a track once given. |
+| **Goal** | Let the user permanently clear a track's rating, closing a real gap: `setCurrentRating()` only accepts 1-10, so before this there was no way to un-rate a track once given — and let them lock ratings against accidental changes. |
 | **Actor** | User |
-| **Trigger** | User clicks the trash-bin button next to NowPlaying's rating stars, then DELETE in the "DELETE RATING" confirmation. |
-| **Precondition** | Setup → MISC → "Delete the Rating for the Track currently playing" is enabled (default off), a track is loaded, and it currently has a rating. |
+| **Trigger** | User clicks a rating star, or the trash-bin button next to NowPlaying's rating stars, then DELETE in the "DELETE RATING" confirmation. |
+| **Precondition** | Setup → MISC → "Modify the Rating for the Track currently playing" is enabled (default **on**), a track is loaded, and (for delete) it currently has a rating. |
 
-A new `AppConfig.deleteCurrentRatingEnabled` bool — identical shape to
+`AppConfig.modifyCurrentRatingEnabled` bool — identical shape to
 UC-28's `startFullscreen` (`Q_PROPERTY` + `Q_INVOKABLE
-setDeleteCurrentRatingEnabled(bool)`), persisted as `Topaz.config`'s
-top-level `deleteCurrentRatingEnabled` key, default `false`. MISC tab
-gains a fourth toggle row (after Start Topaz in Full Screen), same
-48×24/18×18 pill switch.
+setModifyCurrentRatingEnabled(bool)`), persisted as `Topaz.config`'s
+top-level `modifyCurrentRatingEnabled` key, default `true`. MISC tab
+toggle row (after Start Topaz in Full Screen), same 48×24/18×18 pill switch.
+
+**History (1.1.0):** in 1.0.0 the option was "Delete the Rating for the Track currently playing"
+(`deleteCurrentRatingEnabled`, default `false`) and only showed/hid the trash bin; the stars were
+always clickable. It now governs the rating as a whole: **on** = stars and trash bin work;
+**off** = both stay **visible but disabled** — the stars still show the rating in full colour
+(only hover and click are off), the trash bin uses its dimmed/inert state — and
+`PlaybackEngine::setCurrentRating()` / `deleteCurrentRating()` themselves return early, so no
+path can change a locked rating. The old key is deliberately **not migrated**: its `false` meant
+"no trash bin", not "lock the rating", and NowPlaying is the only place a rating can be given, so
+honouring it would have locked rating for every 1.0.0 user. It is simply no longer written.
 
 Unlike UC-28's setting (a startup preference, takes effect next launch),
-this one gates a live UI element: `NowPlaying.qml` takes a new `appConfig`
-property (wired from `Main.qml`, previously not forwarded to this panel)
-and binds a trash-bin button's `visible` directly to
-`appConfig.deleteCurrentRatingEnabled` — flipping the toggle in Setup
-shows/hides the button in NowPlaying immediately, no restart or dialog
-close needed. The button is the visual twin of `PlaylistViewer.qml`'s
+this one gates live UI elements: `NowPlaying.qml` takes an `appConfig`
+property (wired from `Main.qml`); `ratingStarsRow.editable` binds to
+`appConfig.modifyCurrentRatingEnabled` (star `MouseArea.enabled`), and the trash-bin button is
+visible whenever the stars are (a track is loaded) — flipping the toggle in Setup takes effect
+in NowPlaying immediately, no restart or dialog close needed. The button is the visual twin of `PlaylistViewer.qml`'s
 `deletePlaylistBtn` (32×32, `Theme.radiusFull`, `TrashBin_Icon.svg`),
 anchored `right: ratingStarsRow.left; rightMargin: 12` — the identical
 12px gap `PlaylistViewer.qml`'s EXPORT→trash-bin buttons use
@@ -6843,7 +6851,7 @@ anchored `right: ratingStarsRow.left; rightMargin: 12` — the identical
 always vertically centered on the star row regardless of which anchors on
 which side. Its own `active` state (full opacity + clickable vs. 0.35
 dimmed) is separate from `visible` — dimmed whenever `currentRating` is 0
-(nothing to delete), exactly mirroring `deletePlaylistBtn`'s/`exportBtn`'s
+(nothing to delete) or the rating is locked (`ratingStarsRow.editable` false), exactly mirroring `deletePlaylistBtn`'s/`exportBtn`'s
 own active/dimmed convention in `PlaylistViewer.qml`.
 
 Clicking it (while active) opens a `MessageBox` styled like
@@ -7159,8 +7167,8 @@ shape as `autoPlaySongRepeat`/`autoPlayTransportAccess`), persisted as
 - `"artistAlbum"` — Artist ascending → Album ascending (no year tiebreak
   at all).
 
-MISC tab gains a new radio group (after Delete the Rating for the Track
-currently playing) — label, then the two options stacked vertically in a
+MISC tab gains a new radio group (after Modify the Rating for the Track
+currently playing — "Delete the Rating …" at the time) — label, then the two options stacked vertically in a
 `Column` (`Layout.leftMargin: 24`), each reusing the identical 18px
 circle/dot radio delegate `SetupDialog.qml`'s three existing radio
 groups (`audioBackend`, `autoPlaySongRepeat`, `autoPlayTransportAccess`)

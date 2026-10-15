@@ -716,6 +716,8 @@ void PlaybackEngine::setPlaylistLocked(bool locked)
 
 void PlaybackEngine::setCurrentRating(int rating)
 {
+    // Setup > MISC "Modify the Rating ..." off: the rating is locked (UC-29).
+    if (m_appConfig && !m_appConfig->modifyCurrentRatingEnabled()) return;
     if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return;
     if (rating < 1 || rating > 10) return;
 
@@ -731,6 +733,7 @@ void PlaybackEngine::setCurrentRating(int rating)
 
 void PlaybackEngine::deleteCurrentRating()
 {
+    if (m_appConfig && !m_appConfig->modifyCurrentRatingEnabled()) return;   // locked (UC-29)
     if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return;
 
     TrackInfo &t = m_queue[m_currentIndex];

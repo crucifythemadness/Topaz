@@ -464,11 +464,11 @@ void AppConfig::setVisualFolderScanning(bool enabled)
     save();
 }
 
-void AppConfig::setDeleteCurrentRatingEnabled(bool enabled)
+void AppConfig::setModifyCurrentRatingEnabled(bool enabled)
 {
-    if (m_deleteCurrentRatingEnabled == enabled) return;
-    m_deleteCurrentRatingEnabled = enabled;
-    emit deleteCurrentRatingEnabledChanged();
+    if (m_modifyCurrentRatingEnabled == enabled) return;
+    m_modifyCurrentRatingEnabled = enabled;
+    emit modifyCurrentRatingEnabledChanged();
     save();
 }
 
@@ -785,8 +785,9 @@ void AppConfig::applyJson(const QJsonObject &root)
     m_nowPlayingWidth    = root[QStringLiteral("nowPlayingWidth")].toInt(359);
     m_startFullscreen    = root[QStringLiteral("startFullscreen")].toBool(false);
     m_visualFolderScanning = root[QStringLiteral("visualFolderScanning")].toBool(false);
-    m_deleteCurrentRatingEnabled =
-        root[QStringLiteral("deleteCurrentRatingEnabled")].toBool(false);
+    // Default true; the 1.0.0 key "deleteCurrentRatingEnabled" is ignored (see appconfig.h).
+    m_modifyCurrentRatingEnabled =
+        root[QStringLiteral("modifyCurrentRatingEnabled")].toBool(true);
     m_albumBrowserSortOrder =
         root[QStringLiteral("albumBrowserSortOrder")].toString(QStringLiteral("artistYearAlbum"));
 
@@ -923,7 +924,7 @@ QVariantMap AppConfig::restoreFromJson(const QByteArray &json)
     emit panelWidthsChanged();
     emit startFullscreenChanged();
     emit visualFolderScanningChanged();
-    emit deleteCurrentRatingEnabledChanged();
+    emit modifyCurrentRatingEnabledChanged();
     emit albumBrowserSortOrderChanged();
     emit crossfadeChanged();
     // audioBackendChanged deliberately NOT emitted -- value is unchanged.
@@ -981,7 +982,7 @@ void AppConfig::save()
     root[QStringLiteral("nowPlayingWidth")]    = m_nowPlayingWidth;
     root[QStringLiteral("startFullscreen")]    = m_startFullscreen;
     root[QStringLiteral("visualFolderScanning")] = m_visualFolderScanning;
-    root[QStringLiteral("deleteCurrentRatingEnabled")] = m_deleteCurrentRatingEnabled;
+    root[QStringLiteral("modifyCurrentRatingEnabled")] = m_modifyCurrentRatingEnabled;
     root[QStringLiteral("albumBrowserSortOrder")]      = m_albumBrowserSortOrder;
 
     QJsonObject playback;

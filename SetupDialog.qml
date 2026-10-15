@@ -4463,11 +4463,10 @@ Popup {
                         color: Theme.ov20
                     }
 
-                    // ── Delete the Rating for the Track currently playing row
-                    // Opt-in for NowPlaying's delete-current-rating trash-bin
-                    // button (next to the rating stars) -- hidden entirely in
-                    // NowPlaying, not just disabled, while this is off. See
-                    // UC-29.
+                    // ── Modify the Rating for the Track currently playing row
+                    // On (default): NowPlaying's rating stars and trash-bin
+                    // button work. Off: both stay visible (the stars still
+                    // show the rating) but are disabled. See UC-29.
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.topMargin: 8
@@ -4475,7 +4474,7 @@ Popup {
 
                         Text {
                             Layout.fillWidth: true
-                            text: "Delete the Rating for the Track currently playing"
+                            text: "Modify the Rating for the Track currently playing"
                             font.family:    Theme.fontFamilyBody
                             font.pixelSize: Theme.titleMd
                             font.weight:    Font.Bold
@@ -4487,7 +4486,7 @@ Popup {
                         Rectangle {
                             id: deleteRatingTrack
                             readonly property bool on:
-                                root.appConfig !== null && root.appConfig.deleteCurrentRatingEnabled
+                                root.appConfig !== null && root.appConfig.modifyCurrentRatingEnabled
 
                             width: 48; height: 24
                             radius: 12
@@ -4507,8 +4506,8 @@ Popup {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     if (root.appConfig)
-                                        root.appConfig.setDeleteCurrentRatingEnabled(
-                                            !root.appConfig.deleteCurrentRatingEnabled)
+                                        root.appConfig.setModifyCurrentRatingEnabled(
+                                            !root.appConfig.modifyCurrentRatingEnabled)
                                 }
                             }
                         }
