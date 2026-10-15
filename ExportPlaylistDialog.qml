@@ -34,6 +34,9 @@ Popup {
     // without ever touching PlaybackEngine.
     property var tracks: []
     property var exportController: null
+    // Name of the exported playlist, set by the caller next to `tracks` --
+    // names the "Create M3U Playlist" file ("<name>.m3u").
+    property string playlistName: ""
 
     // UC-26 Replay Gain Normalization: only these two facts are needed here
     // (not the whole PlaybackEngine/AppConfig), both read fresh whenever the
@@ -54,8 +57,13 @@ Popup {
     // the dialog opens, so an ffmpeg dropped in while Topaz runs is noticed.
     property bool   convertToMp3: false
     property bool   ffmpegAvailable: false
+    // UC-26 "Create M3U Playlist": also write "<playlistName>.m3u" next to
+    // the exported files, for car stereos that read playlists.
+    property bool   createM3u: false
     property bool   showResults: false
     property var    lastResults: []
+    property string lastM3uFileName: ""   // "" = none requested / cancelled
+    property bool   lastM3uOk: false
 
     readonly property bool hasDestination: destFolder.length > 0
     readonly property bool destWritable:   hasDestination && destInfo.writable === true
@@ -75,11 +83,12 @@ Popup {
 
     onConvertActiveChanged: recomputeRequired()
 
-    // ── Checkbox row sizing ───────────────────────────────────────────────
-    // Both checkboxes (Replay Gain, Convert to MP3) share one row. Their
-    // labels are measured, and the dialog is widened by whatever the row needs
-    // beyond the right column's base width (760 - 2*24 margins - 20 gap - the
-    // 200px left panel base), rather than guessing a font-dependent number.
+    // ── Checkbox grid sizing ──────────────────────────────────────────────
+    // Two columns: Replay Gain | Create M3U Playlist, and Convert to MP3
+    // below Create M3U. The labels are measured (column 2 = the wider of its
+    // two), and the dialog is widened by whatever the grid needs beyond the
+    // right column's base width (760 - 2*24 margins - 20 gap - the 200px left
+    // panel base), rather than guessing a font-dependent number.
     TextMetrics {
         id: replayGainLabelMetrics
         font.family: Theme.fontFamilyBody
@@ -92,11 +101,18 @@ Popup {
         font.pixelSize: Theme.labelLg
         text: qsTr("Convert to MP3 (Stereo|CBR|320 kbps)")
     }
+    TextMetrics {
+        id: m3uLabelMetrics
+        font.family: Theme.fontFamilyBody
+        font.pixelSize: Theme.labelLg
+        text: qsTr("Create M3U Playlist")
+    }
     readonly property int checkboxGap: 32
     readonly property int checkboxRowNeededWidth:
         Math.ceil((18 + 10 + replayGainLabelMetrics.advanceWidth)
                   + checkboxGap
-                  + (18 + 10 + convertLabelMetrics.advanceWidth)) + 8
+                  + (18 + 10 + Math.max(convertLabelMetrics.advanceWidth,
+                                         m3uLabelMetrics.advanceWidth))) + 8
     readonly property int rightColumnBaseWidth: 760 - 2 * 24 - 20 - leftPanelBaseWidth
     readonly property int extraCheckboxWidth: Math.max(0, checkboxRowNeededWidth - rightColumnBaseWidth)
 
@@ -170,7 +186,7 @@ Popup {
     x: Overlay.overlay ? (Overlay.overlay.width  - width)  / 2 : 0
     y: Overlay.overlay ? (Overlay.overlay.height - height) / 2 : 0
     width:  760 + extraLabelWidth + extraCheckboxWidth
-    height: 480
+    height: 510   // 480 + the second checkbox row (18 px box + 12 px row spacing)
     padding: 0
 
     modal: true
@@ -187,9 +203,12 @@ Popup {
         prefixText   = ""
         replayGainNormalization = false
         convertToMp3 = false
+        createM3u    = false
         ffmpegAvailable = root.exportController ? root.exportController.ffmpegAvailable() : false
         showResults  = false
         lastResults  = []
+        lastM3uFileName = ""
+        lastM3uOk    = false
         recomputeRequired()
     }
 
@@ -197,6 +216,8 @@ Popup {
         target: root.exportController
         function onExportFinished(results) {
             root.lastResults = results
+            root.lastM3uFileName = root.exportController.m3uFileName
+            root.lastM3uOk       = root.exportController.m3uOk
             root.showResults = true
         }
     }
@@ -588,12 +609,15 @@ Popup {
                         }
                     }
 
-                    // ── Export options row: Replay Gain Normalization (UC-26) +
-                    // Convert to MP3 ────────────────────────────────────
+                    // ── Export options grid (UC-26) ──────────────────────────
+                    //   Replay Gain Normalization | Create M3U Playlist
+                    //                             | Convert to MP3 (...)
                     // Each checkbox is its own RowLayout so that its
                     // MouseArea (anchors.fill: parent) covers only itself.
-                    RowLayout {
-                        spacing: root.checkboxGap
+                    GridLayout {
+                        columns: 2
+                        columnSpacing: root.checkboxGap
+                        rowSpacing: 12
 
                         // ── Replay Gain Normalization (UC-26) ────────────
                         // Same checkbox visual idiom as SetupDialog.qml's Auto
@@ -640,6 +664,50 @@ Popup {
                                 onClicked: root.replayGainNormalization = !root.replayGainNormalization
                             }
                         }
+
+                        // ── Create M3U Playlist (UC-26) ───────────────────
+                        // Always usable: writes "<playlistName>.m3u" next to
+                        // the exported files (PlaylistExportWorker::runExport()).
+                        RowLayout {
+                            spacing: 10
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 3
+                                color: root.createM3u ? Theme.secondaryContainer : "transparent"
+                                border.width: root.createM3u ? 0 : 1
+                                border.color: Theme.outlineVariant
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: root.createM3u
+                                    text: "✓"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                    color: Theme.fgSecondaryContainer
+                                }
+                            }
+
+                            Text {
+                                text: qsTr("Create M3U Playlist")
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.labelLg
+                                color: Theme.fgSurface
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text:    qsTr("Also writes an M3U playlist (\"%1.m3u\") into the export folder, for car stereos that read playlists instead of playing the numbered files in order.")
+                                                 .arg(root.playlistName.length > 0 ? root.playlistName : "Topaz Playlist")
+                                onClicked: root.createM3u = !root.createM3u
+                            }
+                        }
+
+                        Item { width: 1; height: 1 }   // empty cell under Replay Gain
 
                         // ── Convert to MP3 ────────────────────────────────
                         // Enabled when at least one track is FLAC or Opus AND an
@@ -690,8 +758,6 @@ Popup {
                                 onClicked: if (root.canConvert) root.convertToMp3 = !root.convertToMp3
                             }
                         }
-
-                        Item { Layout.fillWidth: true }
                     }
                 }
             }
@@ -765,6 +831,17 @@ Popup {
                     font.family:    Theme.fontFamilyBody
                     font.pixelSize: Theme.titleMd
                     color: Theme.fgSurfaceVariant
+                }
+
+                // Only when "Create M3U Playlist" was checked (UC-26).
+                Text {
+                    visible: root.lastM3uFileName.length > 0
+                    text: root.lastM3uOk
+                          ? qsTr("M3U playlist created: %1").arg(root.lastM3uFileName)
+                          : qsTr("M3U playlist could not be written: %1").arg(root.lastM3uFileName)
+                    font.family:    Theme.fontFamilyBody
+                    font.pixelSize: Theme.titleMd
+                    color: root.lastM3uOk ? Theme.fgSurfaceVariant : Theme.error
                 }
 
                 ScrollView {
@@ -977,6 +1054,7 @@ Popup {
         const alwaysMeasure = root.appConfig ? root.appConfig.loudnessAlwaysMeasure : false
         root.exportController.startExport(tracks, root.destFolder, root.prefixText,
                                            root.replayGainNormalization, trim,
-                                           root.convertActive, alwaysMeasure)
+                                           root.convertActive, alwaysMeasure,
+                                           root.createM3u, root.playlistName)
     }
 }

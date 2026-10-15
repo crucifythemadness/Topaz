@@ -55,9 +55,18 @@ public slots:
     // alwaysMeasure (AppConfig::loudnessAlwaysMeasure, the stored value even
     // while Auto Loudness Correction is off): skips the existing-tag tier and
     // tag-sourced cache entries, same as playback.
+    //
+    // createM3u (UC-26 "Create M3U Playlist"): after the track loop, also
+    // writes "<playlistName>.m3u" (sanitized; "Topaz Playlist" if empty) into
+    // destFolder, listing every successfully exported track in order by its
+    // exported file name only (relative -- the playlist sits next to the
+    // files), with #EXTM3U/#EXTINF lines. UTF-8 without BOM, CRLF line endings
+    // -- the most widely accepted form on car head units. Skipped when the
+    // export was cancelled.
     void runExport(QVariantList tracks, QString destFolder, QString prefix,
                     bool replayGainNormalization, double audiophileTrimDb,
-                    bool convertToMp3, bool alwaysMeasure);
+                    bool convertToMp3, bool alwaysMeasure,
+                    bool createM3u, QString playlistName);
 
 signals:
     // fraction: 0..1 share of the CURRENT file already done (only a conversion
@@ -69,10 +78,14 @@ signals:
     // cancelExport() cut the loop short. replayGainTagged is always false when
     // replayGainNormalization was off; converted is true only for a track that
     // was successfully converted to MP3.
-    void finished(QVariantList results);
+    // m3uFileName: the written playlist's file name ("" = none requested or
+    // cancelled); m3uOk: whether writing it succeeded.
+    void finished(QVariantList results, QString m3uFileName, bool m3uOk);
 
 private:
     static QString sanitizeForFilename(const QString &name);
+    // Writes the M3U described at runExport(). Returns false on any I/O error.
+    static bool writeM3u(const QString &path, const QStringList &lines);
 
     std::atomic<bool> m_cancelRequested{false};
 };

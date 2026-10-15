@@ -856,6 +856,7 @@ ApplicationWindow {
                             // is stale while previewing the playlist active
                             // in the queue (see PlaylistViewer.qml).
                             exportPlaylistDialog.tracks = item.currentRawTracks
+                            exportPlaylistDialog.playlistName = playlistsData.selectedDisplayName
                             exportPlaylistDialog.open()
                             // qmllint enable missing-property
                         })
@@ -887,6 +888,7 @@ ApplicationWindow {
                 onNewPlaylistRequested: newPlaylistDialog.open()
                 onExportPlaylistRequested: {
                     exportPlaylistDialog.tracks = engine.trackList()
+                    exportPlaylistDialog.playlistName = engine.activePlaylistName
                     exportPlaylistDialog.open()
                 }
                 onBigCoverRequested: root.bigCoverPaneOpen = true

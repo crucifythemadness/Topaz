@@ -6166,6 +6166,34 @@ decode that either), or an Opus file whose `OpusTags` packet shares a page with 
   code from `TagWriter`'s own table) confirming every page's CRC and every page's sequence number,
   not just that `TagReader` was happy with what `TagWriter` produced.
 
+### Create M3U Playlist — a playlist file next to the exported tracks (1.1.0)
+
+Car head units differ: some play a folder's files in name order (what the numbered
+`<prefix><NN>_<title>` names are for), others read a playlist file. The checkbox **"Create M3U
+Playlist"** (default off, always usable) additionally writes `<playlistName>.m3u` into the
+destination folder, so one export serves both kinds.
+
+- **Layout:** the options are a 2-column `GridLayout`: Replay Gain Normalization | Create M3U
+  Playlist, with Convert to MP3 below Create M3U (column 2 is sized to the wider of its two labels;
+  the dialog height is 510, up from 480, for the second row).
+- **Name:** `ExportPlaylistDialog.playlistName`, set by the opener next to `tracks`:
+  `engine.activePlaylistName` from NowPlaying's EXPORT (only active with an active playlist), or
+  `playlistsData.selectedDisplayName` from PlaylistViewer's. It is sanitized with the same
+  `sanitizeForFilename()` as the track names; empty → `Topaz Playlist.m3u`. An existing file of that
+  name is overwritten, like the track copies.
+- **Content** (`PlaylistExportWorker::runExport()`, after the track loop): `#EXTM3U`, then per
+  *successfully* exported track, in order, `#EXTINF:<seconds>,<artist> - <title>` (`-1` if the
+  duration is unknown) followed by the exported **file name only**. The path is relative, so the
+  playlist works wherever the stick is mounted, and a converted track appears with its `.mp3` name.
+  The file is **UTF-8 without BOM** (some head units mis-read a BOM) with **CRLF** line endings,
+  the most widely accepted form. It is not written when the export was cancelled.
+- **API:** `startExport(..., alwaysMeasure, createM3u = false, playlistName = "")` →
+  `_requestExport` → `runExport(..., createM3u, playlistName)`. The worker's
+  `finished(results, m3uFileName, m3uOk)` feeds the controller properties `m3uFileName` / `m3uOk`
+  (NOTIFY `m3uResultChanged`, set before `exportFinished()`), so the per-track `results` list and
+  its counts stay unchanged. The results screen adds "M3U playlist created: <name>.m3u", or an
+  error line.
+
 ### Convert to MP3 — re-encoding non-MP3 tracks in the exported copies
 
 An opt-in checkbox (`Convert to MP3 (Stereo|CBR|320 kbps)`, default unchecked, reset on every open)

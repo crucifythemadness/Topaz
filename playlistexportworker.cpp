@@ -24,9 +24,22 @@ QString PlaylistExportWorker::sanitizeForFilename(const QString &name)
     return out.trimmed();
 }
 
+bool PlaylistExportWorker::writeM3u(const QString &path, const QStringList &lines)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    // UTF-8 without BOM, CRLF -- see runExport()'s doc comment.
+    const QByteArray data = (lines.join(QStringLiteral("\r\n")) + QStringLiteral("\r\n")).toUtf8();
+    const bool ok = f.write(data) == data.size();
+    f.close();
+    return ok && f.error() == QFileDevice::NoError;
+}
+
 void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QString prefix,
                                       bool replayGainNormalization, double audiophileTrimDb,
-                                      bool convertToMp3, bool alwaysMeasure)
+                                      bool convertToMp3, bool alwaysMeasure,
+                                      bool createM3u, QString playlistName)
 {
     m_cancelRequested.store(false, std::memory_order_relaxed);
 
@@ -53,9 +66,13 @@ void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QS
     const QString ffmpegPath = convertToMp3 ? Mp3Converter::findFfmpeg() : QString();
 
     QVariantList results;
+    QStringList  m3uLines { QStringLiteral("#EXTM3U") };
+    bool         cancelled = false;
     for (int i = 0; i < total; ++i) {
-        if (m_cancelRequested.load(std::memory_order_relaxed))
+        if (m_cancelRequested.load(std::memory_order_relaxed)) {
+            cancelled = true;
             break;
+        }
 
         const QVariantMap track = tracks.at(i).toMap();
         const QString sourcePath   = track.value(QStringLiteral("filePath")).toString();
@@ -98,8 +115,10 @@ void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QS
                     [&](double fraction) {
                         emit progress(i, total, sourceFileName, fraction, true);
                     });
-                if (o.cancelled)
+                if (o.cancelled) {
+                    cancelled = true;
                     break;   // partial file already removed; like the loop-top cancel, no result entry
+                }
                 ok = converted = o.ok;
                 if (!ok)
                     errorString = QStringLiteral("Conversion failed (%1)").arg(o.error);
@@ -141,10 +160,26 @@ void PlaylistExportWorker::runExport(QVariantList tracks, QString destFolder, QS
         result[QStringLiteral("replayGainTagged")] = tagged;
         result[QStringLiteral("converted")]       = converted;
         results.append(result);
+
+        if (ok && createM3u) {
+            const QString shown = artist.isEmpty() ? title : artist + QStringLiteral(" - ") + title;
+            m3uLines << QStringLiteral("#EXTINF:%1,%2").arg(durationMs > 0 ? durationMs / 1000 : -1).arg(shown)
+                     << destFileName;
+        }
     }
 
     if (normCacheDirty)
         VolumeNormalizationCache::save(normCache);
 
-    emit finished(results);
+    // UC-26 "Create M3U Playlist" -- see runExport()'s doc comment.
+    QString m3uFileName;
+    bool    m3uOk = false;
+    if (createM3u && !cancelled) {
+        QString base = sanitizeForFilename(playlistName);
+        if (base.isEmpty()) base = QStringLiteral("Topaz Playlist");
+        m3uFileName = base + QStringLiteral(".m3u");
+        m3uOk = writeM3u(destDir.filePath(m3uFileName), m3uLines);
+    }
+
+    emit finished(results, m3uFileName, m3uOk);
 }

@@ -77,8 +77,12 @@ void PlaylistExportController::onWorkerProgress(int done, int total, const QStri
     }
 }
 
-void PlaylistExportController::onWorkerFinished(const QVariantList &results)
+void PlaylistExportController::onWorkerFinished(const QVariantList &results,
+                                                 const QString &m3uFileName, bool m3uOk)
 {
+    m_m3uFileName = m3uFileName;
+    m_m3uOk       = m3uOk;
+    emit m3uResultChanged();   // before exportFinished(), so its handlers see it
     m_exporting = false;
     emit exportingChanged();
     m_exportProgress = 100;
@@ -184,7 +188,8 @@ bool PlaylistExportController::ffmpegAvailable() const
 void PlaylistExportController::startExport(const QVariantList &tracks, const QString &destFolder,
                                             const QString &prefix, bool replayGainNormalization,
                                             double audiophileTrimDb, bool convertToMp3,
-                                            bool alwaysMeasure)
+                                            bool alwaysMeasure, bool createM3u,
+                                            const QString &playlistName)
 {
     if (m_exporting) return;
 
@@ -196,7 +201,7 @@ void PlaylistExportController::startExport(const QVariantList &tracks, const QSt
     emit currentFileNameChanged();
 
     emit _requestExport(tracks, destFolder, prefix, replayGainNormalization, audiophileTrimDb,
-                         convertToMp3, alwaysMeasure);
+                         convertToMp3, alwaysMeasure, createM3u, playlistName);
 }
 
 void PlaylistExportController::cancelExport()

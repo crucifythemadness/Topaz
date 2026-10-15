@@ -40,6 +40,11 @@ class PlaylistExportController : public QObject
     // True while the file currently being processed is converted to MP3
     // rather than copied -- the dialog shows "Converting:" instead of "Exporting:".
     Q_PROPERTY(bool    converting      READ converting      NOTIFY convertingChanged)
+    // Result of the last export's "Create M3U Playlist" (UC-26): the written
+    // file name ("" = not requested, or the export was cancelled) and whether
+    // writing it succeeded. Updated right before exportFinished().
+    Q_PROPERTY(QString m3uFileName     READ m3uFileName     NOTIFY m3uResultChanged)
+    Q_PROPERTY(bool    m3uOk           READ m3uOk           NOTIFY m3uResultChanged)
 
 public:
     explicit PlaylistExportController(QObject *parent = nullptr);
@@ -49,6 +54,8 @@ public:
     int     exportProgress()  const { return m_exportProgress; }
     QString currentFileName() const { return m_currentFileName; }
     bool    converting()      const { return m_converting; }
+    QString m3uFileName()     const { return m_m3uFileName; }
+    bool    m3uOk()           const { return m_m3uOk; }
 
     // Returns { exists, writable, isRemovable, volumeLabel, freeBytes, totalBytes }
     // for destPath. writable is determined by actually creating and removing
@@ -81,12 +88,14 @@ public:
     // tracks: [{filePath, title, albumArtist, artist, album, durationMs}, ...]
     // in queue order (see PlaybackEngine::trackList()). No-op if an export is
     // already running. replayGainNormalization/audiophileTrimDb/convertToMp3/
-    // alwaysMeasure: see PlaylistExportWorker::runExport()'s doc comment
-    // (UC-26) -- all captured once here, at click time, not live-bound.
+    // alwaysMeasure/createM3u/playlistName: see PlaylistExportWorker::
+    // runExport()'s doc comment (UC-26) -- all captured once here, at click
+    // time, not live-bound.
     Q_INVOKABLE void startExport(const QVariantList &tracks, const QString &destFolder,
                                   const QString &prefix, bool replayGainNormalization = false,
                                   double audiophileTrimDb = 0.0, bool convertToMp3 = false,
-                                  bool alwaysMeasure = false);
+                                  bool alwaysMeasure = false, bool createM3u = false,
+                                  const QString &playlistName = QString());
 
     // Cooperative cancel -- see PlaylistExportWorker::cancelExport().
     Q_INVOKABLE void cancelExport();
@@ -96,6 +105,7 @@ signals:
     void exportProgressChanged();
     void currentFileNameChanged();
     void convertingChanged();
+    void m3uResultChanged();
 
     // results: [{sourcePath, destPath, success, errorString, replayGainTagged,
     // converted}, ...]
@@ -104,12 +114,13 @@ signals:
     // Commands → worker thread (queued so they execute on the worker's event loop).
     void _requestExport(QVariantList tracks, QString destFolder, QString prefix,
                          bool replayGainNormalization, double audiophileTrimDb,
-                         bool convertToMp3, bool alwaysMeasure);
+                         bool convertToMp3, bool alwaysMeasure,
+                         bool createM3u, QString playlistName);
 
 private slots:
     void onWorkerProgress(int done, int total, const QString &currentFileName,
                           double fraction, bool converting);
-    void onWorkerFinished(const QVariantList &results);
+    void onWorkerFinished(const QVariantList &results, const QString &m3uFileName, bool m3uOk);
 
 private:
     void startWorkerThread();
@@ -125,4 +136,6 @@ private:
     int     m_exportProgress  = 0;
     QString m_currentFileName;
     bool    m_converting      = false;
+    QString m_m3uFileName;
+    bool    m_m3uOk           = false;
 };

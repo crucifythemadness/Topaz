@@ -130,6 +130,17 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
   window overview and the Full Screen description in *Setup reference → MISC* "Start Topaz in
   Full Screen"): one or two sentences. No screenshots needed.
 
+### Export Playlist: "Create M3U Playlist" (UC-26)
+- **What changed:** the EXPORT PLAYLIST dialog has a new checkbox **Create M3U Playlist** (off by
+  default), where "Convert to MP3 (Stereo|CBR|320 kbps)" used to be; "Convert to MP3" now sits
+  right below it. When checked, Topaz also writes a playlist file named after the playlist (e.g.
+  `Road Trip.m3u`) into the export folder, listing the exported tracks in order. Why: some car
+  stereos play the numbered files of a folder in order, others read an M3U playlist; with both on
+  the stick, either kind works. The results screen confirms "M3U playlist created: …".
+- **Guide sections:** *Exporting a playlist*: describe the checkbox (with the car-stereo
+  reasoning) and update the position of "Convert to MP3".
+- **Screenshots:** retake the EXPORT PLAYLIST dialog screenshot (new checkbox, taller dialog).
+
 ### Release housekeeping
 - Title page "Version 1.0.0" and the text "Topaz 1.0.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.
