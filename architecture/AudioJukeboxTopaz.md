@@ -3527,7 +3527,7 @@ point every track-loading path (`playAt`, `next`, `previous`,
 `togglePlay`'s from-empty branch, `advanceToNext`'s has-next-track branch,
 and `addTrack`/`addTracks`' own auto-play branches) already funnels
 through — so it's always accurate regardless of *how* a track next gets
-loaded — **or by `seek()`** (see below). This applies uniformly to AUTO
+loaded — **or by `seek()` and `togglePlay()`'s play/resume branch** (see below). This applies uniformly to AUTO
 PLAY additions and manual ones (`AlbumCard`'s double-click, drag-and-drop
 into `PlaybackQueue`) alike, since both call through `addTrack()`/
 `addTracks()`. `PlaybackEngine` also exposes a plain public
@@ -3556,6 +3556,12 @@ paused" case already does — the same underlying signal ("is the user
 actively re-listening to something") applied consistently everywhere
 `m_queueFinished` gates a decision, not a one-off patched around the
 single reported call site.
+
+**Same bug, second path (fixed in 1.1.0)**: restarting the finished last track with NowPlaying's
+Play button (`togglePlay()`'s resume branch, which just calls `m_deck->play()` on the current
+deck — no `loadTrack()`) also left `m_queueFinished` `true`, so the next added track hijacked the
+track the user had just started again. `togglePlay()`'s play/resume branch now clears the flag
+too, for the same "deliberate re-listen" reason as `seek()`.
 
 ### Alternate: starvation
 

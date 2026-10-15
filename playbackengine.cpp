@@ -817,6 +817,11 @@ void PlaybackEngine::togglePlay()
         if (m_crossfading) m_fadeTimer->stop();
         if (!m_userPaused) { m_userPaused = true; emit userPausedChanged(); }
     } else {
+        // Restarting the last track after the queue played through is a
+        // deliberate re-listen, same as seek(): the queue is no longer
+        // "finished", so a track added next is appended instead of
+        // auto-playing over this one. See UC-16/UC-06.
+        m_queueFinished = false;
         m_deck->play();
         if (m_crossfading) m_decks[1 - m_activeDeck]->play();
         if (m_crossfading) m_fadeTimer->start();
