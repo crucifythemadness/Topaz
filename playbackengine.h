@@ -73,6 +73,9 @@ class PlaybackEngine : public QAbstractListModel
     Q_PROPERTY(int     currentTrackNumber READ currentTrackNumber NOTIFY currentTrackChanged)
     Q_PROPERTY(QString currentFormat    READ currentFormat    NOTIFY currentTrackChanged)
     Q_PROPERTY(int     currentBitrate   READ currentBitrate   NOTIFY currentTrackChanged)
+    // "VBR" / "CBR" for an MP3 (from its Xing/VBRI header), "" for every
+    // other format -- NowPlaying's bitrate prefix.
+    Q_PROPERTY(QString currentBitrateMode READ currentBitrateMode NOTIFY currentTrackChanged)
     Q_PROPERTY(int     currentRating    READ currentRating    NOTIFY currentRatingChanged)
     // Auto Loudness Correction (UC-35): the static correction applied to the
     // current track, formatted for NowPlaying ("-1.2 dB", "+2.0 dB"). Empty
@@ -143,6 +146,7 @@ public:
     int     currentTrackNumber() const;
     QString currentFormat()     const;
     int     currentBitrate()    const;
+    QString currentBitrateMode() const;
     int     currentRating()     const;   // 0-10; 0 if no track loaded or unrated
     QString currentLoudnessText() const;
     QString currentCoverSource()      const;

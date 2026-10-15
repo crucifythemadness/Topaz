@@ -25,7 +25,8 @@ struct TrackInfo
     int     track        = 0;
     int     year         = 0;
     qint64  duration     = 0;   // milliseconds
-    int     bitrate      = 0;   // kbps
+    int     bitrate      = 0;   // kbps (VBR MP3: average)
+    bool    vbr          = false;   // MP3 only: Xing/VBRI header found (NowPlaying "VBR"/"CBR")
     qint64  fileSize     = 0;   // bytes
     qint64  lastModified = 0;   // QDateTime::toMSecsSinceEpoch
 

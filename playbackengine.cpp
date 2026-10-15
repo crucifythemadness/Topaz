@@ -295,6 +295,15 @@ int PlaybackEngine::currentBitrate() const
     return m_queue.at(m_currentIndex).bitrate;
 }
 
+QString PlaybackEngine::currentBitrateMode() const
+{
+    if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return {};
+    const TrackInfo &t = m_queue.at(m_currentIndex);
+    // Only MP3 says so in its header; FLAC is always variable, Opus not known for sure.
+    if (formatFromPath(t.filePath) != QStringLiteral("MP3")) return {};
+    return t.vbr ? QStringLiteral("VBR") : QStringLiteral("CBR");
+}
+
 int PlaybackEngine::currentRating() const
 {
     if (m_currentIndex < 0 || m_currentIndex >= m_queue.size()) return 0;
@@ -352,6 +361,7 @@ TrackInfo PlaybackEngine::trackFromMap(const QVariantMap &map)
     t.genre       = map.value(QStringLiteral("genre")).toString();
     t.year        = map.value(QStringLiteral("year")).toInt();
     t.bitrate     = map.value(QStringLiteral("bitrate")).toInt();
+    t.vbr         = map.value(QStringLiteral("vbr")).toBool();
     t.track       = map.value(QStringLiteral("number")).toString().toInt();
     t.duration    = map.value(QStringLiteral("durationMs")).toLongLong();
 

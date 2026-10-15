@@ -113,6 +113,7 @@ QVariantList serializeAlbumAccum(QList<AlbumAccum> &albumAccum, bool markFirstAc
             tm[QStringLiteral("duration")]    = formatDuration(t->duration);
             tm[QStringLiteral("durationMs")]  = static_cast<qlonglong>(t->duration);
             tm[QStringLiteral("bitrate")]     = t->bitrate;
+            tm[QStringLiteral("vbr")]         = t->vbr;
             tm[QStringLiteral("filePath")]    = t->filePath;
             tm[QStringLiteral("artist")]      = t->artist;
             tm[QStringLiteral("albumArtist")] = t->albumArtist;
@@ -821,6 +822,7 @@ QVariantList LibraryModel::autoPlayCandidatePool(const QStringList &activeGenres
         tm[QStringLiteral("year")]        = t.year;
         tm[QStringLiteral("durationMs")]  = static_cast<qlonglong>(t.duration);
         tm[QStringLiteral("bitrate")]     = t.bitrate;
+        tm[QStringLiteral("vbr")]         = t.vbr;
         tm[QStringLiteral("rating")]      = t.rating;
         tm[QStringLiteral("coverSource")] = cover.isEmpty()
             ? QString()
@@ -945,6 +947,7 @@ QVariantList LibraryModel::buildStandaloneTrackCards(const QVariantList &tracks)
                                          m.value(QStringLiteral("number"))).toInt();
             synth.duration    = m.value(QStringLiteral("durationMs")).toLongLong();
             synth.bitrate     = m.value(QStringLiteral("bitrate")).toInt();
+            synth.vbr         = m.value(QStringLiteral("vbr")).toBool();
             fallback.append(synth);
             t = &fallback.last();
         }

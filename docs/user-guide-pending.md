@@ -92,6 +92,22 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
 - **Screenshots:** retake the MISC tab screenshot (new label). The NowPlaying screenshot now
   shows the trash-bin icon next to the stars — retake if the current one doesn't.
 
+### Correct bitrate for VBR MP3s + VBR/CBR in NowPlaying
+- **What changed:**
+  - MP3 files with a variable bitrate (VBR) now show their real average bitrate in NowPlaying
+    (and wherever the bitrate is shown) — e.g. 182 KBPS instead of 64 KBPS.
+  - NowPlaying's format badge now says whether an MP3 has a variable or constant bitrate:
+    `MP3 | VBR 182 KBPS`, `MP3 | CBR 320 KBPS`. FLAC and Opus show no prefix, as before
+    (`FLAC | 950 KBPS`) — FLAC's bitrate always varies, being lossless.
+  - After the update, Topaz re-reads the information of all MP3 files **once**, in the
+    background, on the first start (the library stays usable meanwhile; ratings and playlists
+    are kept).
+- **Guide sections:** where the format/bitrate badge is explained (NowPlaying, item 8 "Format ·
+  rating"): explain VBR / CBR (MP3 only) and that for VBR the average bitrate is shown.
+  Optionally a "What's new in 1.1.0" line about the one-time background refresh.
+- **Screenshots:** the NowPlaying screenshot(s) showing an MP3 badge now include "CBR" / "VBR" —
+  retake them.
+
 ### Release housekeeping
 - Title page "Version 1.0.0" and the text "Topaz 1.0.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.

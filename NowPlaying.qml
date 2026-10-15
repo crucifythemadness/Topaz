@@ -473,8 +473,12 @@ Rectangle {
                             }
                             Text {
                                 id: formatLabel
+                                // "MP3  |  VBR 182 KBPS" -- the VBR/CBR prefix
+                                // only for MP3 (currentBitrateMode is "" otherwise).
                                 text: root.engine
                                       ? (root.engine.currentFormat + "  |  "
+                                         + (root.engine.currentBitrateMode.length > 0
+                                            ? root.engine.currentBitrateMode + " " : "")
                                          + root.engine.currentBitrate + " KBPS")
                                       : ""
                                 font.family:        Theme.fontFamilyMono

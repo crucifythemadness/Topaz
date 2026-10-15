@@ -405,6 +405,7 @@ QVariantMap PlaylistManager::loadPlaylist(const QString &filePath)
 
         // bitrate comes from the actual file — not stored in XSPF
         m[QStringLiteral("bitrate")]     = tag.bitrate;
+        m[QStringLiteral("vbr")]         = tag.vbr;
 
         const qint64 dur = tag.duration > 0 ? tag.duration : e.duration.toLongLong();
         m[QStringLiteral("durationMs")]  = dur;

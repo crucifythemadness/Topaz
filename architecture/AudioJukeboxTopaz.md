@@ -1089,8 +1089,19 @@ always scanned to determine bitrate, since ID3v2 has no dedicated bitrate frame.
 is taken from the `TLEN` frame when present; otherwise it is estimated from the same
 frame header scan:
 1. Scan past ID3v2 tag to first MPEG sync word; read bitrate/sample-rate from the frame header.
-2. Check for Xing/Info VBR header → use `frame_count × samples_per_frame / sample_rate`.
+2. Check for a `Xing`/`Info` header (after the side info) or a Fraunhofer `VBRI` header (fixed
+   offset 32) → duration = `frame_count × samples_per_frame / sample_rate`. Parsed even when
+   `TLEN` already gave the duration, because of step 4.
 3. CBR fallback → `audio_bytes × 8 / bitrate`.
+4. **VBR average bitrate** (`Xing` or `VBRI` — not `Info`, which is LAME's CBR marker):
+   `bitrate = audio_bytes × 8 / duration_ms` (kbit/s), with the header's byte count (else
+   `fileSize − audioStart`). The first frame of a VBR file is the header frame itself, written at
+   a low nominal rate: before Topaz 1.1.0 the badge showed e.g. 64 KBPS for a ~182 kbps file.
+   CBR files keep the frame header's exact value. `TrackInfo::vbr` records which case it was
+   (true = `Xing`/`VBRI`); it travels with `bitrate` in every track map (`"vbr"` key) and
+   NowPlaying shows it via `PlaybackEngine.currentBitrateMode` (`"VBR"`/`"CBR"` for MP3, `""`
+   otherwise): `MP3  |  VBR 182 KBPS`. MP3 only, by design: FLAC's bitrate always varies
+   (lossless), and Opus doesn't reliably say.
 
 **Duration and bitrate for Opus**: Opus has no total-sample-count field like FLAC's
 `STREAMINFO`. `readOpus()` walks Ogg page framing (`TagReader::readOggPageHeader()`,
@@ -1172,9 +1183,17 @@ current track changes (see `PlaybackEngine::currentLargeCoverSource`).
 
 Stored alongside `Topaz.config` in `QStandardPaths::AppConfigLocation`.
 
+Schema **version 3** (Topaz 1.1.0): version 1's fields plus `"vbr"`, and VBR MP3s store their
+average bitrate (see "Bitrate and duration for MP3"). (Version 2 was a short-lived 1.1.0
+development step: average bitrate, no `"vbr"`.) `LibraryCache::load()` of a file older than
+version 3 zeroes `lastModified` on every `.mp3` entry, so the startup statCheck re-reads those
+tags once on the worker thread (ids kept via `existingIds`, ratings re-applied); the next
+`save()` writes version 3 and nothing is re-read again. FLAC/Opus entries are reused unchanged.
+A fresh install never has an old file, so it starts at version 3.
+
 ```json
 {
-  "version": 1,
+  "version": 3,
   "tracks": [
     {
       "id":           "550e8400-e29b-41d4-a716-446655440000",
@@ -1191,6 +1210,7 @@ Stored alongside `Topaz.config` in `QStandardPaths::AppConfigLocation`.
       "year":         2018,
       "duration":     234000,
       "bitrate":      1024,
+      "vbr":          false,
       "fileSize":     54321678,
       "lastModified": 1718400000000,
       "coverThumb":   "",

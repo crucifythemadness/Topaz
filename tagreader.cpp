@@ -293,9 +293,7 @@ void TagReader::estimateMp3Duration(QFile &f, qint64 audioStart, TrackInfo &info
 
     const int bitrate = isMpeg1 ? kBr1[brIdx] : kBr2[brIdx];
     if (bitrate == 0) return;
-    info.bitrate = bitrate;
-
-    if (!needDuration) return; // TLEN frame already gave us an exact duration
+    info.bitrate = bitrate;   // exact for CBR; replaced by the average below for VBR
 
     int sampleRate = 0;
     if (versionBits == 3)      sampleRate = kSr1[srIdx];
@@ -303,25 +301,45 @@ void TagReader::estimateMp3Duration(QFile &f, qint64 audioStart, TrackInfo &info
     else                        sampleRate = kSr25[srIdx];
     if (sampleRate == 0) return;
 
-    // Check Xing / Info VBR header
+    const auto be32 = [&buf](int off) -> quint32 {
+        const uchar *p = reinterpret_cast<const uchar *>(buf.constData() + off);
+        return (quint32(p[0]) << 24) | (quint32(p[1]) << 16) | (quint32(p[2]) << 8) | quint32(p[3]);
+    };
+
+    // VBR / Info header in the first frame. Parsed even when TLEN already
+    // gave the duration: a VBR file's average bitrate comes from it.
+    quint32 frames = 0, bytes = 0;
+    bool    isVbr  = false;
     const int sideInfoSize = isMpeg1 ? (isMono ? 17 : 32) : (isMono ? 9 : 17);
     const int xingOff      = syncPos + 4 + sideInfoSize;
-    if (xingOff + 8 <= buf.size()) {
-        const QByteArray xingTag = buf.mid(xingOff, 4);
-        if (xingTag == "Xing" || xingTag == "Info") {
-            const uchar *xd = reinterpret_cast<const uchar *>(buf.constData() + xingOff + 4);
-            const quint32 xflags = (quint32(xd[0]) << 24) | (quint32(xd[1]) << 16) |
-                                   (quint32(xd[2]) <<  8) |  quint32(xd[3]);
-            if (xflags & 0x01) { // frame count present
-                const uchar *fc = xd + 4;
-                const quint32 frames = (quint32(fc[0]) << 24) | (quint32(fc[1]) << 16) |
-                                       (quint32(fc[2]) <<  8) |  quint32(fc[3]);
-                const qint64 spf    = isMpeg1 ? 1152 : 576;
-                info.duration       = frames * spf * 1000LL / sampleRate;
-                return;
-            }
-        }
+    const int vbriOff      = syncPos + 4 + 32;   // Fraunhofer VBRI: fixed offset
+    if (xingOff + 16 <= buf.size()
+        && (buf.mid(xingOff, 4) == "Xing" || buf.mid(xingOff, 4) == "Info")) {
+        isVbr = buf.mid(xingOff, 4) == "Xing";   // "Info" = LAME's CBR marker
+        const quint32 xflags = be32(xingOff + 4);
+        int off = xingOff + 8;
+        if (xflags & 0x01) { frames = be32(off); off += 4; }   // frame count
+        if (xflags & 0x02) bytes = be32(off);                  // audio byte count
+    } else if (vbriOff + 18 <= buf.size() && buf.mid(vbriOff, 4) == "VBRI") {
+        isVbr  = true;
+        bytes  = be32(vbriOff + 10);
+        frames = be32(vbriOff + 14);
     }
+
+    const qint64 spf = isMpeg1 ? 1152 : 576;
+    if (needDuration && frames > 0)
+        info.duration = frames * spf * 1000LL / sampleRate;
+
+    info.vbr = isVbr;
+    if (isVbr) {
+        // Average bitrate: bits / ms == kbit/s.
+        const qint64 audioBytes = bytes > 0 ? qint64(bytes) : info.fileSize - audioStart;
+        const qint64 durMs = frames > 0 ? qint64(frames) * spf * 1000LL / sampleRate : info.duration;
+        if (audioBytes > 0 && durMs > 0)
+            info.bitrate = int((audioBytes * 8LL + durMs / 2) / durMs);
+    }
+
+    if (!needDuration || info.duration > 0) return;   // TLEN or the header gave the duration
 
     // CBR fallback: estimate from audio data size
     const qint64 audioBytes = info.fileSize - audioStart;

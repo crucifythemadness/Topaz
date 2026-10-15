@@ -92,10 +92,13 @@ private:
     // duplication, the spec mandates the same layout in both places.
     static QByteArray parsePictureBlock(const QByteArray &block);
 
-    // Always determines bitrate from the first MPEG frame header (ID3v2 has no
-    // dedicated bitrate frame). Also fills in duration from the Xing/Info VBR
-    // header or a CBR estimate, but only when info.duration is not already known
-    // (e.g. from an ID3v2 TLEN frame read earlier).
+    // Always determines the bitrate (ID3v2 has no dedicated bitrate frame): for
+    // a VBR file (Xing or VBRI header) the average, audio bytes x 8 / duration;
+    // otherwise (CBR, LAME "Info" header) the first MPEG frame header's value --
+    // a VBR file's first frame is the header frame itself, written at a low
+    // nominal rate (e.g. 64 kbps for a ~180 kbps file). Also fills in duration
+    // from the VBR/Info header or a CBR estimate, but only when info.duration
+    // is not already known (e.g. from an ID3v2 TLEN frame read earlier).
     static void estimateMp3Duration(QFile &f, qint64 audioStart, TrackInfo &info);
 
     // Decode a 4-byte ID3v2 syncsafe integer (each byte uses 7 bits).

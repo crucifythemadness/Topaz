@@ -38,6 +38,9 @@ QList<TrackInfo> LibraryCache::load()
 
     const QJsonObject root = doc.object();
     const QJsonArray  arr  = root[QStringLiteral("tracks")].toArray();
+    // Older versions lack the VBR average bitrate / "vbr" flag: force one
+    // re-read of every MP3 (see the version history in librarycache.h).
+    const bool refreshMp3 = root[QStringLiteral("version")].toInt(1) < 3;
 
     QList<TrackInfo> tracks;
     tracks.reserve(arr.size());
@@ -68,11 +71,14 @@ QList<TrackInfo> LibraryCache::load()
         t.year         = o[QStringLiteral("year")].toInt();
         t.duration     = static_cast<qint64>(o[QStringLiteral("duration")].toDouble());
         t.bitrate      = o[QStringLiteral("bitrate")].toInt();
+        t.vbr          = o[QStringLiteral("vbr")].toBool(false);
         t.fileSize     = static_cast<qint64>(o[QStringLiteral("fileSize")].toDouble());
         t.lastModified = static_cast<qint64>(o[QStringLiteral("lastModified")].toDouble());
         t.coverThumb   = o[QStringLiteral("coverThumb")].toString();
         t.rating       = o[QStringLiteral("rating")].toInt();
         t.ratingId     = QUuid::fromString(o[QStringLiteral("ratingId")].toString());
+        if (refreshMp3 && t.fileName.endsWith(QStringLiteral(".mp3"), Qt::CaseInsensitive))
+            t.lastModified = 0;
         tracks.append(t);
     }
     return tracks;
@@ -99,6 +105,7 @@ bool LibraryCache::save(const QList<TrackInfo> &tracks)
         o[QStringLiteral("year")]         = t.year;
         o[QStringLiteral("duration")]     = static_cast<double>(t.duration);
         o[QStringLiteral("bitrate")]      = t.bitrate;
+        o[QStringLiteral("vbr")]          = t.vbr;
         o[QStringLiteral("fileSize")]     = static_cast<double>(t.fileSize);
         o[QStringLiteral("lastModified")] = static_cast<double>(t.lastModified);
         o[QStringLiteral("coverThumb")]   = t.coverThumb;
@@ -108,7 +115,7 @@ bool LibraryCache::save(const QList<TrackInfo> &tracks)
     }
 
     QJsonObject root;
-    root[QStringLiteral("version")] = 1;
+    root[QStringLiteral("version")] = 3;
     root[QStringLiteral("tracks")]  = arr;
 
     const QString tmpPath = cacheFilePath() + QStringLiteral(".tmp");
