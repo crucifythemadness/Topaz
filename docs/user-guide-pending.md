@@ -47,6 +47,14 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
   date and some statistics") — describe the three tabs and the POWERED BY details.
   · Screenshots: About dialog TOPAZ tab, POWERED BY grid, one details page (e.g. Qt).
 
+- **8 more audio visualizer colours** — Setup → AUDIO VISUALIZER now offers 40 colour
+  swatches in two rows of 20 (was 32 in two rows of 16), including the four neon colours of
+  the new lettering (pink, violet, cyan, blue), hot magenta, electric lime, mint and a warm
+  white.
+  · Guide section: the audio visualizer settings (colour choice; mention the count only if
+  the guide does).
+  · Screenshots: Setup → AUDIO VISUALIZER tab.
+
 ### Release housekeeping
 - Title page "Version 1.1.0" and the text "Topaz 1.1.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.

@@ -3301,7 +3301,7 @@ Popup {
 
                         Grid {
                             Layout.leftMargin: 24
-                            columns: 16   // 32 swatches → exactly two full rows
+                            columns: 20   // 40 swatches → exactly two full rows (944 px of the ~1024 available)
                             spacing: 16
 
                             Repeater {
@@ -3318,7 +3318,15 @@ Popup {
                                     "#AF52DE", "#FF2D55", "#FF6482", "#A2845E",
                                     "#8E8E93", "#64D2FF", "#BF5AF2", "#32ADE6",
                                     "#FFD60A", "#4CD964", "#FF7A45", "#C77DFF",
-                                    "#06D6A0", "#EF476F", "#FFD166", "#118AB2"
+                                    "#06D6A0", "#EF476F", "#FFD166", "#118AB2",
+                                    // 8 more: the four tube colours of the neon
+                                    // "TOPAZ JUKEBOX" lettering (pink, violet, cyan,
+                                    // blue -- see tools/generate-wordmark.py), then
+                                    // hot magenta, electric lime, mint and a warm
+                                    // incandescent white. Keep the total at 40 (two
+                                    // rows of 20) -- the user wants two rows only.
+                                    "#FF4FB8", "#B03BFF", "#3BE8FF", "#2B8CFF",
+                                    "#F72585", "#CCFF00", "#98FFD9", "#FFF4D6"
                                 ]
 
                                 delegate: Rectangle {

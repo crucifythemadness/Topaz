@@ -1604,7 +1604,7 @@ what "configured" means — absent means that pane has never been positioned yet
 | `tagInfoPaneConfigured` / `tagInfoPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable TagInfoWindow pane's last-saved geometry (defaults `500`×`230`, `configured` starts `false`). Same convention as `bigCoverPane*` above. See UC-18. |
 | `saveTagInfoPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles. Same calling convention as `saveBigCoverPaneGeometry`. |
 | `audioVisualizerBarCount` / `setAudioVisualizerBarCount(count)` | Number of bars the Audio Visualizer pane renders (default `24`); clamped to `[8, 64]`; auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider. Read live by `AudioVisualizerController` on every processed audio block — never cached, same convention `PlaybackEngine` uses for crossfade settings. See UC-19. |
-| `audioVisualizerColor` / `setAudioVisualizerColor(color)` | Hex color string for the bars (default `"#00DAF3"`); no validation beyond non-empty. Set from 32 preset swatches (16-column `Grid`, two full rows) on the AUDIO VISUALIZER tab (not a full color picker — see UC-19). |
+| `audioVisualizerColor` / `setAudioVisualizerColor(color)` | Hex color string for the bars (default `"#00DAF3"`); no validation beyond non-empty. Set from 40 preset swatches (20-column `Grid`, two full rows — user wants two rows only; keep it at 40) on the AUDIO VISUALIZER tab (not a full color picker — see UC-19). |
 | `audioVisualizerDecaySpeed` / `setAudioVisualizerDecaySpeed(speed)` | How quickly bars fall after a peak (default `0.5`); clamped to `[0.0, 1.0]`; auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider ("SLOW"…"FAST"). |
 | `audioVisualizerSensitivity` / `setAudioVisualizerSensitivity(sensitivity)` | Gain offset applied before dB normalization in `AudioVisualizerController::processBlock` (default `0.5` = no change from the original fixed mapping); clamped to `[0.0, 1.0]`; auto-saves. Mapped to ±18dB (`(sensitivity - 0.5) * 2 * 18`) — `1.0` boosts bars closer to full height on loud passages, `0.0` cuts them noticeably lower. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider ("LOW"…"HIGH", displayed 0–100%). See UC-19. |
 | `audioVisualizerPeakHoldEnabled` / `setAudioVisualizerPeakHoldEnabled(enabled)` | Whether a slowly-decaying peak marker is drawn above each bar (default `true`); auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab toggle. |
@@ -4642,16 +4642,18 @@ divided by 100 when calling `setAudioVisualizerPaneOpacity`), and bar opacity
 (0-100%, same percentage convention, calling `setAudioVisualizerBarOpacity` —
 an identical slider block placed directly below pane opacity, independent
 setting for the bars/peak ticks themselves), the same hand-rolled
-48×24 toggle track for peak-hold, and — for color — a fixed 16-column `Grid`
-(not `Row`; 32 swatches at 32px + 16px spacing no longer fit on one line at the
-dialog's content width, so `columns: 16` lays them out as two full rows of 16
-regardless of available width) of 32 preset swatch `Rectangle`s using the same
+48×24 toggle track for peak-hold, and — for color — a fixed 20-column `Grid`
+(not `Row`; 40 swatches at 32px + 16px spacing don't fit on one line at the
+dialog's content width, so `columns: 20` lays them out as two full rows of 20 (944 px)
+regardless of available width) of 40 preset swatch `Rectangle`s using the same
 "`Repeater` over an options array compared against one `AppConfig` value" idiom
 already used for `autoPlaySongRepeat`/`autoPlayTransportAccess`'s radio groups,
-just rendered as color chips instead of labeled circles. The 32 presets are the
+just rendered as color chips instead of labeled circles. The 40 presets are the
 original 8 (4 of which already match Theme tokens — `Theme.secondary`,
 `Theme.primary`, `Theme.tertiary`, `Theme.fgSurface`) plus 24 additional
-saturated colors spread across the hue wheel, appended in a fixed order so
+saturated colors spread across the hue wheel, plus 8 more (the four tube colours
+of the neon wordmark — #FF4FB8, #B03BFF, #3BE8FF, #2B8CFF — then hot magenta, electric
+lime, mint, warm white), all appended in a fixed order so
 existing selections stay stable. A full HSV/RGB color picker was deliberately
 not built for this first version — presets are simpler and consistent with
 starting small; a real picker is a reasonable later enhancement.
