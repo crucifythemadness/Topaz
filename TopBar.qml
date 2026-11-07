@@ -4,10 +4,12 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Header bar: Logo | Navigation tabs | Loudspeaker icon + Settings icon + User avatar
+// Header bar: Logo + "TOPAZ JUKEBOX" | Navigation tabs | Loudspeaker (volume
+// knob) + Setup + About + Fullscreen/Window toggle, and in full screen (no OS
+// title bar) also Minimize + Close.
 Rectangle {
     id: root
-    height: 64
+    height: 76     // = MatryoshkaV2's on-screen bar (56 px × its fontScale 1.35)
     color: Theme.surface
 
     // Bound from Main.qml -- controls the Windows OS master volume (not
@@ -36,6 +38,16 @@ Rectangle {
     // Emitted when the user clicks the About Topaz (ⓘ) icon
     signal aboutRequested()
 
+    // Bound from Main.qml -- true while the main window is Window.FullScreen.
+    // Picks the fullscreen/window toggle icon and shows Minimize + Close.
+    property bool fullscreen: false
+
+    // Fullscreen/window toggle (same as F11), Minimize and Close -- all
+    // handled by Main.qml.
+    signal fullscreenToggled()
+    signal minimizeRequested()
+    signal closeRequested()
+
     // Ghost bottom border (10 % outlineVariant) -- satisfies the "no-line" rule
     Rectangle {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
@@ -48,13 +60,25 @@ Rectangle {
         spacing: 0
 
         // -- Branding --------------------------------------------------
-        Text {
-            text: qsTr("TOPAZ JUKEBOX")
-            font.family: Theme.fontFamilyHeadline
-            font.pixelSize:    22
-            font.weight:       Font.Bold
-            font.letterSpacing: Theme.lsWidest
-            color: Theme.fgSurface
+        Image {
+            Layout.alignment: Qt.AlignVCenter
+            Layout.rightMargin: 12
+            Layout.preferredWidth:  46   // = MatryoshkaV2's logo (34 px × 1.35)
+            Layout.preferredHeight: 46
+            // 256 px PNG of the app icon (tools/generate-app-icon.py), not
+            // app.ico: an Image doesn't reliably pick the .ico's largest frame.
+            source: "qrc:/Topaz/app_icon.png"
+            sourceSize: Qt.size(92, 92)
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            mipmap: true
+        }
+
+        // Neon "TOPAZ JUKEBOX" lettering with glow -- see NeonWordmark.qml
+        // (shared with the About dialog).
+        NeonWordmark {
+            Layout.alignment: Qt.AlignVCenter
+            wordHeight: 48
         }
 
         // Hi-Res Audio badge -- only while the currently-playing track is
@@ -140,33 +164,51 @@ Rectangle {
         // -- Right-side actions --------------------------------------------
         Row {
             Layout.fillHeight: true
-            spacing: 20
+            spacing: 8
 
             // OS Volume (loudspeaker) -- opens a flyout pane with the volume
-            // knob (VolumeKnob.qml). Leftmost of the three (swapped with Settings).
+            // knob (VolumeKnob.qml). Leftmost of the right-side buttons.
             Item {
                 id: volumeButton
-                width:  32
-                height: 32
+                width:  46     // same as IconButton's default
+                height: 46
                 anchors.verticalCenter: parent.verticalCenter
 
-                // Hover feedback: a background highlight rather than the
-                // usual text-recolor, since the speaker emoji glyph is
-                // rendered full-color by the system font and ignores text color.
+                // Same look as the IconButtons next to it (size, radius,
+                // p10 highlight, tinted line icon), but kept as a plain Item +
+                // MouseArea: the popup below is parented to it and its close
+                // timer reads hoverVolume.containsMouse. The highlight also
+                // stays on while the knob pane is open.
+                readonly property bool lit: hoverVolume.containsMouse || volumePopup.opened
+
                 Rectangle {
                     anchors.fill: parent
                     radius: Theme.radiusMd
-                    color:  Theme.p10
-                    visible: hoverVolume.containsMouse || volumePopup.opened
+                    color:  volumeButton.lit ? Theme.p10 : "transparent"
+                    Behavior on color { ColorAnimation { duration: 120 } }
                 }
 
-                Text {
+                // Thin ring showing the current OS volume (a mini VolumeKnob);
+                // live-synced through SystemVolumeController's NOTIFYs.
+                VolumeRing {
                     anchors.fill: parent
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment:   Text.AlignVCenter
-                    text: root.systemVolume && root.systemVolume.muted ? "🔇" : "🔊"
-                    font.pixelSize: 22
+                    anchors.margins: 2
+                    value: root.systemVolume ? root.systemVolume.volume : 0
+                    muted: root.systemVolume ? root.systemVolume.muted : false
                 }
+
+                SvgIcon {
+                    anchors.centerIn: parent
+                    size: 21       // ~half the ring's 42 px, so it sits clear inside
+                    name: root.systemVolume && root.systemVolume.muted ? "volume-mute" : "volume"
+                    color: volumeButton.lit ? Theme.primary : Theme.fgSurfaceVariant
+                }
+
+                ToolTip.visible: hoverVolume.containsMouse && !volumePopup.opened
+                ToolTip.text: !root.systemVolume ? qsTr("System volume")
+                            : root.systemVolume.muted ? qsTr("System volume: muted")
+                            : qsTr("System volume: %1 %").arg(root.systemVolume.volume)
+                ToolTip.delay: 500
 
                 MouseArea {
                     id: hoverVolume
@@ -273,58 +315,50 @@ Rectangle {
                 }
             }
 
-            // Settings
-            Text {
+            // Icon buttons (IconButton.qml: tinted line icons from icons/).
+            // Row centers each child via anchors.verticalCenter, so their
+            // size doesn't affect the 64px bar height.
+            IconButton {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "⚙"
-                font.pixelSize: 20
-                color: hoverSettings.containsMouse ? Theme.primary : Theme.fgSurfaceVariant
-                MouseArea {
-                    id: hoverSettings
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.settingsRequested()
-                }
+                iconName: "settings"
+                tooltip: qsTr("Setup")
+                onClicked: root.settingsRequested()
+            }
+            IconButton {
+                anchors.verticalCenter: parent.verticalCenter
+                iconName: "info"
+                tooltip: qsTr("About Topaz")
+                onClicked: root.aboutRequested()
+            }
+            IconButton {
+                anchors.verticalCenter: parent.verticalCenter
+                iconName: root.fullscreen ? "windowed" : "fullscreen"
+                tooltip: root.fullscreen ? qsTr("Window (F11)") : qsTr("Full screen (F11)")
+                onClicked: root.fullscreenToggled()
             }
 
-            // About Topaz — rightmost (first from the right), deliberately a
-            // bit bigger than the other icons (38×38 vs. their 32×32, tight
-            // 3px image margin) so it stands out as the "info" affordance.
-            // Row centers each child individually via anchors.verticalCenter
-            // (not a RowLayout), so this doesn't affect the 64px bar height.
-            Item {
-                id: aboutButton
-                width:  38
-                height: 38
+            // Full screen only (no OS title bar there): divider, Minimize, Close.
+            Rectangle {
+                visible: root.fullscreen
                 anchors.verticalCenter: parent.verticalCenter
-
-                // Background-highlight hover feedback (not a text-recolor)
-                // since a raster PNG can't be recolored via `color:` the way
-                // the gear glyph is — same technique as the volume button.
-                Rectangle {
-                    anchors.fill: parent
-                    radius: Theme.radiusMd
-                    color:  Theme.p10
-                    visible: hoverAbout.containsMouse
-                }
-
-                Image {
-                    anchors.fill: parent
-                    anchors.margins: 3
-                    source: "qrc:/Topaz/InfoAbout.png"
-                    sourceSize.width:  width
-                    sourceSize.height: height
-                    fillMode: Image.PreserveAspectFit
-                }
-
-                MouseArea {
-                    id: hoverAbout
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.aboutRequested()
-                }
+                width: 1
+                height: 28
+                color: Theme.outlineVariant
+            }
+            IconButton {
+                visible: root.fullscreen
+                anchors.verticalCenter: parent.verticalCenter
+                iconName: "minimize"
+                tooltip: qsTr("Minimize")
+                onClicked: root.minimizeRequested()
+            }
+            IconButton {
+                visible: root.fullscreen
+                anchors.verticalCenter: parent.verticalCenter
+                iconName: "close"
+                danger: true
+                tooltip: qsTr("Close Topaz")
+                onClicked: root.closeRequested()
             }
         }
     }

@@ -27,7 +27,7 @@ find_package(OpenGL REQUIRED)
 qt_standard_project_setup()
 
 # QTP0001: NEW changes the default QML resource prefix to ":/qt/qml/". Everything
-# here loads its assets from the classic ":/Topaz/..." (qrc:/Topaz/app.ico in
+# here loads its assets from the classic ":/Topaz/..." (qrc:/Topaz/app_icon.png in
 # AboutDialog.qml, ":/Topaz/app.ico" in main.cpp / autoplaycontroller.cpp, the .svg
 # icons, ...), so qt_add_qml_module below passes RESOURCE_PREFIX / explicitly --
 # Qt's documented way to keep the old paths. (Leaving the policy unset, or setting
@@ -227,9 +227,23 @@ qt_add_qml_module(topaz
         ScanFoldersDialog.qml
         VolumeKnob.qml
         FoundGenresDialog.qml
+        SvgIcon.qml
+        IconButton.qml
+        VolumeRing.qml
+        NeonWordmark.qml
     RESOURCES
         app.ico
-        InfoAbout.png
+        app_icon.png
+        Topaz_Wordmark_Topaz.svg
+        Topaz_Wordmark_Jukebox.svg
+        icons/info.svg
+        icons/settings.svg
+        icons/fullscreen.svg
+        icons/windowed.svg
+        icons/minimize.svg
+        icons/close.svg
+        icons/volume.svg
+        icons/volume-mute.svg
         Claude_Logo.png
         CrucifyTheMadness_Logo.png
         Qt_Logo.png

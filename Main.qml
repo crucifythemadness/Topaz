@@ -45,8 +45,34 @@ ApplicationWindow {
     // Maximized don't count), which also covers the start-up show.
     property bool layoutFullscreen: false
     onVisibilityChanged: {
+        // TopBar's Minimize button from full screen (see minimizeWindow()).
+        // showMinimized() replaces the window state: Qt first LEAVES full
+        // screen (restoring the frame) and only then minimizes, which reports
+        // a transient Windowed in between. Reacting to that transient (as the
+        // first version did, by re-entering FullScreen mid-minimize) left the
+        // restored window without its frame. So: ignore everything until the
+        // window really is Minimized, and only then arm the restore.
+        if (root.minimizeFromFullscreenPending) {
+            if (root.visibility === Window.Minimized) {
+                root.minimizeFromFullscreenPending = false
+                minimizePendingTimer.stop()
+                root.restoreFullscreenAfterMinimize = true
+            }
+            return
+        }
         if (root.visibility === Window.Hidden || root.visibility === Window.Minimized)
             return
+        // Restored after that minimize: a taskbar restore comes back Windowed --
+        // go back to full screen. Deferred a tick so it doesn't run inside Qt's
+        // own restore handling, and returns before the panel-width switch below
+        // would swap to the windowed set.
+        if (root.restoreFullscreenAfterMinimize) {
+            root.restoreFullscreenAfterMinimize = false
+            if (root.visibility !== Window.FullScreen) {
+                Qt.callLater(function() { root.visibility = Window.FullScreen })
+                return
+            }
+        }
         const full = (root.visibility === Window.FullScreen)
         if (full === root.layoutFullscreen) return
         root.layoutFullscreen = full
@@ -66,11 +92,31 @@ ApplicationWindow {
         if (np    > 0) nowPlayingPanel.SplitView.preferredWidth    = np
     }
 
-    // F11 toggles between fullscreen and windowed.
+    // F11 and TopBar's fullscreen/window button toggle between fullscreen and windowed.
+    function toggleFullscreen() {
+        root.visibility = (root.visibility === Window.FullScreen)
+                          ? Window.Windowed : Window.FullScreen
+    }
     Shortcut {
         sequence: "F11"
-        onActivated: root.visibility = (root.visibility === Window.FullScreen)
-                     ? Window.Windowed : Window.FullScreen
+        onActivated: root.toggleFullscreen()
+    }
+
+    // TopBar's Minimize button (full screen only); see onVisibilityChanged.
+    property bool minimizeFromFullscreenPending: false   // showMinimized() in progress
+    property bool restoreFullscreenAfterMinimize: false  // minimized; re-enter FullScreen on restore
+    function minimizeWindow() {
+        root.restoreFullscreenAfterMinimize = false
+        root.minimizeFromFullscreenPending = (root.visibility === Window.FullScreen)
+        if (root.minimizeFromFullscreenPending) minimizePendingTimer.restart()
+        root.showMinimized()
+    }
+    // Safety net: if the window never reports Minimized (shouldn't happen),
+    // don't leave onVisibilityChanged ignoring every later change.
+    Timer {
+        id: minimizePendingTimer
+        interval: 2000
+        onTriggered: root.minimizeFromFullscreenPending = false
     }
 
     // While fullscreen (F11 or "Start Topaz in Full Screen") the mouse cursor
@@ -771,8 +817,12 @@ ApplicationWindow {
             systemVolume: systemVolume
             engine: engine
             activeTab: root.activeTab
+            fullscreen: root.visibility === Window.FullScreen
             onSettingsRequested: setupDialog.open()
             onAboutRequested:    aboutDialog.open()
+            onFullscreenToggled: root.toggleFullscreen()
+            onMinimizeRequested: root.minimizeWindow()
+            onCloseRequested:    root.close()   // honours the onClosing veto above
             onLibrarySelected:   root.activeTab = "library"
             onPlaylistsSelected: root.activeTab = "playlists"
             onSearchSelected:    root.activeTab = "search"

@@ -187,7 +187,9 @@ it with `pactl` — see the "Verification" paragraph in the SystemVolumeControll
 architecture doc.
 `packaging/linux/` (tracked) holds everything in `deploy-linux/` that isn't build output:
 `qt.conf`, `run-topaz.sh`, `README-Linux.txt`, and the launcher assets — `topaz.png` (the
-256px image from `app.ico`) and `install-topaz-launcher.sh`, which writes
+256px app icon; generated together with `app.ico`/`app_icon.png` by `tools/generate-app-icon.py`,
+see the TopBar entry in the architecture doc — never edit the images by hand) and
+`install-topaz-launcher.sh`, which writes
 `~/.local/share/applications/topaz.desktop` so the app menu/panel/Wayland get an icon
 (`main.cpp` sets the X11 window icon itself, under `#ifndef Q_OS_WIN`). Edit those files
 there, not in the gitignored `deploy-linux/`.

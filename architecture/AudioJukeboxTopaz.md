@@ -99,11 +99,11 @@ User clicks an album row in `LibraryTree`:
 | **Goal** | User opens the setup dialog to configure genres and monitored folders. |
 | **Actor** | User |
 | **Precondition** | Application is running. |
-| **Trigger** | User clicks the gear icon (⚙) in the `TopBar`. |
+| **Trigger** | User clicks the gear icon (line-icon `IconButton`, tooltip "Setup") in the `TopBar`. |
 
 ### Normal Flow
 
-1. User clicks the ⚙ icon in the top-right toolbar.
+1. User clicks the gear icon in the top-right toolbar.
 2. `TopBar` emits `settingsRequested()`.
 3. `Main.qml` handles `onSettingsRequested` → calls `setupDialog.open()`.
 4. `SetupDialog` opens as a modal popup centered on the application window with a dark scrim behind it.
@@ -668,6 +668,23 @@ Topaz module
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 │                         signal playlistCreated()  ← emitted on success; Main.qml calls playlistsData.refreshPlaylists() so the PLAYLISTS tab stays live even while already active, see UC-22
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
+├── AboutDialog.qml     Modal "About Topaz" (560×760, draggable header, bottom tab bar), three tabs:
+│                         TOPAZ — app_icon.png, NeonWordmark (wordHeight 48), version/build-date chips (BuildInfo),
+│                         track/album/rating chips (LibraryModel), description (mentions Claude Sonnet 4.6/5.0 up to
+│                         1.1.0 and Claude Opus 5.5 for newer versions). DEVELOPED BY — Claude + CrucifyTheMadness
+│                         with links, tools/LLM lines. POWERED BY — no scrolling (the user rejects scrollbars in
+│                         dialogs): a 2×4 GridLayout of cards from one JS model `libs` (name, logo or text `mark`, role,
+│                         version, license, inTopaz, about, copyright, links) — Qt, FFmpeg, projectM, KISS FFT, GLEW,
+│                         miniz, BASS (optional, not bundled), Monoton (wordmark typeface). A card click sets
+│                         `detail` → the same panel shows a details page (logo, version/license chips, IN TOPAZ, ABOUT,
+│                         copyright, links, BACK / n of 8 / NEXT); leaving the tab resets to the grid. Versions: Qt
+│                         live from BuildInfo.qtVersion (qVersion()); FFmpeg = the build shipped with Qt Multimedia
+│                         (7.1.2, read from deploy/avcodec-61.dll — update on a Qt upgrade); projectM 4.1.7 / GLEW
+│                         2.2.0 from CMakeLists.txt; miniz MZ_VERSION. 8 cards fill the panel; more need a taller
+│                         dialog or a third column.
+├── NeonWordmark.qml    Neon "TOPAZ JUKEBOX" lettering (TopBar, AboutDialog): Row of two inline NeonWord items (word SVG
+│                         + MultiEffect glow in the word's colour); properties wordHeight, glowOpacity, glowSpread,
+│                         glowScale — see the TopBar entry for the wordmark/glow details
 ├── MissingTracksDialog.qml Informational popup listing tracks (artist/album/title/location)
 │                         a playlist LOAD couldn't find on disk; opened from both NowPlaying and
 │                         PlaylistViewer's LOAD flows via a missingPlaylistTracks(missingTracks)
@@ -677,12 +694,64 @@ Topaz module
 ├── TagInfoWindow.qml   FloatingPane specialization: shows the current track's tag metadata, content scales with pane size — see UC-18
 ├── AudioVisualizerWindow.qml FloatingPane specialization: renders bumping bars from AudioVisualizerController's barLevels/peakLevels — see UC-19
 ├── MilkdropWindow.qml  FloatingPane specialization: hosts a MilkdropView (C++ QQuickItem, owns the projectM render pipeline directly) — see UC-20
-├── TopBar.qml          Header (logo | navigation tabs | loudspeaker icon + gear icon + avatar)  height 64 px
+├── TopBar.qml          Header (app_icon.png logo + neon "TOPAZ JUKEBOX" wordmark [+ Hi-Res badge] | navigation tabs | loudspeaker + gear + info +
+│                         fullscreen/window toggle [+ divider + minimize + close, full screen only])  height 76 px (= MatryoshkaV2 on screen: 56 × its fontScale 1.35; logo 46 px)
+│                         Wordmark: Topaz_Wordmark_Topaz.svg + Topaz_Wordmark_Jukebox.svg, one per word, sharing one
+│                         coordinate system/height (each viewBox covers only its word), shown by NeonWordmark.qml (below;
+│                         shared with the About dialog) with wordHeight 48, width from the SVG's aspect
+│                         ratio. Replaces the former Text in Theme.fontFamilyHeadline ("Manrope" — never bundled, so
+│                         each OS silently drew a fallback font). Letters are outlines, so no font is needed at runtime.
+│                         Neon glow: per word a MultiEffect shadow with zero offset, shadowBlur 1.0, blurMax
+│                         glowSpread (40), shadowScale glowScale (1.04), shadowOpacity glowOpacity (1.0 =
+│                         maximum; 0 = off), in the word's tube colour (#FF4FB8 / #3BE8FF) —
+│                         the reason for two files, since one MultiEffect has one colour. The glow can't be in the SVG
+│                         (Qt's SVG renderer ignores filters). Static content → the effect renders once.
+│                         Generated by tools/generate-wordmark.py (Monoton, SIL OFL 1.1; HarfBuzz-kerned; pink → violet
+│                         "TOPAZ", cyan "JUKEBOX", hard offset shadow; SVG Tiny 1.2 only; no "--" in the XML comment).
+│                         Re-run the script (Docker, see its header) instead of editing the SVGs.
+│                         App icon (matches the wordmark's colours): a retro neon jukebox, no letters — arched cabinet
+│                         with a neon tube outline (violet top, pink sides, cyan foot), vinyl record in a cyan-framed
+│                         dome window, pink/cyan selector buttons, pink → violet speaker-grille tubes, cyan neon base,
+│                         Gaussian-blur glow, dark rounded tile. ≤ 32 px frames use a thick simplified master (cabinet,
+│                         record, two grille bars, base). The script also keeps the earlier "TJ" Monoton-monogram
+│                         candidate (`tj` variant, preview with `--preview`); `VARIANT` in the script = the shipped one.
+│                         Generated by tools/generate-app-icon.py (Docker; librsvg rasterizes, so SVG filters are fine there,
+│                         unlike the Qt-rendered wordmark) into app.ico (9 sizes, 16–256, classic 32-bit BMP frames
+│                         like the original — proven with windres and Qt's ICO reader; Pillow's default would be PNG
+│                         frames), app_icon.png (256 px — the TopBar logo, because a QML Image doesn't reliably pick
+│                         the largest .ico frame) and packaging/linux/topaz.png (launcher icon). app.ico feeds app.rc
+│                         (exe/taskbar), main.cpp's setWindowIcon and the AUTO PLAY tray icon; app_icon.png is also the
+│                         About dialog's icon. (The original crystal "TJ" icon was removed.)
+│                         Right-side buttons are IconButton (below), modelled on the MatryoshkaV2 top bar; order:
+│                         loudspeaker · gear · info · fullscreen toggle · | · minimize · close. All are SVG line icons
+│                         compiled into the exe, so they look identical on Windows and Linux (the loudspeaker was an
+│                         emoji before, drawn by each OS's own emoji font).
+│                         Minimize/close show only while fullscreen — Window.FullScreen has no OS title bar, and
+│                         windowed mode already has the native ones.
+│                         property bool fullscreen  (bound from Main.qml: root.visibility === Window.FullScreen) — picks
+│                         the "fullscreen"/"windowed" icon (tooltip "Full screen (F11)"/"Window (F11)") and shows minimize/close
+│                         signal aboutRequested()  ← info icon click (opens AboutDialog)
+│                         signal fullscreenToggled()  ← Main.qml calls toggleFullscreen(), the same function the F11 Shortcut uses
+│                         signal minimizeRequested()  ← Main.qml minimizeWindow(): showMinimized(). showMinimized() replaces
+│                         the window state — Qt first leaves FullScreen (restoring the frame), reporting a transient
+│                         Windowed, and only then minimizes. So minimizeFromFullscreenPending makes onVisibilityChanged
+│                         ignore everything (incl. the panel-width switch) until Minimized is reached; only then is
+│                         restoreFullscreenAfterMinimize armed, and the taskbar restore (which comes back Windowed)
+│                         re-enters FullScreen via Qt.callLater. A 2 s timer clears the pending flag as a safety net.
+│                         Bug fixed: the first version armed the restore immediately, reacted to that transient Windowed
+│                         by re-entering FullScreen mid-minimize, and the restored window had no frame.
+│                         signal closeRequested()  ← Main.qml root.close() (still subject to the onClosing veto during Milkdrop cleanup)
 │                         property var systemVolume  (bound to SystemVolumeController; drives the OS-Volume flyout, see below)
 │                         property string activeTab ("library"/"playlists"/"search", bound from Main.qml)  — drives which of the 3 tabs is highlighted; a Repeater-driven Row (same array-model convention as BottomBar), see UC-21/UC-22
 │                         signal librarySelected() / playlistsSelected() / searchSelected()  ← tab click; "dumb component, owner decides" — Main.qml sets activeTab in response
 │                         signal settingsRequested()  ← gear icon click
-│                         Loudspeaker icon (🔊, or 🔇 while the OS is muted; leftmost of the three): click opens a
+│                         Loudspeaker icon (SvgIcon "volume", or "volume-mute" while the OS is muted; leftmost of the
+│                         right-side buttons). Styled like an IconButton (46×46, p10 highlight while hovered OR while the
+│                         pane is open) but kept as a plain Item + MouseArea, because the Popup is parented to it and its
+│                         close timer reads hoverVolume.containsMouse. A thin VolumeRing (below) around the 21 px icon
+│                         shows the current OS volume without opening the pane; it follows every change (knob, volume
+│                         keys, OS flyout) through SystemVolumeController's live sync. Tooltip "System volume: N %" /
+│                         "System volume: muted". Click opens a
 │                         non-modal Popup anchored under the button via parent: <button item>, holding a square
 │                         288×288 area (75 % of the old ~385 px slider pane's width) with one VolumeKnob (below).
 │                         The pane itself is fully transparent (no background, no border — the user's choice), so
@@ -717,6 +786,23 @@ Topaz module
 │                         mute button); a drag through the bottom gap sticks at 0/100 instead of flipping (jumps
 │                         > 50 are refused); WheelHandler over the whole knob, 2 % per 120-unit notch, small touchpad
 │                         deltas accumulated.
+├── IconButton.qml      Square icon-only AbstractButton (TopBar's info/gear/fullscreen/minimize/close), ported from
+│                         MatryoshkaV2: property string iconName, tooltip; color iconColor (fgSurfaceVariant), hoverColor
+│                         (primary); bool danger (red hover: Theme.danger icon + Theme.danger15 background — close button);
+│                         int buttonSize (46 = MatryoshkaV2's on-screen 34 px × its fontScale 1.35; icon = 50 %). Background radiusMd, hover p10, pressed p20; NoFocus; ToolTip after 500 ms.
+├── VolumeRing.qml      "Mini knob" around TopBar's loudspeaker icon: property int value (0-100), bool muted, real
+│                         lineWidth (2). One Canvas, same geometry/colours as VolumeKnob (270° arc open at the bottom,
+│                         135° → 405°; track surfaceContainerHighest; value arc secondary → primary → tertiary in 4°
+│                         segments with round end caps; 35 % alpha while muted); no glow/handle. Helpers colorAt()/
+│                         css()/rad() are copies of VolumeKnob's — change both together.
+├── SvgIcon.qml         Tinted line icon: loads qrc:/Topaz/icons/<name>.svg (white-stroke 24×24 SVGs copied from
+│                         MatryoshkaV2: info, settings, fullscreen, windowed, minimize, close; plus volume and
+│                         volume-mute drawn for Topaz in the same style), rasterized at 2× via
+│                         [provenance: all are own drawings, no third-party icon set — so no POWERED BY entry. The
+│                         gear is MatryoshkaV2's own redraw (its first version was Feather's); the first volume
+│                         icons reproduced Feather's volume-2/volume-x and were redrawn with own geometry]
+│                         sourceSize, recolored to `color` with QtQuick.Effects MultiEffect (colorization 1.0,
+│                         brightness 1.0) — one SVG serves every hover/disabled color.
 ├── GenreBar.qml        genre toggle grid, 10 per row, up to 4 rows / 40 buttons (reads lib.genreModel, calls lib.toggleGenre)
 ├── FoundGenresDialog.qml  FOUND GENRES — pick genres discovered by Setup → GENRES → SCAN FOLDERS (GenreScanController), see UC-36
 ├── LibraryTree.qml     Left sidebar  default width 286 px, user-resizable  (flat virtualised ListView; flatRows JS array; no nested Repeaters)
@@ -6812,7 +6898,10 @@ section above) — now shows itself once restored, with
 (see "Layout persistence" for the whole startup sequence). The existing F11
 `Shortcut` and the `saveLayoutTimer`'s fullscreen guard (skip persisting
 `windowWidth`/`windowHeight` while fullscreen) are unchanged — F11 still
-imperatively reassigns `root.visibility` at runtime.
+imperatively reassigns `root.visibility` at runtime, via `Main.qml`'s
+`toggleFullscreen()`, which `TopBar`'s fullscreen/window button calls too. While
+fullscreen, `TopBar` also shows Minimize and Close buttons (see the `TopBar.qml`
+entry in the component tree).
 
 **The toggle takes effect on the next launch, as documented above.** It used
 to be a live `visibility:` binding, which also flipped a *running* window when

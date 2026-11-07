@@ -7,10 +7,12 @@ import QtQuick.Layouts
 
 // ── AboutDialog ──────────────────────────────────────────────────────────
 // "About Topaz" modal with three tabs:
-//   • TOPAZ        — app mark, name, version + build-date chips, description
-//   • DEVELOPED BY — placeholder for now; user fills in real credits later
-//   • POWERED BY   — intentionally empty for now; user adds a dependency/
-//                    logo list later
+//   • TOPAZ        — app icon, neon lettering (NeonWordmark), version/build-date
+//                    and library-statistics chips, description
+//   • DEVELOPED BY — people (Claude, CrucifyTheMadness) and the tools used
+//   • POWERED BY   — grid of cards for every library/framework/asset Topaz uses,
+//                    each opening a details page (version, license, role in
+//                    Topaz, description, copyright, links) — no scrolling
 //
 // Same Popup/header/drag/close chrome as SetupDialog.qml, styled with the
 // app's existing Theme.qml tokens throughout (not a one-off palette) so it
@@ -140,23 +142,23 @@ Popup {
 
                     Image {
                         Layout.alignment: Qt.AlignHCenter
-                        source: "qrc:/Topaz/app.ico"
+                        Layout.preferredWidth:  128
+                        Layout.preferredHeight: 128
+                        // App icon (tools/generate-app-icon.py), PNG rather than
+                        // app.ico: an Image doesn't reliably pick the largest frame.
+                        source: "qrc:/Topaz/app_icon.png"
                         sourceSize.width:  128
                         sourceSize.height: 128
-                        width:  128
-                        height: 128
                         fillMode: Image.PreserveAspectFit
+                        smooth: true
+                        mipmap: true
                     }
 
-                    Text {
+                    // Neon lettering with glow, same as the top bar's
+                    NeonWordmark {
                         Layout.alignment: Qt.AlignHCenter
                         Layout.topMargin: 8
-                        text: "TOPAZ JUKEBOX"
-                        font.family:        Theme.fontFamilyHeadline
-                        font.pixelSize:     Theme.displayLg
-                        font.weight:        Font.Bold
-                        font.letterSpacing: Theme.lsWide
-                        color: Theme.primary
+                        wordHeight: 48
                     }
 
                     RowLayout {
@@ -327,7 +329,7 @@ Popup {
                         Layout.alignment: Qt.AlignHCenter
                         Layout.topMargin: 16
                         Layout.preferredWidth: 440
-                        text: qsTr("A desktop audio jukebox that supports FLAC, MP3 and OPUS. A simple way to experience music in a different way. Simple yet sophisticated – for music lovers, offline collectors and parties. Developed as a Vibe-Coding project, using only Claude Sonnet 4.6 and 5.0, to demonstrate just how powerful these LLMs are.")
+                        text: qsTr("A desktop audio jukebox that supports FLAC, MP3 and OPUS. A simple way to experience music in a different way. Simple yet sophisticated – for music lovers, offline collectors and parties. Developed as a Vibe-Coding project, up to version 1.1.0 using only Claude Sonnet 4.6 and 5.0, to demonstrate just how powerful these LLMs are. Versions newer than 1.1.0 are made with the support of Claude Opus 5.5.")
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
                         font.family:    Theme.fontFamilyBody
@@ -496,7 +498,14 @@ Popup {
                         }
 
                         Text {
-                            text: "LLM: Claude Sonnet 4.6 and 5.0"
+                            text: "LLM: Claude Sonnet 4.6 and 5.0 (up to version 1.1.0)"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            color: Theme.fgSurfaceVariant
+                        }
+
+                        Text {
+                            text: "LLM: Claude Opus 5.5 (versions newer than 1.1.0)"
                             font.family:    Theme.fontFamilyBody
                             font.pixelSize: Theme.titleMd
                             color: Theme.fgSurfaceVariant
@@ -515,227 +524,418 @@ Popup {
             }
 
             // PANEL 2 — POWERED BY
+            // A 2-column grid of cards that always fits without scrolling (the
+            // user dislikes scrollbars in dialogs); clicking a card opens its
+            // details page in the same panel -- version, license, what it does
+            // in Topaz, what it is, copyright, links -- like MatryoshkaV2's
+            // "About Qt" page. Back returns to the grid, Next steps through.
+            // All facts live in the `libs` model below: to add a library, add
+            // an entry (an odd count leaves one grid cell empty; 4 rows of 2
+            // fill the panel exactly -- a 9th/10th entry needs a taller dialog
+            // or a third column).
             Item {
+                id: poweredBy
                 anchors.fill: parent
                 visible: tabBar.currentTab === 2
 
-                // Scrollable (unlike DEVELOPED BY): more libraries may be
-                // added here over time, so this panel scrolls instead of
-                // needing the dialog resized each time.
-                ScrollView {
-                    id: poweredByScroll
-                    anchors.fill: parent
-                    anchors.margins: 40
-                    clip: true
+                property int detail: -1      // index into libs; -1 = grid
+                readonly property var lib: detail >= 0 ? libs[detail] : null
 
-                    ColumnLayout {
-                        width: poweredByScroll.availableWidth
-                        spacing: 40
+                // Back to the grid whenever the tab is left or the dialog reopens
+                onVisibleChanged: if (!visible) detail = -1
 
-                        // Qt
-                        RowLayout {
-                            Layout.alignment: Qt.AlignLeft
-                            spacing: 20
+                // Versions: Qt from the running library; FFmpeg is the build
+                // that ships with Qt Multimedia (read from deploy/avcodec-61.dll
+                // -- update together with a Qt upgrade); projectM/GLEW from
+                // CMakeLists.txt's FetchContent; miniz from MZ_VERSION.
+                readonly property var libs: [
+                    {
+                        name: "Qt", logo: "qrc:/Topaz/Qt_Logo.png", mark: "",
+                        role: qsTr("Application framework"),
+                        version: buildInfo.qtVersion, license: "LGPL-3.0",
+                        inTopaz: qsTr("The foundation Topaz is built on: the whole user interface (Qt Quick / QML), audio playback and output (Qt Multimedia), library scanning on background threads, folder monitoring, and the JSON settings, library and playlist files."),
+                        about: qsTr("Qt is a C++ toolkit for cross-platform application development on all major desktop, embedded and mobile operating systems. Topaz uses the open-source edition under the GNU Lesser General Public License v3."),
+                        copyright: qsTr("© The Qt Company Ltd. and other contributors. Qt and the Qt logo are trademarks of The Qt Company Ltd."),
+                        links: ["https://www.qt.io/", "https://www.qt.io/licensing/"]
+                    },
+                    {
+                        name: "FFmpeg", logo: "qrc:/Topaz/FFmpeg_Logo.png", mark: "",
+                        role: qsTr("Audio decoding"),
+                        version: qsTr("7.1.2 (via Qt Multimedia)"), license: "LGPL-2.1+",
+                        inTopaz: qsTr("Decodes your FLAC, MP3 and Opus files: Qt Multimedia plays them through its FFmpeg backend, which also delivers the raw audio the visualizers analyse. Export's “Convert to MP3” uses a separate ffmpeg program with the LAME encoder that you supply yourself — it is not included."),
+                        about: qsTr("FFmpeg is the leading multimedia framework, able to decode, encode, transcode, stream and filter almost any audio and video format."),
+                        copyright: qsTr("© The FFmpeg developers. FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project."),
+                        links: ["https://ffmpeg.org/", "https://ffmpeg.org/legal.html"]
+                    },
+                    {
+                        name: "projectM", logo: "qrc:/Topaz/ProjectM_Logo.png", mark: "",
+                        role: qsTr("Milkdrop visualizer"),
+                        version: "4.1.7", license: "LGPL-2.1",
+                        inTopaz: qsTr("Powers the Milkdrop visualizer pane: it renders classic Milkdrop presets in real time with OpenGL, driven by the music that is playing."),
+                        about: qsTr("projectM is an open-source, cross-platform reimplementation of Milkdrop, the iconic music visualizer of Winamp."),
+                        copyright: qsTr("© The projectM team and contributors."),
+                        links: ["https://github.com/projectM-visualizer/projectm"]
+                    },
+                    {
+                        name: "KISS FFT", logo: "", mark: "KISS FFT",
+                        role: qsTr("Spectrum analysis"),
+                        version: qsTr("bundled source"), license: "BSD-3-Clause",
+                        inTopaz: qsTr("Calculates the frequency spectrum of the music (Fast Fourier Transform) for the bars of the audio visualizer pane. Its source code is compiled directly into Topaz."),
+                        about: qsTr("“Keep It Simple, Stupid” FFT: a small, fast and portable FFT library written in C, with a deliberately simple interface."),
+                        copyright: qsTr("© 2003–2010 Mark Borgerding and contributors."),
+                        links: ["https://github.com/mborgerding/kissfft"]
+                    },
+                    {
+                        name: "GLEW", logo: "", mark: "GLEW",
+                        role: qsTr("OpenGL loader"),
+                        version: "2.2.0", license: "BSD-3-Clause / MIT",
+                        inTopaz: qsTr("Loads the OpenGL functions that projectM needs to draw the Milkdrop visualizer pane."),
+                        about: qsTr("The OpenGL Extension Wrangler Library: a cross-platform C/C++ library that finds and loads OpenGL extensions and core functions at run time."),
+                        copyright: qsTr("© 2002–2007 Milan Ikits, Marcelo E. Magallon, Lev Povalahev, and contributors."),
+                        links: ["https://github.com/nigels-com/glew"]
+                    },
+                    {
+                        name: "miniz", logo: "", mark: "MINIZ",
+                        role: qsTr("Backup ZIP files"),
+                        version: "11.3.2", license: "MIT",
+                        inTopaz: qsTr("Writes and reads the ZIP archives of Backup and Restore (settings, ratings, playlists, library and loudness data). Its source code is compiled directly into Topaz."),
+                        about: qsTr("A single-file, high-performance replacement for zlib, including ZIP archive reading and writing."),
+                        copyright: qsTr("© 2010–2014 Rich Geldreich and Tenacious Software LLC, © 2013–2014 RAD Game Tools and Valve Software."),
+                        links: ["https://github.com/richgel999/miniz"]
+                    },
+                    {
+                        name: "BASS", logo: "", mark: "BASS",
+                        role: qsTr("Optional audio engine"),
+                        version: qsTr("your own copy"), license: qsTr("Proprietary"),
+                        inTopaz: qsTr("An alternative playback engine you can choose in Setup instead of FFmpeg. Auto Loudness Correction needs it; its “Consistent Background Music” strategy also uses the BASS_FX add-on. Not included with Topaz — place your own licensed copy next to Topaz."),
+                        about: qsTr("BASS is an audio library for Windows, Linux, macOS and mobile platforms, extended with add-ons for formats such as FLAC and Opus. Free for non-commercial use."),
+                        copyright: qsTr("© Un4seen Developments Ltd."),
+                        links: ["https://www.un4seen.com/"]
+                    },
+                    {
+                        name: "Monoton", logo: "qrc:/Topaz/Topaz_Wordmark_Topaz.svg", mark: "",
+                        role: qsTr("Lettering typeface"),
+                        version: "Google Fonts", license: "SIL OFL 1.1",
+                        inTopaz: qsTr("The neon “TOPAZ JUKEBOX” lettering in the top bar and in this dialog is drawn from Monoton's letter shapes. Only the outlines are used — the font itself is neither installed nor shipped."),
+                        about: qsTr("Monoton is a display typeface built from parallel lines, giving letters a retro, neon-tube look."),
+                        copyright: qsTr("© Vernon Adams."),
+                        links: ["https://fonts.google.com/specimen/Monoton"]
+                    }
+                ]
 
-                            Image {
-                                Layout.alignment: Qt.AlignVCenter
-                                source: "qrc:/Topaz/Qt_Logo.png"
-                                sourceSize.width:  128
-                                sourceSize.height: 128
-                                width:  128
-                                height: 128
-                                fillMode: Image.PreserveAspectFit
-                            }
+                // Logo, or a bold name "wordmark" for projects without one
+                component LibLogo: Item {
+                    id: libLogo
+                    property var entry: null
+                    property int size: 56
+                    implicitWidth:  size
+                    implicitHeight: size
+                    Image {
+                        anchors.fill: parent
+                        visible: libLogo.entry && libLogo.entry.logo !== ""
+                        source: libLogo.entry ? libLogo.entry.logo : ""
+                        sourceSize.width:  libLogo.size * 2
+                        sourceSize.height: libLogo.size * 2
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true
+                        mipmap: true
+                    }
+                    Text {
+                        anchors.fill: parent
+                        visible: libLogo.entry && libLogo.entry.logo === ""
+                        text: libLogo.entry ? libLogo.entry.mark : ""
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment:   Text.AlignVCenter
+                        wrapMode: Text.WordWrap
+                        font.family:    Theme.fontFamilyHeadline
+                        font.pixelSize: Math.round(libLogo.size * 0.3)
+                        font.weight:    Font.ExtraBold
+                        color: Theme.fgSurface
+                    }
+                }
 
-                            Text {
-                                Layout.alignment: Qt.AlignVCenter
-                                text: "https://www.qt.io/"
-                                font.family:    Theme.fontFamilyBody
-                                font.pixelSize: Theme.titleMd
-                                color: linkHoverQtLib.containsMouse
-                                       ? Theme.primary : Theme.fgSurfaceVariant
+                // Small rounded fact chip (version / license)
+                component Chip: Rectangle {
+                    id: chip
+                    property string label
+                    property color dot: Theme.secondary
+                    implicitHeight: 22
+                    implicitWidth:  chipRow.implicitWidth + 20
+                    radius: Theme.radiusFull
+                    color:  Theme.surfaceContainerHighest
+                    Row {
+                        id: chipRow
+                        anchors.centerIn: parent
+                        spacing: 6
+                        Rectangle {
+                            width: 6; height: 6; radius: 3
+                            color: chip.dot
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                            text: chip.label
+                            font.family:    Theme.fontFamilyMono
+                            font.pixelSize: Theme.labelMd
+                            color: Theme.fgSurface
+                        }
+                    }
+                }
+
+                // Text button in the dialog's style
+                component PanelButton: Rectangle {
+                    id: panelButton
+                    property string label
+                    signal clicked()
+                    implicitWidth:  buttonText.implicitWidth + 32
+                    implicitHeight: 34
+                    radius: Theme.radiusMd
+                    color: buttonArea.containsMouse ? Theme.p20 : Theme.p10
+                    Text {
+                        id: buttonText
+                        anchors.centerIn: parent
+                        text: panelButton.label
+                        font.family:        Theme.fontFamilyBody
+                        font.pixelSize:     Theme.labelLg
+                        font.weight:        Font.Bold
+                        font.letterSpacing: Theme.lsWide
+                        color: Theme.primary
+                    }
+                    MouseArea {
+                        id: buttonArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: panelButton.clicked()
+                    }
+                }
+
+                // Small uppercase section label on the details page
+                component SectionLabel: Text {
+                    font.family:        Theme.fontFamilyBody
+                    font.pixelSize:     Theme.labelMd
+                    font.weight:        Font.Bold
+                    font.letterSpacing: Theme.lsWidest
+                    color: Theme.primary
+                }
+
+                // ── Grid of cards ────────────────────────────────────────
+                ColumnLayout {
+                    visible: poweredBy.detail < 0
+                    anchors { fill: parent; margins: 24 }
+                    spacing: 14
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Topaz is built with these open-source projects and tools. Click one for details.")
+                        wrapMode: Text.WordWrap
+                        font.family:    Theme.fontFamilyBody
+                        font.pixelSize: Theme.titleMd
+                        color: Theme.fgSurfaceVariant
+                    }
+
+                    GridLayout {
+                        Layout.fillWidth:  true
+                        Layout.fillHeight: true
+                        columns: 2
+                        rowSpacing:    12
+                        columnSpacing: 12
+
+                        Repeater {
+                            model: poweredBy.libs
+
+                            delegate: Rectangle {
+                                id: card
+                                required property var modelData
+                                required property int index
+                                Layout.fillWidth:  true
+                                Layout.fillHeight: true
+                                Layout.preferredWidth: 1     // equal columns
+                                radius: Theme.radiusLg
+                                color: cardArea.containsMouse ? Theme.surfaceContainerHighest
+                                                              : Theme.surfaceContainerHigh
+                                border.width: 1
+                                border.color: cardArea.containsMouse ? Theme.primary : Theme.ov10
+
+                                RowLayout {
+                                    anchors { fill: parent; margins: 14 }
+                                    spacing: 14
+
+                                    LibLogo {
+                                        Layout.alignment: Qt.AlignVCenter
+                                        entry: card.modelData
+                                        size: 56
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth:  true
+                                        Layout.fillHeight: true
+                                        spacing: 4
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: card.modelData.name
+                                            elide: Text.ElideRight
+                                            font.family:    Theme.fontFamilyHeadline
+                                            font.pixelSize: Theme.headlineSm
+                                            font.weight:    Font.Bold
+                                            color: Theme.fgSurface
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: card.modelData.role
+                                            elide: Text.ElideRight
+                                            font.family:    Theme.fontFamilyBody
+                                            font.pixelSize: Theme.labelXl
+                                            color: Theme.fgSurfaceVariant
+                                        }
+                                        Item { Layout.fillHeight: true }
+                                        Chip {
+                                            label: card.modelData.license
+                                            dot: Theme.tertiary
+                                        }
+                                        Text {
+                                            text: qsTr("DETAILS ›")
+                                            font.family:        Theme.fontFamilyBody
+                                            font.pixelSize:     Theme.labelMd
+                                            font.weight:        Font.Bold
+                                            font.letterSpacing: Theme.lsWide
+                                            color: cardArea.containsMouse ? Theme.primary
+                                                                          : Theme.fgSurfaceVariant
+                                        }
+                                    }
+                                }
 
                                 MouseArea {
-                                    id: linkHoverQtLib
+                                    id: cardArea
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: Qt.openUrlExternally("https://www.qt.io/")
+                                    onClicked: poweredBy.detail = card.index
                                 }
                             }
                         }
+                    }
+                }
 
-                        // FFmpeg
-                        RowLayout {
-                            Layout.alignment: Qt.AlignLeft
-                            spacing: 20
+                // ── Details page ─────────────────────────────────────────
+                ColumnLayout {
+                    visible: poweredBy.detail >= 0
+                    anchors { fill: parent; margins: 32 }
+                    spacing: 12
 
-                            Image {
-                                Layout.alignment: Qt.AlignVCenter
-                                source: "qrc:/Topaz/FFmpeg_Logo.png"
-                                sourceSize.width:  128
-                                sourceSize.height: 128
-                                width:  128
-                                height: 128
-                                fillMode: Image.PreserveAspectFit
-                            }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 20
 
-                            Text {
-                                Layout.alignment: Qt.AlignVCenter
-                                text: "https://ffmpeg.org/"
-                                font.family:    Theme.fontFamilyBody
-                                font.pixelSize: Theme.titleMd
-                                color: linkHoverFFmpeg.containsMouse
-                                       ? Theme.primary : Theme.fgSurfaceVariant
-
-                                MouseArea {
-                                    id: linkHoverFFmpeg
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: Qt.openUrlExternally("https://ffmpeg.org/")
-                                }
-                            }
+                        LibLogo {
+                            Layout.alignment: Qt.AlignTop
+                            entry: poweredBy.lib
+                            size: 96
                         }
 
-                        // ProjectM
-                        RowLayout {
-                            Layout.alignment: Qt.AlignLeft
-                            spacing: 20
-
-                            Image {
-                                Layout.alignment: Qt.AlignVCenter
-                                source: "qrc:/Topaz/ProjectM_Logo.png"
-                                sourceSize.width:  128
-                                sourceSize.height: 128
-                                width:  128
-                                height: 128
-                                fillMode: Image.PreserveAspectFit
-                            }
-
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
                             Text {
-                                Layout.alignment: Qt.AlignVCenter
-                                text: "https://github.com/projectM-visualizer/projectm"
-                                font.family:    Theme.fontFamilyBody
-                                font.pixelSize: Theme.titleMd
-                                color: linkHoverProjectM.containsMouse
-                                       ? Theme.primary : Theme.fgSurfaceVariant
-
-                                MouseArea {
-                                    id: linkHoverProjectM
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: Qt.openUrlExternally("https://github.com/projectM-visualizer/projectm")
-                                }
-                            }
-                        }
-
-                        // KISS FFT -- no logo exists for this project, so a
-                        // wordmark-style Text fills the same 128px-wide slot
-                        // the logos occupy in the rows above, keeping the
-                        // link column aligned across all four rows.
-                        RowLayout {
-                            Layout.alignment: Qt.AlignLeft
-                            spacing: 20
-
-                            Text {
-                                Layout.preferredWidth: 128
-                                Layout.alignment: Qt.AlignVCenter
-                                horizontalAlignment: Text.AlignHCenter
-                                text: "KISS FFT"
+                                text: poweredBy.lib ? poweredBy.lib.name : ""
                                 font.family:    Theme.fontFamilyHeadline
-                                font.pixelSize: Theme.headlineMd
+                                font.pixelSize: Theme.headlineLg
                                 font.weight:    Font.Bold
                                 color: Theme.fgSurface
                             }
-
                             Text {
-                                Layout.alignment: Qt.AlignVCenter
-                                text: "https://github.com/mborgerding/kissfft"
+                                text: poweredBy.lib ? poweredBy.lib.role : ""
                                 font.family:    Theme.fontFamilyBody
                                 font.pixelSize: Theme.titleMd
-                                color: linkHoverKissFFT.containsMouse
-                                       ? Theme.primary : Theme.fgSurfaceVariant
-
-                                MouseArea {
-                                    id: linkHoverKissFFT
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: Qt.openUrlExternally("https://github.com/mborgerding/kissfft")
+                                color: Theme.fgSurfaceVariant
+                            }
+                            Flow {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 4
+                                spacing: 8
+                                Chip {
+                                    label: poweredBy.lib ? qsTr("VERSION ") + poweredBy.lib.version : ""
+                                    dot: Theme.secondary
+                                }
+                                Chip {
+                                    label: poweredBy.lib ? poweredBy.lib.license : ""
+                                    dot: Theme.tertiary
                                 }
                             }
                         }
+                    }
 
-                        // GLEW -- also no real logo, same wordmark treatment
-                        // as KISS FFT above.
-                        RowLayout {
-                            Layout.alignment: Qt.AlignLeft
-                            spacing: 20
+                    SectionLabel { Layout.topMargin: 8; text: qsTr("IN TOPAZ") }
+                    Text {
+                        Layout.fillWidth: true
+                        text: poweredBy.lib ? poweredBy.lib.inTopaz : ""
+                        wrapMode: Text.WordWrap
+                        font.family:    Theme.fontFamilyBody
+                        font.pixelSize: Theme.titleMd
+                        lineHeight: 1.15
+                        color: Theme.fgSurface
+                    }
 
-                            Text {
-                                Layout.preferredWidth: 128
-                                Layout.alignment: Qt.AlignVCenter
-                                horizontalAlignment: Text.AlignHCenter
-                                text: "GLEW"
-                                font.family:    Theme.fontFamilyHeadline
-                                font.pixelSize: Theme.headlineMd
-                                font.weight:    Font.Bold
-                                color: Theme.fgSurface
-                            }
+                    SectionLabel { Layout.topMargin: 6; text: qsTr("ABOUT") }
+                    Text {
+                        Layout.fillWidth: true
+                        text: poweredBy.lib ? poweredBy.lib.about : ""
+                        wrapMode: Text.WordWrap
+                        font.family:    Theme.fontFamilyBody
+                        font.pixelSize: Theme.titleMd
+                        lineHeight: 1.15
+                        color: Theme.fgSurfaceVariant
+                    }
 
-                            Text {
-                                Layout.alignment: Qt.AlignVCenter
-                                text: "https://github.com/nigels-com/glew"
-                                font.family:    Theme.fontFamilyBody
-                                font.pixelSize: Theme.titleMd
-                                color: linkHoverGlew.containsMouse
-                                       ? Theme.primary : Theme.fgSurfaceVariant
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 6
+                        text: poweredBy.lib ? poweredBy.lib.copyright : ""
+                        wrapMode: Text.WordWrap
+                        font.family:    Theme.fontFamilyBody
+                        font.pixelSize: Theme.labelLg
+                        color: Theme.outline
+                    }
 
-                                MouseArea {
-                                    id: linkHoverGlew
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: Qt.openUrlExternally("https://github.com/nigels-com/glew")
-                                }
+                    // Links -- open in the browser
+                    Repeater {
+                        model: poweredBy.lib ? poweredBy.lib.links : []
+                        delegate: Text {
+                            required property string modelData
+                            text: "↗  " + modelData
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.underline: linkArea.containsMouse
+                            color: linkArea.containsMouse ? Theme.fgSurface : Theme.primary
+                            MouseArea {
+                                id: linkArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Qt.openUrlExternally(parent.modelData)
                             }
                         }
+                    }
 
-                        // MINIZ -- also no real logo, same wordmark treatment
-                        // as KISS FFT/GLEW above.
-                        RowLayout {
-                            Layout.alignment: Qt.AlignLeft
-                            spacing: 20
+                    Item { Layout.fillHeight: true }
 
-                            Text {
-                                Layout.preferredWidth: 128
-                                Layout.alignment: Qt.AlignVCenter
-                                horizontalAlignment: Text.AlignHCenter
-                                text: "MINIZ"
-                                font.family:    Theme.fontFamilyHeadline
-                                font.pixelSize: Theme.headlineMd
-                                font.weight:    Font.Bold
-                                color: Theme.fgSurface
-                            }
-
-                            Text {
-                                Layout.alignment: Qt.AlignVCenter
-                                text: "https://github.com/richgel999/miniz"
-                                font.family:    Theme.fontFamilyBody
-                                font.pixelSize: Theme.titleMd
-                                color: linkHoverMiniz.containsMouse
-                                       ? Theme.primary : Theme.fgSurfaceVariant
-
-                                MouseArea {
-                                    id: linkHoverMiniz
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: Qt.openUrlExternally("https://github.com/richgel999/miniz")
-                                }
-                            }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        PanelButton {
+                            label: qsTr("‹  BACK")
+                            onClicked: poweredBy.detail = -1
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: (poweredBy.detail + 1) + " / " + poweredBy.libs.length
+                            font.family:    Theme.fontFamilyMono
+                            font.pixelSize: Theme.labelLg
+                            color: Theme.fgSurfaceVariant
+                        }
+                        PanelButton {
+                            label: qsTr("NEXT  ›")
+                            onClicked: poweredBy.detail = (poweredBy.detail + 1) % poweredBy.libs.length
                         }
                     }
                 }

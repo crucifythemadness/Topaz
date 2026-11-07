@@ -43,6 +43,9 @@ QtObject {
     // в”Ђв”Ђ Error в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     readonly property color error:          "#FFB4AB"
     readonly property color errorContainer: "#93000A"
+    // Destructive-action accent (TopBar close button hover: icon + 15 % tint)
+    readonly property color danger:         "#FF5A5F"
+    readonly property color danger15:       Qt.rgba(1, 0x5A/255, 0x5F/255, 0.15)
 
     // в”Ђв”Ђ Pre-computed Alpha Variants в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     // outlineVariant (#494454) at key opacities

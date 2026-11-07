@@ -12,3 +12,8 @@ QString BuildInfo::buildDate() const
     // so the About dialog kept showing an old day.
     return QStringLiteral(TOPAZ_BUILD_DATE);
 }
+
+QString BuildInfo::qtVersion() const
+{
+    return QString::fromLatin1(qVersion());
+}
