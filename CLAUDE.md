@@ -338,6 +338,7 @@ token — QML files should reference `Theme.*` rather than hardcoding values.
 | `AppConfig` | `appconfig.h/cpp` | Reads/writes `Topaz.config` JSON (genres, monitored folders, window/panel layout); auto-saves on every mutation |
 | `PlaybackEngine` | `playbackengine.h/cpp` | `QAbstractListModel` + `QML_ELEMENT`; simultaneously the queue model *and* the playback controller (wraps `QMediaPlayer`/`QAudioOutput`) |
 | `PlaylistManager` | `playlistmanager.h/cpp` | XSPF (`.xml`) playlist file I/O, including drive-letter-stripped portable paths |
+| `AudioMeterController` | `audiometercontroller.h/cpp` | Audio Meter levels (UC-37): BASS `BASS_ChannelGetLevelEx` when BASS plays, else own analysis of the PCM tap; 90s ballistics, OVER; idle unless a meter view `acquire()`s it |
 
 ### Threading model
 
@@ -356,7 +357,12 @@ state), `LibraryModel`, `PlaybackEngine`, `PlaylistManager`, and the modal dialo
 The four main panels (`LibraryTree`, `AlbumBrowser`, `PlaybackQueue`, `NowPlaying`) sit in
 a horizontal `SplitView`; only `AlbumBrowser` has `SplitView.fillWidth: true` and absorbs
 resize surplus. Panel widths and window size are persisted to `Topaz.config` via a
-debounced (500 ms) `AppConfig.saveLayout()` call.
+debounced (500 ms) `AppConfig.saveLayout()` call. `PlaybackQueue` itself sits in a nested
+vertical `SplitView` (`queueColumn`) between two `QueueDockArea` free areas, so its height is
+adjustable from above and below; those heights are persisted per mode with
+`saveQueueDockHeights()` from their `SplitView.preferredHeight` (not `height` — see "Layout
+persistence" in the architecture doc). Anything addressing the queue *slot* (width, attached
+`SplitView.*`) targets `queueColumn`, not `playbackQueuePanel`.
 
 Data flow for filtering follows one repeated pattern worth knowing before touching any
 of it: `GenreBar`/`LibraryTree` mutate `LibraryData` selection state → `LibraryTree`

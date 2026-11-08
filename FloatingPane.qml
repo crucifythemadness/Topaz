@@ -33,6 +33,8 @@ import QtQuick.Window
 //     elsewhere, or 4 s without input ends it. No clamping, same as a mouse
 //     drag. Disabled while keyboardMoveEnabled is false (MilkdropWindow:
 //     during its F10 fullscreen).
+//   - When dockable (UC-38), hovering shows small "dock above / below the
+//     queue" buttons in the top-right corner (dockRequested()).
 //   - Any settled change to x/y/width/height (debounced 500ms, same pattern
 //     as Main.qml's saveLayoutTimer) emits geometrySettled() for the owner to
 //     persist -- including an arrow-key nudge.
@@ -250,6 +252,18 @@ Window {
     // stacked hover mechanism.
     signal mouseMoved()
 
+    // ── Docking into the queue column (UC-38) ───────────────────────────
+    // Generic like the rest of this file: the pane only offers the two dock
+    // buttons and emits dockRequested("top"/"bottom"); Main.qml owns the dock
+    // state and decides what docking means. dockable = this pane can be docked
+    // at all (and right now -- MilkdropWindow switches it off during F10);
+    // dockTop/BottomAvailable = that free area is empty, so its button shows.
+    // The buttons appear while the mouse is over the pane.
+    property bool dockable: false
+    property bool dockTopAvailable: false
+    property bool dockBottomAvailable: false
+    signal dockRequested(string slot)
+
     Item {
         id: contentItem
         anchors.fill: parent
@@ -259,6 +273,7 @@ Window {
     // the resize grips below so they naturally stack above it for their thin
     // strips.
     MouseArea {
+        id: moveArea
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         hoverEnabled: true
@@ -440,6 +455,68 @@ Window {
         }
         onPositionChanged: (mouse) => {
             if (pane.fixedAspectRatio > 0) pane.updateAspectResize(bottomLeftGrip, mouse, true, false, true, true)
+        }
+    }
+
+    // ── Dock buttons (see "Docking into the queue column" above) ────────
+    // Top-right corner, inside the resize grips. Shown while the mouse is over
+    // the pane -- the move area's own hover, OR one of the buttons' (hovering
+    // a button takes the hover away from the move area beneath it), with a
+    // short grace period so moving from the pane onto a button never flickers.
+    readonly property bool _dockHover: moveArea.containsMouse || dockTopBtn.hovered
+                                       || dockBottomBtn.hovered
+    property bool _dockButtonsShown: false
+    on_DockHoverChanged: {
+        if (_dockHover) {
+            dockHideTimer.stop()
+            _dockButtonsShown = true
+        } else {
+            dockHideTimer.restart()
+        }
+    }
+    Timer {
+        id: dockHideTimer
+        interval: 600
+        onTriggered: pane._dockButtonsShown = false
+    }
+
+    Rectangle {
+        id: dockButtons
+        anchors { top: parent.top; right: parent.right
+                  topMargin: pane.gripSize + 2; rightMargin: pane.gripSize + 2 }
+        z: 900
+        width: dockRow.implicitWidth + 8
+        height: dockRow.implicitHeight + 8
+        radius: Theme.radiusMd
+        color: Qt.rgba(Theme.surfaceContainerLowest.r, Theme.surfaceContainerLowest.g,
+                       Theme.surfaceContainerLowest.b, 0.85)
+        border.width: 1
+        border.color: Theme.outlineVariant
+        visible: opacity > 0
+        opacity: (pane.dockable && pane._dockButtonsShown
+                  && (pane.dockTopAvailable || pane.dockBottomAvailable)) ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+
+        Row {
+            id: dockRow
+            anchors.centerIn: parent
+            spacing: 2
+            IconButton {
+                id: dockTopBtn
+                buttonSize: 28
+                visible: pane.dockTopAvailable
+                iconName: "dock-top"
+                tooltip: qsTr("Dock above the queue")
+                onClicked: pane.dockRequested("top")
+            }
+            IconButton {
+                id: dockBottomBtn
+                buttonSize: 28
+                visible: pane.dockBottomAvailable
+                iconName: "dock-bottom"
+                tooltip: qsTr("Dock below the queue")
+                onClicked: pane.dockRequested("bottom")
+            }
         }
     }
 

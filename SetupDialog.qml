@@ -7,7 +7,7 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 
 // ── SetupDialog ──────────────────────────────────────────────────────────
-// Modal setup window with seven tabs:
+// Modal setup window with eight tabs:
 //   • GENRES        — add/delete genre names (up to 48) and choose which of them
 //                     (up to 40) are enabled via a per-cell checkbox to appear as
 //                     GenreBar buttons; SCAN FOLDERS discovers the genres tagged in
@@ -19,6 +19,7 @@ import QtQuick.Dialogs
 //                     Queue Horizon lookahead, Consider Genre, and Consider
 //                     Rating + Minimum Rating (see UC-14)
 //   • AUDIO VISUALIZER — bar count, color, decay/sensitivity, opacity (see UC-19)
+//   • AUDIO METER   — style, peak hold, pane opacity (see UC-37)
 //   • MILKDROP      — preset folders, shuffle/duration, beat sensitivity (see UC-20)
 //   • MISC          — one-off maintenance actions; currently just Remove
 //                     Abandoned Ratings (see UC-24)
@@ -141,7 +142,7 @@ Popup {
         // Dialog is a persistent instance that remembers its last-selected
         // tab across close/reopen -- if it reopens directly on MILKDROP,
         // the tab-switch handler below never fires, so refresh here too.
-        if (tabBar.currentTab === 5) refreshMilkdropFolderRows()
+        if (tabBar.currentTab === 6) refreshMilkdropFolderRows()
     }
 
     // Auto-rescan if FILE MONITORING was touched this session -- see UC-04/
@@ -255,7 +256,7 @@ Popup {
                 spacing: 0
 
                 Repeater {
-                    model: ["GENRES", "FILE MONITORING", "PLAYBACK", "AUTO PLAY", "AUDIO VISUALIZER", "MILKDROP", "MISC"]
+                    model: ["GENRES", "FILE MONITORING", "PLAYBACK", "AUTO PLAY", "AUDIO VISUALIZER", "AUDIO METER", "MILKDROP", "MISC"]
 
                     delegate: Item {
                         width:  tabLabel.implicitWidth + 32
@@ -294,7 +295,7 @@ Popup {
                                 root.selectedGenreIndex  = -1
                                 root.selectedFolderIndex = -1
                                 root.selectedMilkdropFolderIndex = -1
-                                if (index === 5) root.refreshMilkdropFolderRows()
+                                if (index === 6) root.refreshMilkdropFolderRows()
                             }
                         }
                     }
@@ -3354,11 +3355,357 @@ Popup {
             } // end AUDIO VISUALIZER panel
 
             // ────────────────────────────────────────────────────────────
-            // PANEL 6 — MILKDROP
+            // PANEL 5b — AUDIO METER (UC-37)
             // ────────────────────────────────────────────────────────────
             Item {
                 anchors.fill: parent
                 visible: tabBar.currentTab === 5
+
+                ColumnLayout {
+                    anchors { fill: parent; margins: 24 }
+                    spacing: 40
+
+                    // ── Style row ─────────────────────────────────────
+                    // One card per visual style; each shows a frozen
+                    // sample of the real style component. A new style = one
+                    // more entry here and in AudioMeterView.qml.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text {
+                            text: "Style"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+                        }
+
+                        Row {
+                            Layout.leftMargin: 24
+                            spacing: 16
+
+                            Repeater {
+                                model: [ { key: "hifi90s", title: "90s HiFi",
+                                           text: qsTr("Segment meter in dBFS with peak hold and OVER lamp") } ]
+
+                                delegate: Rectangle {
+                                    id: styleCard
+                                    required property var modelData
+                                    readonly property bool selected:
+                                        root.appConfig && root.appConfig.audioMeterStyle === modelData.key
+                                    width: 400; height: 196
+                                    radius: Theme.radiusLg
+                                    color: Theme.surfaceContainer
+                                    border.width: selected ? 2 : 1
+                                    border.color: selected ? Theme.secondary : Theme.outlineVariant
+
+                                    // Frozen sample levels for the preview.
+                                    QtObject {
+                                        id: sampleMeter
+                                        readonly property real floorDb: -60
+                                        readonly property real peakLeftDb: -5.5
+                                        readonly property real peakRightDb: -9
+                                        readonly property real holdLeftDb: -1.5
+                                        readonly property real holdRightDb: -3.5
+                                        readonly property bool over: true
+                                        readonly property string sourceName: "BASS"
+                                    }
+
+                                    AudioMeterHiFi90s {
+                                        x: 14; y: 14
+                                        width: parent.width - 28
+                                        height: 120
+                                        meter: sampleMeter
+                                        peakHold: root.appConfig ? root.appConfig.audioMeterPeakHoldEnabled : true
+                                        colorScheme: root.appConfig ? root.appConfig.audioMeterColorScheme : "hifi"
+                                    }
+
+                                    Column {
+                                        x: 16
+                                        anchors { bottom: parent.bottom; bottomMargin: 12 }
+                                        spacing: 2
+                                        Text {
+                                            text: styleCard.modelData.title
+                                            font.family:    Theme.fontFamilyBody
+                                            font.pixelSize: Theme.labelXl
+                                            font.weight:    Font.Bold
+                                            color: styleCard.selected ? Theme.secondary : Theme.fgSurface
+                                        }
+                                        Text {
+                                            text: styleCard.modelData.text
+                                            font.family:    Theme.fontFamilyBody
+                                            font.pixelSize: Theme.labelMd
+                                            color: Theme.fgSurfaceVariant
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: if (root.appConfig) root.appConfig.setAudioMeterStyle(styleCard.modelData.key)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Colours of the 90s HiFi style: classic HiFi
+                        // (default) or the Topaz theme colours. Below the
+                        // cards, so further styles can sit right of the first
+                        // card. The card's preview follows the choice live.
+                        Row {
+                            Layout.leftMargin: 24
+                            spacing: 14
+
+                            // Same height as the switch, so "Colours" lines up
+                            // with it while the hint sits below the switch.
+                            Text {
+                                height: meterSchemeSwitch.height
+                                verticalAlignment: Text.AlignVCenter
+                                text: qsTr("Colours")
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.labelXl
+                                font.weight:    Font.Bold
+                                color: Theme.fgSurface
+                            }
+
+                            Column {
+                                spacing: 6
+
+                                Rectangle {
+                                    id: meterSchemeSwitch
+                                    readonly property string scheme:
+                                        root.appConfig ? root.appConfig.audioMeterColorScheme : "hifi"
+                                    width: schemeRow.implicitWidth + 6
+                                    height: 34
+                                    radius: 17
+                                    color: Theme.surfaceContainer
+                                    border.width: 1
+                                    border.color: Theme.outlineVariant
+
+                                    Row {
+                                        id: schemeRow
+                                        anchors.centerIn: parent
+                                        spacing: 2
+                                        Repeater {
+                                            model: [ { key: "hifi",  label: "HIFI"  },
+                                                     { key: "topaz", label: "TOPAZ" } ]
+                                            delegate: Rectangle {
+                                                id: schemeSeg
+                                                required property var modelData
+                                                readonly property bool on: meterSchemeSwitch.scheme === modelData.key
+                                                width: 84; height: 28
+                                                radius: 14
+                                                color: on ? Theme.secondary : "transparent"
+                                                Behavior on color { ColorAnimation { duration: 120 } }
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: schemeSeg.modelData.label
+                                                    font.family:        Theme.fontFamilyBody
+                                                    font.pixelSize:     Theme.labelMd
+                                                    font.weight:        Font.Bold
+                                                    font.letterSpacing: 1
+                                                    color: schemeSeg.on ? Theme.fgSecondary : Theme.fgSurfaceVariant
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: if (root.appConfig)
+                                                        root.appConfig.setAudioMeterColorScheme(schemeSeg.modelData.key)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    leftPadding: 4
+                                    text: qsTr("90s HiFi: classic HiFi colours or the colours of Topaz")
+                                    font.family:    Theme.fontFamilyBody
+                                    font.pixelSize: Theme.labelMd
+                                    color: Theme.fgSurfaceVariant
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Peak Hold row ─────────────────────────────────
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        Text {
+                            text: "Peak Hold"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text:    qsTr("Keep the highest recent level lit for a moment")
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            id: meterPeakHoldTrack
+
+                            readonly property bool peakHoldOn:
+                                root.appConfig !== null && root.appConfig.audioMeterPeakHoldEnabled
+
+                            width: 48; height: 24
+                            radius: 12
+                            color: peakHoldOn ? Theme.secondary : Theme.outlineVariant
+
+                            Rectangle {
+                                width: 18; height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: meterPeakHoldTrack.peakHoldOn ? 27 : 3
+                                color: Theme.fgSurface
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioMeterPeakHoldEnabled(
+                                            !root.appConfig.audioMeterPeakHoldEnabled)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Pane Opacity row ──────────────────────────────
+                    // Background only -- the segments always stay opaque.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Pane Opacity"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Medium
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("How visible the meter's background is — the segments always stay fully visible")
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: Math.round(meterOpacitySlider.value) + "%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "0%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: meterOpacitySlider
+                                Layout.fillWidth: true
+                                from: 0
+                                to:   100
+                                stepSize: 1
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.audioMeterPaneOpacity * 100 : 100
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioMeterPaneOpacity(value / 100)
+                                }
+
+                                background: Rectangle {
+                                    x: meterOpacitySlider.leftPadding
+                                    y: meterOpacitySlider.topPadding
+                                       + meterOpacitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  meterOpacitySlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  meterOpacitySlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: meterOpacitySlider.leftPadding
+                                       + meterOpacitySlider.visualPosition
+                                         * (meterOpacitySlider.availableWidth - width)
+                                    y: meterOpacitySlider.topPadding
+                                       + meterOpacitySlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "100%"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+                        }
+                    }
+
+                    // ── Measuring source (info only) ──────────────────
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: qsTr("Levels are measured by the BASS Audio Library while it plays the music; with FFmpeg, Topaz measures them itself. The scale is digital (dBFS): 0 dB is the loudest level a track can contain, and the OVER lamp lights when a track reaches it.")
+                        font.family:    Theme.fontFamilyBody
+                        font.pixelSize: Theme.labelLg
+                        color: Theme.fgSurfaceVariant
+                    }
+
+                    Item { Layout.fillHeight: true }   // push content to top
+                }
+            } // end AUDIO METER panel
+
+            // ────────────────────────────────────────────────────────────
+            // PANEL 6 — MILKDROP
+            // ────────────────────────────────────────────────────────────
+            Item {
+                anchors.fill: parent
+                visible: tabBar.currentTab === 6
 
                 ColumnLayout {
                     anchors { fill: parent; margins: 24 }
@@ -4120,7 +4467,7 @@ Popup {
             // ────────────────────────────────────────────────────────────
             Item {
                 anchors.fill: parent
-                visible: tabBar.currentTab === 6
+                visible: tabBar.currentTab === 7
 
                 MessageBox {
                     id: abandonedRatingsResultBox

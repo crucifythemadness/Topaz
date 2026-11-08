@@ -11,12 +11,14 @@ import QtQuick.Window
 // Main.qml's Loader wiring). Double-click cycles horizontal position (mirrors
 // BigCoverWindow.qml, see UC-17) and F10 toggles fullscreen — see UC-20.
 //
-// Unlike AudioVisualizerWindow (a thin renderer over a long-lived, Main.qml-
-// owned AudioVisualizerController), MilkdropView is instantiated directly
-// here and owns real GPU/native resources (an offscreen OpenGL context, the
-// projectM instance) — its lifetime is deliberately tied to this pane's own
-// Loader lifecycle (created on open, destroyed on close), not kept alive for
-// the whole app.
+// The content (MilkdropView + placeholders + preset toast) lives in
+// MilkdropPaneView.qml, shared with the docked copy (UC-38); this file keeps
+// only the window features. Unlike AudioVisualizerWindow (a thin renderer
+// over a long-lived, Main.qml-owned AudioVisualizerController), MilkdropView
+// owns real GPU/native resources (an offscreen OpenGL context, the projectM
+// instance) — its lifetime is deliberately tied to this pane's own Loader
+// lifecycle (created on open, destroyed on close), not kept alive for the
+// whole app.
 FloatingPane {
     id: mdWindow
 
@@ -75,8 +77,10 @@ FloatingPane {
     // pressed (manually dragged, or a result of double-clicking) is exactly
     // what gets restored on the second press.
     property bool _isFullscreen: false
-    // Arrow-key nudging (FloatingPane) only makes sense for a windowed pane.
+    // Arrow-key nudging and the dock buttons (FloatingPane) only make sense
+    // for a windowed pane.
     keyboardMoveEnabled: !_isFullscreen
+    dockable: !_isFullscreen
     property real _preFullscreenX: 0
     property real _preFullscreenY: 0
     property real _preFullscreenWidth: 0
@@ -140,131 +144,9 @@ FloatingPane {
         }
     }
 
-    MilkdropView {
-        id: milkdropView
+    MilkdropPaneView {
         anchors.fill: parent
-        visible: mdWindow.hasTrack && mdWindow.isPlaying && !milkdropView.initFailed
-        engine: mdWindow.engine
-        appConfig: mdWindow.milkdropConfig
-    }
-
-    // ── Placeholder — no track loaded ─────────────────────────────────────
-    Rectangle {
-        anchors.fill: parent
-        visible: !mdWindow.hasTrack && !milkdropView.initFailed
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
-            GradientStop { position: 1.0; color: Theme.surfaceBright }
-        }
-        Text {
-            anchors.centerIn: parent
-            text: "♫  " + qsTr("NO TRACK")
-            font.family:        Theme.fontFamilyHeadline
-            font.pixelSize:     22
-            font.weight:        Font.Bold
-            font.letterSpacing: 2
-            color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.30)
-        }
-    }
-
-    // ── Placeholder — track loaded but not playing (paused, or queue ended) ─
-    Rectangle {
-        anchors.fill: parent
-        visible: mdWindow.hasTrack && !mdWindow.isPlaying && !milkdropView.initFailed
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
-            GradientStop { position: 1.0; color: Theme.surfaceBright }
-        }
-        Text {
-            anchors.centerIn: parent
-            text: "⏸  " + qsTr("PAUSED")
-            font.family:        Theme.fontFamilyHeadline
-            font.pixelSize:     22
-            font.weight:        Font.Bold
-            font.letterSpacing: 2
-            color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.30)
-        }
-    }
-
-    // ── Placeholder — projectM/OpenGL failed to initialize ─────────────────
-    // Shown instead of either state above once MilkdropView reports it
-    // couldn't set up its offscreen GL context or the projectM instance —
-    // most likely this system's GPU/driver doesn't support the required
-    // OpenGL 3.3 core profile. See UC-20.
-    Rectangle {
-        anchors.fill: parent
-        visible: milkdropView.initFailed
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: Theme.surfaceContainerHigh }
-            GradientStop { position: 1.0; color: Theme.surfaceBright }
-        }
-        Column {
-            anchors.centerIn: parent
-            spacing: 8
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "⚠  " + qsTr("MILKDROP UNAVAILABLE")
-                font.family:        Theme.fontFamilyHeadline
-                font.pixelSize:     22
-                font.weight:        Font.Bold
-                font.letterSpacing: 2
-                color: Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.55)
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: qsTr("This system's graphics driver doesn't support the required OpenGL version (OpenGL 3.3 Core Profile)")
-                font.family:    Theme.fontFamilyBody
-                font.pixelSize: Theme.labelSm
-                color: Theme.fgSurfaceVariant
-            }
-        }
-    }
-
-    // ── Current preset name toast ───────────────────────────────────────
-    // Shows the active preset's name briefly on every switch, then fades out
-    // — same convention projectM's own reference frontends use. Optional,
-    // toggled via AppConfig.milkdropShowPresetName (SetupDialog's MILKDROP
-    // tab). Text.Outline instead of a background Rectangle for legibility
-    // over arbitrary preset visuals without adding another opaque box.
-    // Also gated on mdWindow.isPlaying so a toast mid-fade doesn't linger
-    // visibly on top of the "PAUSED" placeholder if playback pauses.
-    Text {
-        id: presetToast
-        anchors {
-            bottom: parent.bottom
-            horizontalCenter: parent.horizontalCenter
-            bottomMargin: 24
-        }
-        text: milkdropView.currentPresetName
-        visible: opacity > 0 && mdWindow.isPlaying
-        opacity: 0
-        font.family:    Theme.fontFamilyBody
-        font.pixelSize: Theme.titleMd
-        font.weight:    Font.Bold
-        color: Theme.fgSurface
-        style: Text.Outline
-        styleColor: "black"
-
-        Behavior on opacity {
-            NumberAnimation { duration: 1000 }
-        }
-    }
-
-    Timer {
-        id: presetToastHoldTimer
-        interval: 5000
-        repeat: false
-        onTriggered: presetToast.opacity = 0
-    }
-
-    Connections {
-        target: milkdropView
-        function onCurrentPresetNameChanged() {
-            if (mdWindow.milkdropConfig && mdWindow.milkdropConfig.milkdropShowPresetName
-                && milkdropView.currentPresetName.length > 0) {
-                presetToast.opacity = 1
-                presetToastHoldTimer.restart()
-            }
-        }
+        playback: mdWindow.engine
+        milkdropConfig: mdWindow.milkdropConfig
     }
 }

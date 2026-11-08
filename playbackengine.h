@@ -177,6 +177,14 @@ public:
     // comment above.
     QString activeBackendName() const;
 
+    // Audio Meter (UC-37). levelsFromBackend(): the active backend measures
+    // levels itself (BASS with BASS_ChannelGetLevelEx). readDeckLevels():
+    // current output levels of every audible deck combined; false when no
+    // deck can deliver them right now (FFmpeg backend, nothing playing) --
+    // AudioMeterController then uses its own analysis of the PCM tap.
+    bool levelsFromBackend() const;
+    bool readDeckLevels(DeckLevels &out) const;
+
     // Sets the active playlist name (called from QML after creating/loading a playlist).
     Q_INVOKABLE void setActivePlaylistName(const QString &name);
     // Locks or unlocks playlist sync.  When unlocked, the XSPF is immediately

@@ -104,6 +104,9 @@ bool BassLibrary::load()
     resolve(BASS_ChannelRemoveFX, "BASS_ChannelRemoveFX");
     resolve(BASS_FXSetParameters, "BASS_FXSetParameters");
     resolve(BASS_ChannelGetAttribute, "BASS_ChannelGetAttribute");
+    // Audio Meter (UC-37) -- optional as well; missing → meter uses its
+    // own PCM analysis instead.
+    resolve(BASS_ChannelGetLevelEx, "BASS_ChannelGetLevelEx");
 
     m_loaded = true;
     return true;

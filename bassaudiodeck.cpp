@@ -171,6 +171,25 @@ bool BassAudioDeck::isPlaying() const
     return BassLibrary::instance().BASS_ChannelIsActive(m_stream) == BASS_ACTIVE_PLAYING;
 }
 
+bool BassAudioDeck::readLevels(DeckLevels &out) const
+{
+    auto &bass = BassLibrary::instance();
+    if (!m_stream || !bass.hasLevelMeter() || !isPlaying()) return false;
+
+    // A playing (non-decode) channel's level is read from its playback
+    // buffer without consuming anything, so this never disturbs playback.
+    float peak[2] = { 0.0f, 0.0f };
+    float rms[2]  = { 0.0f, 0.0f };
+    if (!bass.BASS_ChannelGetLevelEx(m_stream, peak, 0.05f, BASS_LEVEL_STEREO | BASS_LEVEL_VOLPAN))
+        return false;
+    if (!bass.BASS_ChannelGetLevelEx(m_stream, rms, 0.3f,
+                                     BASS_LEVEL_STEREO | BASS_LEVEL_RMS | BASS_LEVEL_VOLPAN))
+        return false;
+    out.peakL = peak[0]; out.peakR = peak[1];
+    out.rmsL  = rms[0];  out.rmsR  = rms[1];
+    return true;
+}
+
 void BassAudioDeck::setVolume(float volume)
 {
     m_fadeVolume = volume;

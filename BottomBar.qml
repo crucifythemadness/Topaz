@@ -2,7 +2,7 @@
 // qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
 // qmllint disable unqualified
 
-// Bottom toolbar: Auto Play | Audio Visualizer | Milkdrop | Tag Information | Scan Folders
+// Bottom toolbar: Auto Play | Audio Visualizer | Audio Meter | Milkdrop | Tag Information | Scan Folders
 Rectangle {
     id: root
     height: 56
@@ -20,6 +20,9 @@ Rectangle {
     // VISUALIZER button.
     signal audioVisualizerToggleRequested()
 
+    // Same split again, for the AUDIO METER button (UC-37).
+    signal audioMeterToggleRequested()
+
     // Same split again, for the MILKDROP button.
     signal milkdropToggleRequested()
 
@@ -33,6 +36,9 @@ Rectangle {
     // Set by Main.qml (bound to root.audioVisualizerPaneOpen) — drives the
     // AUDIO VISUALIZER button's on/off color, mirroring the pane's actual state.
     property bool audioVisualizerPaneOpen: false
+
+    // Same split again, for the AUDIO METER button.
+    property bool audioMeterPaneOpen: false
 
     // Same split again, for the MILKDROP button.
     property bool milkdropPaneOpen: false
@@ -60,20 +66,23 @@ Rectangle {
         Repeater {
             model: [
                 { label: "AUTO PLAY",       icon: "\u25B6", active: root.autoPlayReady },
-                { label: "AUDIO VISUALIZER", icon: "\u2261", active: false },
+                { label: "AUDIO VISUALIZER", icon: "\u2583\u2585\u2587", active: false },
+                // No glyph: drawn below as two horizontal L/R level bars
+                { label: "AUDIO METER",     icon: "", active: false },
                 { label: "MILKDROP",        icon: "\u2733", active: false },
                 { label: "TAG INFORMATION", icon: "\u24D8", active: false },
                 { label: "SCAN FOLDERS",    icon: "\u29C9", active: false }
             ]
 
             delegate: Item {
-                width:  root.width / 5
+                width:  root.width / 6
                 height: root.height
 
                 readonly property bool isScanBtn:     modelData.label === "SCAN FOLDERS"
                 readonly property bool isAutoPlayBtn: modelData.label === "AUTO PLAY"
                 readonly property bool isTagInfoBtn:  modelData.label === "TAG INFORMATION"
                 readonly property bool isAudioVisualizerBtn: modelData.label === "AUDIO VISUALIZER"
+                readonly property bool isAudioMeterBtn: modelData.label === "AUDIO METER"
                 readonly property bool isMilkdropBtn: modelData.label === "MILKDROP"
 
                 // AUTO PLAY is only ready once the library scan has completed
@@ -101,6 +110,8 @@ Rectangle {
                             : (isTagInfoBtn && root.tagInfoPaneOpen)
                                 ? Theme.tertiary
                                 : (isAudioVisualizerBtn && root.audioVisualizerPaneOpen)
+                                    ? Theme.tertiary
+                                : (isAudioMeterBtn && root.audioMeterPaneOpen)
                                     ? Theme.tertiary
                                     : (isMilkdropBtn && root.milkdropPaneOpen)
                                         ? Theme.tertiary
@@ -130,10 +141,46 @@ Rectangle {
                     onBlinkingActiveChanged: if (!blinkingActive) opacity = 1.0   // animation.stop() can land mid-fade
 
                     Text {
+                        id: iconGlyph
                         anchors.horizontalCenter: parent.horizontalCenter
+                        visible: !isAudioMeterBtn
                         text: modelData.icon
                         font.pixelSize: 16
                         color: btnColor
+                    }
+
+                    // AUDIO METER icon: two horizontal segmented level bars
+                    // (L and R) like the meter itself, the lower one a step
+                    // shorter (its last segment dimmed). Same height as the
+                    // glyph icons so all labels stay on one line.
+                    Item {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        visible: isAudioMeterBtn
+                        width: 6 * 4 + 5 * 1.5
+                        height: iconGlyph.implicitHeight
+
+                        Column {
+                            anchors.centerIn: parent
+                            spacing: 2.5
+                            Repeater {
+                                model: 2
+                                delegate: Row {
+                                    id: meterIconRow
+                                    required property int index
+                                    spacing: 1.5
+                                    Repeater {
+                                        model: 6
+                                        delegate: Rectangle {
+                                            required property int index
+                                            width: 4; height: 4.5
+                                            radius: 0.5
+                                            color: btnColor
+                                            opacity: (meterIconRow.index === 1 && index >= 4) ? 0.3 : 1.0
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     Text {
@@ -161,6 +208,8 @@ Rectangle {
                             root.tagInfoToggleRequested()
                         else if (isAudioVisualizerBtn)
                             root.audioVisualizerToggleRequested()
+                        else if (isAudioMeterBtn)
+                            root.audioMeterToggleRequested()
                         else if (isMilkdropBtn)
                             root.milkdropToggleRequested()
                     }

@@ -54,6 +54,13 @@ inline constexpr BASS_DWORD BASS_DATA_FLOAT     = 0x40000000u;
 inline constexpr BASS_DWORD BASS_SAMPLE_FLOAT   = 0x100u;
 inline constexpr BASS_DWORD BASS_STREAM_PRESCAN = 0x20000u;
 inline constexpr BASS_DWORD BASS_STREAM_DECODE  = 0x200000u;
+// BASS_ChannelGetLevelEx() flags (bass.h) -- the Audio Meter (UC-37).
+// STEREO = one level per side (mono sources report the same on both),
+// RMS = RMS instead of peak, VOLPAN = include BASS_ATTRIB_VOL/PAN, i.e. the
+// level actually sent to the output (crossfade ramp + loudness gain).
+inline constexpr BASS_DWORD BASS_LEVEL_STEREO   = 2;
+inline constexpr BASS_DWORD BASS_LEVEL_RMS      = 4;
+inline constexpr BASS_DWORD BASS_LEVEL_VOLPAN   = 8;
 
 // ── BASS_FX (bass_fx.h) ─────────────────────────────────────────────────────
 // Only the "Compressor 2" effect is used (Setup > PLAYBACK > Auto Loudness
@@ -125,6 +132,12 @@ public:
     BASS_BOOL   (BASSCALL *BASS_FXSetParameters)(BASS_HANDLE fx, const void *params) = nullptr;
     // Read-back of an attribute (BASS_ATTRIB_VOL) -- diagnostics/tests only.
     BASS_BOOL   (BASSCALL *BASS_ChannelGetAttribute)(BASS_HANDLE handle, BASS_DWORD attrib, float *value) = nullptr;
+    // Level meter (Audio Meter, UC-37) -- also OPTIONAL: without it the meter
+    // simply falls back to Topaz's own analysis of the PCM tap. levels gets
+    // one float per side (BASS_LEVEL_STEREO), 1.0 = 0 dBFS; length = the
+    // measuring window in seconds (max 1).
+    BASS_BOOL   (BASSCALL *BASS_ChannelGetLevelEx)(BASS_HANDLE handle, float *levels, float length, BASS_DWORD flags) = nullptr;
+    bool hasLevelMeter() const { return m_loaded && BASS_ChannelGetLevelEx; }
 
     // Loads bass_fx.dll / libbass_fx.so from next to the executable (same
     // rule as bass.dll itself; never bundled -- the user supplies it) and

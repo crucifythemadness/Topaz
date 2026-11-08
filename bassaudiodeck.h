@@ -76,6 +76,11 @@ public:
     void setCompressorEnabled(bool on) override;
     void setCompressorTrimDb(float db, bool smooth) override;
 
+    // Audio Meter (UC-37): BASS_ChannelGetLevelEx() on the playing stream,
+    // peak over 50 ms and RMS over 300 ms, both incl. BASS_ATTRIB_VOL (what
+    // is actually heard). false when not playing or the export is missing.
+    bool readLevels(DeckLevels &out) const override;
+
 private:
     // Writes m_fadeVolume x linear(m_gainDbCurrent) to BASS_ATTRIB_VOL.
     void applyVolume();

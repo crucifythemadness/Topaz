@@ -83,13 +83,43 @@ ApplicationWindow {
     // itself, so the declarative bindings below stop tracking appConfig after
     // the first drag. A full-screen width of 0 (never set) keeps the current
     // width -- the first full-screen use behaves exactly as before.
+    // Also applies the mode's heights of the free areas above/below the queue
+    // that hold a docked pane (applyDockHeights(), UC-38).
     function applyPanelWidths(full) {
         const lib   = full ? appConfig.fullscreenLibraryTreeWidth   : appConfig.libraryTreeWidth
         const queue = full ? appConfig.fullscreenPlaybackQueueWidth : appConfig.playbackQueueWidth
         const np    = full ? appConfig.fullscreenNowPlayingWidth    : appConfig.nowPlayingWidth
         if (lib   > 0) libraryTreePanel.SplitView.preferredWidth   = lib
-        if (queue > 0) playbackQueuePanel.SplitView.preferredWidth = queue
+        if (queue > 0) queueColumn.SplitView.preferredWidth        = queue
         if (np    > 0) nowPlayingPanel.SplitView.preferredWidth    = np
+
+        root.applyDockHeights(full)
+    }
+
+    // The stored height of a free area for one mode (-1 = full screen never set).
+    function savedDockHeight(slot, full) {
+        return slot === "top"
+               ? (full ? appConfig.fullscreenQueueTopDockHeight    : appConfig.queueTopDockHeight)
+               : (full ? appConfig.fullscreenQueueBottomDockHeight : appConfig.queueBottomDockHeight)
+    }
+
+    // Gives each area holding a docked pane the mode's stored height (if it
+    // fits the pane's minimum; else keeps the current height if that does,
+    // else the pane's default). Empty areas keep their current size during a
+    // session -- they only start collapsed (see the dock areas' preferredHeight).
+    function applyDockHeights(full) {
+        const slots = ["top", "bottom"]
+        for (let i = 0; i < slots.length; i++) {
+            const id = slots[i] === "top" ? root.dockTop : root.dockBottom
+            if (id === "") continue
+            const entry = root.dockablePanes[id]
+            const area  = root.dockArea(slots[i])
+            const saved = root.savedDockHeight(slots[i], full)
+            if (saved >= entry.minDockHeight)
+                area.SplitView.preferredHeight = saved
+            else if (area.SplitView.preferredHeight < entry.minDockHeight)
+                area.SplitView.preferredHeight = entry.defaultDockHeight
+        }
     }
 
     // F11 and TopBar's fullscreen/window button toggle between fullscreen and windowed.
@@ -347,7 +377,9 @@ ApplicationWindow {
 
     Loader {
         id: audioVisualizerLoader
+        // Floating only while not docked (UC-38, see "Docking panes" below)
         active: root.audioVisualizerPaneOpen
+                && root.dockTop !== "audioVisualizer" && root.dockBottom !== "audioVisualizer"
         onLoaded: {
             if (item) {
                 item.engine           = engine
@@ -373,7 +405,51 @@ ApplicationWindow {
 
             onGeometrySettled: (x, y, width, height, screenName) =>
                 appConfig.saveAudioVisualizerPaneGeometry(x, y, width, height, screenName)
-            onCloseRequested: root.audioVisualizerPaneOpen = false
+            onCloseRequested: root.closePane("audioVisualizer")
+            dockTopAvailable:    root.dockTop === ""
+            dockBottomAvailable: root.dockBottom === ""
+            onDockRequested: (slot) => root.dockPane("audioVisualizer", slot)
+        }
+    }
+
+    // ── Detachable "audio meter" pane ─────────────────────────────────────
+    // Opened by toggling the "AUDIO METER" button in BottomBar; see
+    // AudioMeterWindow.qml / AudioMeterView.qml and AudioMeterController
+    // (UC-37). Same wiring as audioVisualizerLoader above.
+    property bool audioMeterPaneOpen: false
+
+    Loader {
+        id: audioMeterLoader
+        active: root.audioMeterPaneOpen
+                && root.dockTop !== "audioMeter" && root.dockBottom !== "audioMeter"
+        onLoaded: {
+            if (item) {
+                item.meter       = audioMeter
+                item.meterConfig = appConfig
+            }
+        }
+
+        sourceComponent: AudioMeterWindow {
+            id: audioMeterWindow
+
+            kiosk: root.visibility === Window.FullScreen
+
+            Component.onCompleted: {
+                root.restorePaneGeometry(audioMeterWindow, appConfig.audioMeterPaneConfigured,
+                                         appConfig.audioMeterPaneX, appConfig.audioMeterPaneY,
+                                         appConfig.audioMeterPaneWidth, appConfig.audioMeterPaneHeight,
+                                         520, 150)
+                visible = true
+                raise()
+                requestActivate()
+            }
+
+            onGeometrySettled: (x, y, width, height, screenName) =>
+                appConfig.saveAudioMeterPaneGeometry(x, y, width, height, screenName)
+            onCloseRequested: root.closePane("audioMeter")
+            dockTopAvailable:    root.dockTop === ""
+            dockBottomAvailable: root.dockBottom === ""
+            onDockRequested: (slot) => root.dockPane("audioMeter", slot)
         }
     }
 
@@ -389,6 +465,7 @@ ApplicationWindow {
     Loader {
         id: milkdropLoader
         active: root.milkdropPaneOpen
+                && root.dockTop !== "milkdrop" && root.dockBottom !== "milkdrop"
         onLoaded: {
             if (item) {
                 item.engine         = engine
@@ -413,8 +490,128 @@ ApplicationWindow {
 
             onGeometrySettled: (x, y, width, height, screenName) =>
                 appConfig.saveMilkdropPaneGeometry(x, y, width, height, screenName)
-            onCloseRequested: root.milkdropPaneOpen = false
+            onCloseRequested: root.closePane("milkdrop")
+            dockTopAvailable:    root.dockTop === ""
+            dockBottomAvailable: root.dockBottom === ""
+            onDockRequested: (slot) => root.dockPane("milkdrop", slot)
         }
+    }
+
+    // ── Docking panes into the queue column (UC-38) ──────────────────────
+    // A dockable pane is either floating (its own loader above, a
+    // FloatingPane window) or docked into one of the two free areas above /
+    // below the queue (queueTopDock / queueBottomDock, which load the pane's
+    // content view from this registry). Never both: each floating loader is
+    // active only while its pane is open AND not docked, so there is at most
+    // one instance (matters for Milkdrop's GL context / projectM).
+    //
+    // Registry: pane id -> content component + dock heights. The id is also
+    // the prefix of the pane's open flag (root.<id>PaneOpen). A future
+    // dockable pane = one entry here + a dock component + dock props on its
+    // floating loader.
+    Component {
+        id: audioMeterDockComponent
+        Item {   // same 6 px margin as in AudioMeterWindow
+            AudioMeterView { anchors.fill: parent; anchors.margins: 6; meter: audioMeter; meterConfig: appConfig }
+        }
+    }
+    Component {
+        id: audioVisualizerDockComponent
+        AudioVisualizerView { playback: engine; visualizer: audioVisualizer; visualizerConfig: appConfig }
+    }
+    Component {
+        id: milkdropDockComponent
+        MilkdropPaneView { playback: engine; milkdropConfig: appConfig }
+    }
+    readonly property var dockablePanes: ({
+        audioMeter:      { component: audioMeterDockComponent,      minDockHeight: 90,  defaultDockHeight: 140 },
+        audioVisualizer: { component: audioVisualizerDockComponent, minDockHeight: 120, defaultDockHeight: 200 },
+        milkdrop:        { component: milkdropDockComponent,        minDockHeight: 160, defaultDockHeight: 260 }
+    })
+
+    // Which pane is docked in each area ("" = empty). A pane counts as docked
+    // only while open: closing a docked pane empties its area.
+    property string dockTop: ""
+    property string dockBottom: ""
+    // Session memory: the area a pane was last docked in, so reopening it from
+    // the BottomBar puts it back there (if that area is free). Forgotten when
+    // the user floats the pane again.
+    property var lastDockSlot: ({})
+
+    function dockSlotOf(id) {
+        return root.dockTop === id ? "top" : root.dockBottom === id ? "bottom" : ""
+    }
+    function dockArea(slot) { return slot === "top" ? queueTopDock : queueBottomDock }
+
+    // Dock pane `id` into `slot` ("top"/"bottom") and open it there. The slot
+    // is set BEFORE the open flag, so the floating loader never starts.
+    function dockPane(id, slot) {
+        const entry = root.dockablePanes[id]
+        if (!entry) return
+        const occupant = slot === "top" ? root.dockTop : root.dockBottom
+        if (occupant !== "" && occupant !== id) return
+        if (root.dockTop === id)    root.dockTop = ""
+        if (root.dockBottom === id) root.dockBottom = ""
+        if (slot === "top") root.dockTop = id
+        else                root.dockBottom = id
+        root.lastDockSlot[id] = slot
+        root[id + "PaneOpen"] = true
+
+        // Give the area room for the pane: keep its current height if it is
+        // big enough, else the mode's saved height, else the pane's default.
+        const area  = root.dockArea(slot)
+        const saved = root.savedDockHeight(slot, root.layoutFullscreen)
+        if (area.SplitView.preferredHeight < entry.minDockHeight)
+            area.SplitView.preferredHeight = saved >= entry.minDockHeight ? saved : entry.defaultDockHeight
+    }
+
+    // Float a docked pane again: emptying its area makes the floating loader
+    // start (the open flag stays true).
+    function undockPane(id) {
+        delete root.lastDockSlot[id]
+        if (root.dockTop === id)    root.dockTop = ""
+        if (root.dockBottom === id) root.dockBottom = ""
+    }
+
+    // Close a pane wherever it is. The open flag goes false BEFORE the area is
+    // emptied, so a docked pane doesn't flash up as a floating window. The
+    // area keeps its size (FREE SPACE) and lastDockSlot is kept.
+    function closePane(id) {
+        root[id + "PaneOpen"] = false
+        if (root.dockTop === id)    root.dockTop = ""
+        if (root.dockBottom === id) root.dockBottom = ""
+    }
+
+    // Persistence: an area's entry is set exactly while a pane is docked and
+    // open there (closePane() empties it), so the config always holds what a
+    // restart should bring back.
+    onDockTopChanged:    appConfig.saveDockedPanes(root.dockTop, root.dockBottom)
+    onDockBottomChanged: appConfig.saveDockedPanes(root.dockTop, root.dockBottom)
+
+    // Startup (Component.onCompleted, window still hidden): reopen the panes
+    // that were docked at the last exit, in their areas. Unknown ids (a pane
+    // removed in a later version) and a duplicate are ignored.
+    function restoreDockedPanes() {
+        const top    = appConfig.queueTopDockPane
+        const bottom = appConfig.queueBottomDockPane
+        if (top !== "" && root.dockablePanes[top])
+            root.dockPane(top, "top")
+        if (bottom !== "" && bottom !== top && root.dockablePanes[bottom])
+            root.dockPane(bottom, "bottom")
+    }
+
+    // BottomBar button: close if open; otherwise reopen in the area it was
+    // last docked in when that area is free, else as a floating window.
+    function togglePane(id) {
+        if (root[id + "PaneOpen"]) {
+            root.closePane(id)
+            return
+        }
+        const slot = root.lastDockSlot[id]
+        if (slot && (slot === "top" ? root.dockTop : root.dockBottom) === "")
+            root.dockPane(id, slot)
+        else
+            root[id + "PaneOpen"] = true
     }
 
     // Shared data model — owns genre toggle state and mock library.
@@ -518,6 +715,14 @@ ApplicationWindow {
     // Passed as `visualizer` property to AudioVisualizerWindow.
     AudioVisualizerController {
         id: audioVisualizer
+        engine:    engine
+        appConfig: appConfig
+    }
+
+    // Audio Meter level analysis (UC-37): BASS levels when BASS plays,
+    // otherwise Topaz's own PCM analysis. Idle unless a meter view exists.
+    AudioMeterController {
+        id: audioMeter
         engine:    engine
         appConfig: appConfig
     }
@@ -676,6 +881,14 @@ ApplicationWindow {
         } catch (e) {
             console.warn("Main: restoring the window geometry failed, using platform defaults:", e)
         } finally {
+            // Panes docked at the last exit come back docked (UC-38). In the
+            // windowed set's heights here; a full-screen start re-applies its
+            // own set via applyPanelWidths() on the flip below.
+            try {
+                root.restoreDockedPanes()
+            } catch (e2) {
+                console.warn("Main: restoring the docked panes failed:", e2)
+            }
             root.visibility = wantFullscreen ? Window.FullScreen : Window.Windowed
             settleTimer.start()
         }
@@ -741,7 +954,7 @@ ApplicationWindow {
     onActiveFocusItemChanged: {
         const hasFocus = root.activeFocusItem !== null
         if (hasFocus && !root.mainHadFocus && root.visibility === Window.FullScreen) {
-            const loaders = [bigCoverLoader, tagInfoLoader, audioVisualizerLoader, milkdropLoader]
+            const loaders = [bigCoverLoader, tagInfoLoader, audioVisualizerLoader, audioMeterLoader, milkdropLoader]
             for (let i = 0; i < loaders.length; i++) {
                 if (loaders[i].item) loaders[i].item.kioskBurst()
             }
@@ -779,9 +992,21 @@ ApplicationWindow {
             // full-screen window that gets minimised still saves to its own set.
             appConfig.saveLayout(winW, winH,
                                  libraryTreePanel.width,
-                                 playbackQueuePanel.width,
+                                 queueColumn.width,
                                  nowPlayingPanel.width,
                                  root.layoutFullscreen)
+            // The free areas above/below the queue: their preferredHeight
+            // (only a handle drag writes it), not their current height -- a
+            // window squeezed too small must not overwrite what the user set.
+            // Only while an area holds a docked pane (UC-38); an empty area
+            // keeps the stored height of its last docked pane.
+            const full = root.layoutFullscreen
+            appConfig.saveQueueDockHeights(
+                root.dockTop !== "" ? Math.round(queueTopDock.SplitView.preferredHeight)
+                                    : root.savedDockHeight("top", full),
+                root.dockBottom !== "" ? Math.round(queueBottomDock.SplitView.preferredHeight)
+                                       : root.savedDockHeight("bottom", full),
+                full)
 
             const posX = (root.visibility !== Window.FullScreen) ? root.x : appConfig.windowX
             const posY = (root.visibility !== Window.FullScreen) ? root.y : appConfig.windowY
@@ -916,14 +1141,61 @@ ApplicationWindow {
                 }
             }
 
-            PlaybackQueue {
-                id: playbackQueuePanel
+            // Queue column: a vertical SplitView of free area | queue | free
+            // area, so the queue can be made shorter from the top and from the
+            // bottom (its two handles sit directly above and below it). The
+            // free areas (QueueDockArea) can hold a docked pane (UC-38, see
+            // "Docking panes" above). The queue fills the rest, so window height
+            // changes go to the queue; the areas keep their size. Width (as
+            // before) and the two heights are persisted per mode -- see
+            // applyPanelWidths() / saveLayoutTimer.
+            SplitView {
+                id: queueColumn
+                orientation: Qt.Vertical
                 SplitView.preferredWidth: appConfig.playbackQueueWidth
                 SplitView.minimumWidth:   240
-                engine: engine
-                autoPlay: autoPlay
-                appConfig: appConfig
                 onWidthChanged: saveLayoutTimer.restart()
+
+                // Same 5 px handle as the main SplitView's
+                handle: Rectangle {
+                    implicitWidth:  5
+                    implicitHeight: 5
+                    color: SplitHandle.pressed ? Theme.secondary
+                         : SplitHandle.hovered ? Theme.surfaceContainerHigh
+                         :                       Theme.surfaceContainerLow
+                }
+
+                QueueDockArea {
+                    id: queueTopDock
+                    // Starts collapsed; restoreDockedPanes() / applyDockHeights()
+                    // open it only when a pane comes back docked (UC-38).
+                    SplitView.preferredHeight: 0
+                    // A docked pane can't be squeezed below its own minimum
+                    SplitView.minimumHeight: root.dockTop !== "" ? root.dockablePanes[root.dockTop].minDockHeight : 0
+                    SplitView.onPreferredHeightChanged: saveLayoutTimer.restart()
+                    paneComponent: root.dockTop !== "" ? root.dockablePanes[root.dockTop].component : null
+                    onUndockRequested: root.undockPane(root.dockTop)
+                    onCloseRequested:  root.closePane(root.dockTop)
+                }
+
+                PlaybackQueue {
+                    id: playbackQueuePanel
+                    SplitView.fillHeight:    true
+                    SplitView.minimumHeight: 200
+                    engine: engine
+                    autoPlay: autoPlay
+                    appConfig: appConfig
+                }
+
+                QueueDockArea {
+                    id: queueBottomDock
+                    SplitView.preferredHeight: 0
+                    SplitView.minimumHeight: root.dockBottom !== "" ? root.dockablePanes[root.dockBottom].minDockHeight : 0
+                    SplitView.onPreferredHeightChanged: saveLayoutTimer.restart()
+                    paneComponent: root.dockBottom !== "" ? root.dockablePanes[root.dockBottom].component : null
+                    onUndockRequested: root.undockPane(root.dockBottom)
+                    onCloseRequested:  root.closePane(root.dockBottom)
+                }
             }
 
             NowPlaying {
@@ -956,11 +1228,15 @@ ApplicationWindow {
             autoPlay: autoPlay
             tagInfoPaneOpen: root.tagInfoPaneOpen
             audioVisualizerPaneOpen: root.audioVisualizerPaneOpen
+            audioMeterPaneOpen: root.audioMeterPaneOpen
             milkdropPaneOpen: root.milkdropPaneOpen
             onScanRequested: libraryModel.startFullScan()
             onTagInfoToggleRequested: root.tagInfoPaneOpen = !root.tagInfoPaneOpen
-            onAudioVisualizerToggleRequested: root.audioVisualizerPaneOpen = !root.audioVisualizerPaneOpen
-            onMilkdropToggleRequested: root.milkdropPaneOpen = !root.milkdropPaneOpen
+            // Dockable panes go through togglePane(): reopening a pane that
+            // was docked puts it back in its area (UC-38).
+            onAudioVisualizerToggleRequested: root.togglePane("audioVisualizer")
+            onAudioMeterToggleRequested: root.togglePane("audioMeter")
+            onMilkdropToggleRequested: root.togglePane("milkdrop")
         }
     }
 }

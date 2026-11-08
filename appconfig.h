@@ -72,6 +72,9 @@ class QJsonObject;
 //                           "paneOpacity": 1.0, "sensitivity": 0.5 },
 //     "audioVisualizerPane": { "x": 100, "y": 100, "width": 500, "height": 260,
 //                              "screenName": "DISPLAY1" },
+//     "audioMeter": { "style": "hifi90s", "peakHoldEnabled": true, "paneOpacity": 1.0 },
+//     "audioMeterPane": { "x": 100, "y": 100, "width": 520, "height": 150,
+//                         "screenName": "DISPLAY1" },
 //     "milkdrop": { "presetFolders": [ { "path": "C:/Presets", "active": true } ],
 //                   // "active" (default true when absent, for pre-existing
 //                   // configs) gates whether a folder's presets are loaded
@@ -138,6 +141,26 @@ class AppConfig : public QObject
     Q_PROPERTY(int fullscreenLibraryTreeWidth   READ fullscreenLibraryTreeWidth   NOTIFY panelWidthsChanged)
     Q_PROPERTY(int fullscreenPlaybackQueueWidth READ fullscreenPlaybackQueueWidth NOTIFY panelWidthsChanged)
     Q_PROPERTY(int fullscreenNowPlayingWidth    READ fullscreenNowPlayingWidth    NOTIFY panelWidthsChanged)
+    // Heights (px) of the free "dock" areas above and below the playback
+    // queue (Main.qml's vertical queueColumn SplitView), per mode like the
+    // widths. Windowed default 0 = no area. Full screen -1 = not set yet --
+    // Main.qml then keeps the current heights (0 is a real value here: the
+    // user collapsed the area). Stored from the areas' SplitView.preferredHeight
+    // (written only by a handle drag), so a window squeezed too small never
+    // overwrites them. Reuses panelWidthsChanged ("panel layout changed").
+    Q_PROPERTY(int queueTopDockHeight              READ queueTopDockHeight              NOTIFY panelWidthsChanged)
+    Q_PROPERTY(int queueBottomDockHeight           READ queueBottomDockHeight           NOTIFY panelWidthsChanged)
+    Q_PROPERTY(int fullscreenQueueTopDockHeight    READ fullscreenQueueTopDockHeight    NOTIFY panelWidthsChanged)
+    Q_PROPERTY(int fullscreenQueueBottomDockHeight READ fullscreenQueueBottomDockHeight NOTIFY panelWidthsChanged)
+
+    // The pane docked in the free area above / below the queue (UC-38): a
+    // dockable pane id ("audioMeter", "audioVisualizer", "milkdrop") or "" for
+    // none. Set only while a pane is docked AND open there, so at startup
+    // Main.qml reopens exactly those panes docked and collapses empty areas.
+    // Since 1.2.x the dock heights above are only written while their area
+    // holds a pane (they are "the height of a docked pane", per mode).
+    Q_PROPERTY(QString queueTopDockPane    READ queueTopDockPane    NOTIFY dockedPanesChanged)
+    Q_PROPERTY(QString queueBottomDockPane READ queueBottomDockPane NOTIFY dockedPanesChanged)
 
     // Startup fullscreen/windowed preference (Setup > MISC). Default false
     // (Windowed) -- see Main.qml's `visibility` binding.
@@ -236,6 +259,23 @@ class AppConfig : public QObject
     Q_PROPERTY(int  audioVisualizerPaneWidth      READ audioVisualizerPaneWidth      NOTIFY audioVisualizerPaneChanged)
     Q_PROPERTY(int  audioVisualizerPaneHeight     READ audioVisualizerPaneHeight     NOTIFY audioVisualizerPaneChanged)
 
+    // ── Audio meter settings (see AudioMeterController / UC-37) ────────────
+    // style: which visual AudioMeterView.qml loads ("hifi90s" = the 90s HiFi
+    // segment meter, the only one so far). paneOpacity: background only.
+    Q_PROPERTY(QString audioMeterStyle           READ audioMeterStyle           NOTIFY audioMeterChanged)
+    Q_PROPERTY(bool    audioMeterPeakHoldEnabled READ audioMeterPeakHoldEnabled NOTIFY audioMeterChanged)
+    Q_PROPERTY(double  audioMeterPaneOpacity     READ audioMeterPaneOpacity     NOTIFY audioMeterChanged)
+    // colorScheme: the 90s HiFi style's colours -- "hifi" (default: green /
+    // yellow / orange) or "topaz" (teal / violet / neon pink from the theme).
+    Q_PROPERTY(QString audioMeterColorScheme     READ audioMeterColorScheme     NOTIFY audioMeterChanged)
+
+    // ── Detachable "audio meter" pane geometry (see FloatingPane.qml / AudioMeterWindow.qml) ──
+    Q_PROPERTY(bool audioMeterPaneConfigured READ audioMeterPaneConfigured NOTIFY audioMeterPaneChanged)
+    Q_PROPERTY(int  audioMeterPaneX          READ audioMeterPaneX          NOTIFY audioMeterPaneChanged)
+    Q_PROPERTY(int  audioMeterPaneY          READ audioMeterPaneY          NOTIFY audioMeterPaneChanged)
+    Q_PROPERTY(int  audioMeterPaneWidth      READ audioMeterPaneWidth      NOTIFY audioMeterPaneChanged)
+    Q_PROPERTY(int  audioMeterPaneHeight     READ audioMeterPaneHeight     NOTIFY audioMeterPaneChanged)
+
     // ── Milkdrop visualizer settings (see MilkdropView / UC-20) ────────────
     Q_PROPERTY(QVariantList milkdropPresetFolders    READ milkdropPresetFolders    NOTIFY milkdropChanged)
     Q_PROPERTY(bool         milkdropShuffleEnabled   READ milkdropShuffleEnabled   NOTIFY milkdropChanged)
@@ -273,6 +313,12 @@ public:
     int fullscreenLibraryTreeWidth()   const { return m_fullscreenLibraryTreeWidth;   }
     int fullscreenPlaybackQueueWidth() const { return m_fullscreenPlaybackQueueWidth; }
     int fullscreenNowPlayingWidth()    const { return m_fullscreenNowPlayingWidth;    }
+    int queueTopDockHeight()              const { return m_queueTopDockHeight;              }
+    int queueBottomDockHeight()           const { return m_queueBottomDockHeight;           }
+    int fullscreenQueueTopDockHeight()    const { return m_fullscreenQueueTopDockHeight;    }
+    int fullscreenQueueBottomDockHeight() const { return m_fullscreenQueueBottomDockHeight; }
+    QString queueTopDockPane()    const { return m_queueTopDockPane;    }
+    QString queueBottomDockPane() const { return m_queueBottomDockPane; }
     bool startFullscreen()     const { return m_startFullscreen;   }
     bool visualFolderScanning() const { return m_visualFolderScanning; }
     bool modifyCurrentRatingEnabled() const { return m_modifyCurrentRatingEnabled; }
@@ -322,6 +368,16 @@ public:
     int  audioVisualizerPaneY()          const { return m_audioVisualizerPaneY;          }
     int  audioVisualizerPaneWidth()      const { return m_audioVisualizerPaneWidth;      }
     int  audioVisualizerPaneHeight()     const { return m_audioVisualizerPaneHeight;     }
+
+    QString audioMeterStyle()           const { return m_audioMeterStyle;           }
+    bool    audioMeterPeakHoldEnabled() const { return m_audioMeterPeakHoldEnabled; }
+    QString audioMeterColorScheme()     const { return m_audioMeterColorScheme;     }
+    double  audioMeterPaneOpacity()     const { return m_audioMeterPaneOpacity;     }
+    bool audioMeterPaneConfigured() const { return m_audioMeterPaneConfigured; }
+    int  audioMeterPaneX()          const { return m_audioMeterPaneX;          }
+    int  audioMeterPaneY()          const { return m_audioMeterPaneY;          }
+    int  audioMeterPaneWidth()      const { return m_audioMeterPaneWidth;      }
+    int  audioMeterPaneHeight()     const { return m_audioMeterPaneHeight;     }
 
     QVariantList milkdropPresetFolders()      const { return m_milkdropPresetFolders;      }
     bool         milkdropShuffleEnabled()     const { return m_milkdropShuffleEnabled;     }
@@ -393,6 +449,16 @@ public:
                                 int playbackQueueWidth,
                                 int nowPlayingWidth,
                                 bool fullscreen = false);
+
+    // Persists the heights of the free areas above/below the playback queue
+    // for one mode (fullscreen selects the set, like saveLayout()). Called
+    // from the same debounce timer; negative values are clamped to 0.
+    Q_INVOKABLE void saveQueueDockHeights(int topHeight, int bottomHeight,
+                                          bool fullscreen = false);
+
+    // Persists which pane is docked above / below the queue ("" = none),
+    // see queueTopDockPane. Called by Main.qml whenever its dock state changes.
+    Q_INVOKABLE void saveDockedPanes(const QString &topPane, const QString &bottomPane);
 
     // Persists the main window's last windowed (non-fullscreen) position and
     // which monitor it was on -- same calling convention as
@@ -489,6 +555,14 @@ public:
     Q_INVOKABLE void saveAudioVisualizerPaneGeometry(int x, int y, int width, int height,
                                                       const QString &screenName);
 
+    // ── Audio meter settings / pane geometry (UC-37) ─────────────────────
+    Q_INVOKABLE void setAudioMeterStyle(const QString &style);
+    Q_INVOKABLE void setAudioMeterPeakHoldEnabled(bool enabled);
+    Q_INVOKABLE void setAudioMeterColorScheme(const QString &scheme);   // "hifi" | "topaz"
+    Q_INVOKABLE void setAudioMeterPaneOpacity(double opacity);
+    Q_INVOKABLE void saveAudioMeterPaneGeometry(int x, int y, int width, int height,
+                                                 const QString &screenName);
+
     // ── Milkdrop operations ──────────────────────────────────────────────
     // rawPath may be a plain path or a file:// URL — both are accepted, same
     // as addFolder above. Always scanned recursively by MilkdropView; no
@@ -539,6 +613,7 @@ signals:
     void foldersChanged();
     void windowGeometryChanged();
     void panelWidthsChanged();
+    void dockedPanesChanged();
     void startFullscreenChanged();
     void visualFolderScanningChanged();
     void modifyCurrentRatingEnabledChanged();
@@ -559,6 +634,8 @@ signals:
     void tagInfoPaneChanged();
     void audioVisualizerChanged();
     void audioVisualizerPaneChanged();
+    void audioMeterChanged();
+    void audioMeterPaneChanged();
     void milkdropChanged();
     void milkdropPaneChanged();
 
@@ -596,6 +673,12 @@ private:
     int m_fullscreenLibraryTreeWidth   = 0;   // 0 = not set yet
     int m_fullscreenPlaybackQueueWidth = 0;
     int m_fullscreenNowPlayingWidth    = 0;
+    int m_queueTopDockHeight              = 0;    // 0 = no free area
+    int m_queueBottomDockHeight           = 0;
+    int m_fullscreenQueueTopDockHeight    = -1;   // -1 = not set yet
+    int m_fullscreenQueueBottomDockHeight = -1;
+    QString m_queueTopDockPane;                   // "" = no docked pane
+    QString m_queueBottomDockPane;
     bool m_startFullscreen   = false;
     bool m_visualFolderScanning = false;
     bool m_modifyCurrentRatingEnabled = true;
@@ -648,6 +731,17 @@ private:
     int     m_audioVisualizerPaneWidth      = 500;
     int     m_audioVisualizerPaneHeight     = 260;
     QString m_audioVisualizerPaneScreenName;
+
+    QString m_audioMeterStyle           = QStringLiteral("hifi90s");
+    bool    m_audioMeterPeakHoldEnabled = true;
+    QString m_audioMeterColorScheme     = QStringLiteral("hifi");
+    double  m_audioMeterPaneOpacity     = 1.0;
+    bool    m_audioMeterPaneConfigured  = false;
+    int     m_audioMeterPaneX           = 0;
+    int     m_audioMeterPaneY           = 0;
+    int     m_audioMeterPaneWidth       = 520;
+    int     m_audioMeterPaneHeight      = 150;
+    QString m_audioMeterPaneScreenName;
 
     // Each entry is a QVariantMap { "path": QString, "active": bool } --
     // narrower than m_folders (no volume/relPath/rawPath VolumePath

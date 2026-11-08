@@ -257,6 +257,34 @@ void AppConfig::saveLayout(int windowWidth, int windowHeight,
     save();
 }
 
+void AppConfig::saveQueueDockHeights(int topHeight, int bottomHeight, bool fullscreen)
+{
+    // Full screen keeps -1 ("never set"): Main.qml passes the stored value
+    // back unchanged for an area without a docked pane.
+    const int lowest = fullscreen ? -1 : 0;
+    topHeight    = qMax(lowest, topHeight);
+    bottomHeight = qMax(lowest, bottomHeight);
+    int &top    = fullscreen ? m_fullscreenQueueTopDockHeight    : m_queueTopDockHeight;
+    int &bottom = fullscreen ? m_fullscreenQueueBottomDockHeight : m_queueBottomDockHeight;
+    if (top == topHeight && bottom == bottomHeight) return;
+    top    = topHeight;
+    bottom = bottomHeight;
+    // No panelWidthsChanged here, same as saveLayout(): Main.qml's dock
+    // heights are already what's being saved, so re-notifying would only
+    // feed back into the (still bound) SplitView.preferredHeight bindings.
+    save();
+}
+
+void AppConfig::saveDockedPanes(const QString &topPane, const QString &bottomPane)
+{
+    if (m_queueTopDockPane == topPane && m_queueBottomDockPane == bottomPane) return;
+    m_queueTopDockPane    = topPane;
+    m_queueBottomDockPane = bottomPane;
+    // Like saveQueueDockHeights(): Main.qml's dock state is the source, so
+    // no notify back (it only reads these at startup).
+    save();
+}
+
 void AppConfig::saveWindowPosition(int x, int y, const QString &screenName)
 {
     m_windowPositionConfigured = true;
@@ -598,6 +626,55 @@ void AppConfig::saveAudioVisualizerPaneGeometry(int x, int y, int width, int hei
     save();
 }
 
+// ── Audio meter settings / pane geometry (UC-37) ────────────────────────────
+
+void AppConfig::setAudioMeterStyle(const QString &style)
+{
+    if (style.isEmpty() || m_audioMeterStyle == style) return;
+    m_audioMeterStyle = style;
+    emit audioMeterChanged();
+    save();
+}
+
+void AppConfig::setAudioMeterPeakHoldEnabled(bool enabled)
+{
+    if (m_audioMeterPeakHoldEnabled == enabled) return;
+    m_audioMeterPeakHoldEnabled = enabled;
+    emit audioMeterChanged();
+    save();
+}
+
+void AppConfig::setAudioMeterColorScheme(const QString &scheme)
+{
+    const QString s = (scheme == QLatin1String("topaz")) ? scheme : QStringLiteral("hifi");
+    if (m_audioMeterColorScheme == s) return;
+    m_audioMeterColorScheme = s;
+    emit audioMeterChanged();
+    save();
+}
+
+void AppConfig::setAudioMeterPaneOpacity(double opacity)
+{
+    opacity = qBound(0.0, opacity, 1.0);
+    if (qFuzzyCompare(m_audioMeterPaneOpacity, opacity)) return;
+    m_audioMeterPaneOpacity = opacity;
+    emit audioMeterChanged();
+    save();
+}
+
+void AppConfig::saveAudioMeterPaneGeometry(int x, int y, int width, int height,
+                                            const QString &screenName)
+{
+    m_audioMeterPaneConfigured = true;
+    m_audioMeterPaneX          = x;
+    m_audioMeterPaneY          = y;
+    m_audioMeterPaneWidth      = width;
+    m_audioMeterPaneHeight     = height;
+    m_audioMeterPaneScreenName = screenName;
+    emit audioMeterPaneChanged();
+    save();
+}
+
 // ── Milkdrop settings ────────────────────────────────────────────────────────
 
 void AppConfig::addMilkdropPresetFolder(const QString &rawPath)
@@ -792,6 +869,12 @@ void AppConfig::applyJson(const QJsonObject &root)
     m_fullscreenLibraryTreeWidth   = root[QStringLiteral("fullscreenLibraryTreeWidth")].toInt(0);
     m_fullscreenPlaybackQueueWidth = root[QStringLiteral("fullscreenPlaybackQueueWidth")].toInt(0);
     m_fullscreenNowPlayingWidth    = root[QStringLiteral("fullscreenNowPlayingWidth")].toInt(0);
+    m_queueTopDockHeight              = qMax(0, root[QStringLiteral("queueTopDockHeight")].toInt(0));
+    m_queueBottomDockHeight           = qMax(0, root[QStringLiteral("queueBottomDockHeight")].toInt(0));
+    m_fullscreenQueueTopDockHeight    = qMax(-1, root[QStringLiteral("fullscreenQueueTopDockHeight")].toInt(-1));
+    m_fullscreenQueueBottomDockHeight = qMax(-1, root[QStringLiteral("fullscreenQueueBottomDockHeight")].toInt(-1));
+    m_queueTopDockPane    = root[QStringLiteral("queueTopDockPane")].toString();
+    m_queueBottomDockPane = root[QStringLiteral("queueBottomDockPane")].toString();
     m_startFullscreen    = root[QStringLiteral("startFullscreen")].toBool(false);
     m_visualFolderScanning = root[QStringLiteral("visualFolderScanning")].toBool(false);
     // Default true; the 1.0.0 key "deleteCurrentRatingEnabled" is ignored (see appconfig.h).
@@ -866,6 +949,22 @@ void AppConfig::applyJson(const QJsonObject &root)
     m_audioVisualizerPaneHeight     = audioVisualizerPane[QStringLiteral("height")].toInt(260);
     m_audioVisualizerPaneScreenName = audioVisualizerPane[QStringLiteral("screenName")].toString();
 
+    const QJsonObject audioMeter = root[QStringLiteral("audioMeter")].toObject();
+    m_audioMeterStyle = audioMeter[QStringLiteral("style")].toString(QStringLiteral("hifi90s"));
+    m_audioMeterPeakHoldEnabled = audioMeter[QStringLiteral("peakHoldEnabled")].toBool(true);
+    m_audioMeterColorScheme =
+        audioMeter[QStringLiteral("colorScheme")].toString() == QLatin1String("topaz")
+            ? QStringLiteral("topaz") : QStringLiteral("hifi");
+    m_audioMeterPaneOpacity = qBound(0.0, audioMeter[QStringLiteral("paneOpacity")].toDouble(1.0), 1.0);
+
+    m_audioMeterPaneConfigured = root.contains(QStringLiteral("audioMeterPane"));
+    const QJsonObject audioMeterPane = root[QStringLiteral("audioMeterPane")].toObject();
+    m_audioMeterPaneX          = audioMeterPane[QStringLiteral("x")].toInt(0);
+    m_audioMeterPaneY          = audioMeterPane[QStringLiteral("y")].toInt(0);
+    m_audioMeterPaneWidth      = audioMeterPane[QStringLiteral("width")].toInt(520);
+    m_audioMeterPaneHeight     = audioMeterPane[QStringLiteral("height")].toInt(150);
+    m_audioMeterPaneScreenName = audioMeterPane[QStringLiteral("screenName")].toString();
+
     m_milkdropPresetFolders.clear();
     const QJsonObject milkdrop = root[QStringLiteral("milkdrop")].toObject();
     const QJsonArray milkdropFoldersArr = milkdrop[QStringLiteral("presetFolders")].toArray();
@@ -931,6 +1030,7 @@ QVariantMap AppConfig::restoreFromJson(const QByteArray &json)
     emit foldersChanged();
     emit windowGeometryChanged();
     emit panelWidthsChanged();
+    emit dockedPanesChanged();
     emit startFullscreenChanged();
     emit visualFolderScanningChanged();
     emit modifyCurrentRatingEnabledChanged();
@@ -951,6 +1051,8 @@ QVariantMap AppConfig::restoreFromJson(const QByteArray &json)
     emit tagInfoPaneChanged();
     emit audioVisualizerChanged();
     emit audioVisualizerPaneChanged();
+    emit audioMeterChanged();
+    emit audioMeterPaneChanged();
     emit milkdropChanged();
     emit milkdropPaneChanged();
 
@@ -992,6 +1094,12 @@ void AppConfig::save()
     root[QStringLiteral("fullscreenLibraryTreeWidth")]   = m_fullscreenLibraryTreeWidth;
     root[QStringLiteral("fullscreenPlaybackQueueWidth")] = m_fullscreenPlaybackQueueWidth;
     root[QStringLiteral("fullscreenNowPlayingWidth")]    = m_fullscreenNowPlayingWidth;
+    root[QStringLiteral("queueTopDockHeight")]              = m_queueTopDockHeight;
+    root[QStringLiteral("queueBottomDockHeight")]           = m_queueBottomDockHeight;
+    root[QStringLiteral("fullscreenQueueTopDockHeight")]    = m_fullscreenQueueTopDockHeight;
+    root[QStringLiteral("fullscreenQueueBottomDockHeight")] = m_fullscreenQueueBottomDockHeight;
+    root[QStringLiteral("queueTopDockPane")]                = m_queueTopDockPane;
+    root[QStringLiteral("queueBottomDockPane")]             = m_queueBottomDockPane;
     root[QStringLiteral("startFullscreen")]    = m_startFullscreen;
     root[QStringLiteral("visualFolderScanning")] = m_visualFolderScanning;
     root[QStringLiteral("modifyCurrentRatingEnabled")] = m_modifyCurrentRatingEnabled;
@@ -1058,6 +1166,23 @@ void AppConfig::save()
         audioVisualizerPane[QStringLiteral("height")]     = m_audioVisualizerPaneHeight;
         audioVisualizerPane[QStringLiteral("screenName")] = m_audioVisualizerPaneScreenName;
         root[QStringLiteral("audioVisualizerPane")] = audioVisualizerPane;
+    }
+
+    QJsonObject audioMeter;
+    audioMeter[QStringLiteral("style")]           = m_audioMeterStyle;
+    audioMeter[QStringLiteral("peakHoldEnabled")] = m_audioMeterPeakHoldEnabled;
+    audioMeter[QStringLiteral("colorScheme")]     = m_audioMeterColorScheme;
+    audioMeter[QStringLiteral("paneOpacity")]     = m_audioMeterPaneOpacity;
+    root[QStringLiteral("audioMeter")] = audioMeter;
+
+    if (m_audioMeterPaneConfigured) {
+        QJsonObject audioMeterPane;
+        audioMeterPane[QStringLiteral("x")]          = m_audioMeterPaneX;
+        audioMeterPane[QStringLiteral("y")]          = m_audioMeterPaneY;
+        audioMeterPane[QStringLiteral("width")]      = m_audioMeterPaneWidth;
+        audioMeterPane[QStringLiteral("height")]     = m_audioMeterPaneHeight;
+        audioMeterPane[QStringLiteral("screenName")] = m_audioMeterPaneScreenName;
+        root[QStringLiteral("audioMeterPane")] = audioMeterPane;
     }
 
     QJsonObject milkdrop;

@@ -152,6 +152,32 @@ QString PlaybackEngine::activeBackendName() const
         : QStringLiteral("FFmpeg");
 }
 
+bool PlaybackEngine::levelsFromBackend() const
+{
+    return m_decks[0] && qobject_cast<BassAudioDeck *>(m_decks[0])
+        && BassLibrary::instance().hasLevelMeter();
+}
+
+bool PlaybackEngine::readDeckLevels(DeckLevels &out) const
+{
+    // Every deck that is audible right now -- two during a crossfade. Their
+    // levels are power-summed per side (uncorrelated signals), so a
+    // crossfade reads as one continuous signal rather than a dip or a spike.
+    bool any = false;
+    float pl = 0, pr = 0, rl = 0, rr = 0;
+    for (AudioDeck *deck : m_decks) {
+        DeckLevels d;
+        if (!deck || !deck->readLevels(d)) continue;
+        any = true;
+        pl += d.peakL * d.peakL; pr += d.peakR * d.peakR;
+        rl += d.rmsL * d.rmsL;   rr += d.rmsR * d.rmsR;
+    }
+    if (!any) return false;
+    out.peakL = std::sqrt(pl); out.peakR = std::sqrt(pr);
+    out.rmsL  = std::sqrt(rl); out.rmsR  = std::sqrt(rr);
+    return true;
+}
+
 // ── QAbstractListModel ────────────────────────────────────────────────────
 
 int PlaybackEngine::rowCount(const QModelIndex &parent) const

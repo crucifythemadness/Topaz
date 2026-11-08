@@ -3,6 +3,13 @@
 #include <QAudioBuffer>
 #include <QObject>
 
+// Instantaneous output levels of one deck for the Audio Meter (UC-37),
+// linear amplitude, 1.0 = 0 dBFS (can exceed 1.0 with float processing).
+struct DeckLevels {
+    float peakL = 0.0f, peakR = 0.0f;
+    float rmsL  = 0.0f, rmsR  = 0.0f;
+};
+
 // ── AudioDeck ─────────────────────────────────────────────────────────────
 // Abstract playback backend for one deck of PlaybackEngine's dual-deck
 // design. PlaybackEngine's crossfade orchestration (timer-driven fade,
@@ -60,6 +67,12 @@ public:
     // per-track one, so (unlike that one) it survives setSource(). smooth
     // ramps it like setLoudnessGainDb() does.
     virtual void setCompressorTrimDb(float db, bool smooth) { Q_UNUSED(db) Q_UNUSED(smooth) }
+
+    // Audio Meter (UC-37): the deck's current output levels straight from the
+    // backend, if it can measure them itself. Default: false = "can't", and
+    // AudioMeterController then analyses the PCM tap instead (the FFmpeg
+    // path). BassAudioDeck answers via BASS_ChannelGetLevelEx() while playing.
+    virtual bool readLevels(DeckLevels &out) const { Q_UNUSED(out) return false; }
 
 signals:
     // Fired whenever position advances during playback (poll-driven for

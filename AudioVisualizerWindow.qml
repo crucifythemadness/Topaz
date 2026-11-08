@@ -7,11 +7,12 @@ import QtQuick
 // movable/resizable/right-click-to-close chrome this builds on, and
 // BigCoverWindow.qml/TagInfoWindow.qml for the sibling panes it mirrors the
 // wiring pattern of. Opened by clicking the "AUDIO VISUALIZER" button in
-// BottomBar.qml (see Main.qml's Loader wiring).
+// BottomBar.qml (see Main.qml's Loader wiring). The content itself (bars,
+// placeholder) is AudioVisualizerView.qml, shared with the docked copy
+// (UC-38).
 //
 // Purely a renderer: all audio analysis (FFT, band grouping, decay,
-// peak-hold) happens in AudioVisualizerController (C++) — this file just
-// draws whatever barLevels/peakLevels currently say. See UC-19.
+// peak-hold) happens in AudioVisualizerController (C++) — see UC-19.
 FloatingPane {
     id: visWindow
 
@@ -30,21 +31,14 @@ FloatingPane {
     title: qsTr("Topaz — Audio Visualizer")
     minPaneWidth:  400
     minPaneHeight: 200
-
-    readonly property bool hasTrack: engine && engine.currentTitle.length > 0
-    readonly property var  barModel:  visualizer ? visualizer.barLevels  : []
-    readonly property var  peakModel: visualizer ? visualizer.peakLevels : []
-    readonly property color barColor: (visualizerConfig && visualizerConfig.audioVisualizerColor.length > 0)
-                                       ? visualizerConfig.audioVisualizerColor : Theme.primary
-    readonly property bool  peakHoldEnabled: visualizerConfig ? visualizerConfig.audioVisualizerPeakHoldEnabled : true
+    dockable: true
 
     // Background-only opacity — applied to the window's own clear color
     // (Window.color's alpha channel) AND the no-track placeholder's gradient
-    // below (both are "the pane's background" as far as this setting is
-    // concerned), never to the bars/peak ticks, which bind fully-opaque colors
-    // and are entirely unaffected by this. Deliberately NOT using
-    // Window.opacity, which would fade the whole window including its content.
-    // Lets the user drop the pane anywhere with just the bars visible.
+    // (both are "the pane's background" as far as this setting is concerned),
+    // never to the bars/peak ticks. Deliberately NOT using Window.opacity,
+    // which would fade the whole window including its content. Lets the user
+    // drop the pane anywhere with just the bars visible.
     //
     // The window's own color additionally premultiplies RGB by paneOpacity
     // (not just the alpha channel) — DWM/Direct3D composition on Windows
@@ -52,7 +46,7 @@ FloatingPane {
     // color; at true zero opacity the RGB channels must also be zero, or a
     // compositor assuming premultiplied input can render a faint residual tint
     // instead of true invisibility. This only applies to the window's own
-    // clear color, not ordinary in-scene Rectangles like the placeholder below
+    // clear color, not ordinary in-scene Rectangles like the placeholder
     // (Qt Quick's own scenegraph alpha blending already handles those
     // correctly without this treatment).
     readonly property real paneOpacity:
@@ -62,93 +56,11 @@ FloatingPane {
                    Theme.surfaceContainerLowest.b * paneOpacity,
                    paneOpacity)
 
-    // Foreground-only opacity — applied to barsRow below (level bars + peak
-    // ticks together), independent of paneOpacity above. Unlike paneOpacity,
-    // no premultiply treatment is needed: barsRow is an ordinary in-scene
-    // Item, not a Window's own clear color, so Qt Quick's scenegraph alpha
-    // blending already composites it correctly.
-    readonly property real barOpacity:
-        visualizerConfig ? visualizerConfig.audioVisualizerBarOpacity : 1.0
-
-    // ── Placeholder — no track loaded ─────────────────────────────────────
-    Rectangle {
+    AudioVisualizerView {
         anchors.fill: parent
-        visible: !visWindow.hasTrack
-        gradient: Gradient {
-            GradientStop {
-                position: 0.0
-                color: Qt.rgba(Theme.surfaceContainerHigh.r, Theme.surfaceContainerHigh.g,
-                               Theme.surfaceContainerHigh.b, visWindow.paneOpacity)
-            }
-            GradientStop {
-                position: 1.0
-                color: Qt.rgba(Theme.surfaceBright.r, Theme.surfaceBright.g,
-                               Theme.surfaceBright.b, visWindow.paneOpacity)
-            }
-        }
-        Text {
-            anchors.centerIn: parent
-            text: "♫  " + qsTr("NO TRACK")
-            font.family:        Theme.fontFamilyHeadline
-            font.pixelSize:     22
-            font.weight:        Font.Bold
-            font.letterSpacing: 2
-            color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.30)
-        }
-    }
-
-    // ── Bars ───────────────────────────────────────────────────────────────
-    Row {
-        id: barsRow
-        anchors.fill: parent
-        anchors.margins: 12
-        visible: visWindow.hasTrack
-        opacity: visWindow.barOpacity
-        spacing: 3
-
-        readonly property int  barCount: visWindow.barModel.length
-        readonly property real barWidth: barCount > 0
-                                          ? (width - spacing * (barCount - 1)) / barCount
-                                          : 0
-
-        // Repeater's model is a plain integer (the bar count), not the level
-        // array itself — the level array is reassigned wholesale ~30 times a
-        // second (see AudioVisualizerController::onUpdateTick), and Repeater
-        // would recreate every delegate on each such reassignment if the
-        // array were the model directly. Keeping the model a stable integer
-        // means delegates are created once; only their height/y bindings
-        // (which read barModel[index] reactively) recompute each tick.
-        Repeater {
-            model: barsRow.barCount
-
-            delegate: Item {
-                width:  barsRow.barWidth
-                height: barsRow.height
-
-                readonly property real level:
-                    (index < visWindow.barModel.length && typeof visWindow.barModel[index] === "number")
-                    ? visWindow.barModel[index] : 0
-                readonly property real peak:
-                    (index < visWindow.peakModel.length && typeof visWindow.peakModel[index] === "number")
-                    ? visWindow.peakModel[index] : 0
-
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    width:  parent.width
-                    height: parent.height * parent.level
-                    radius: 1
-                    color:  visWindow.barColor
-                }
-
-                Rectangle {
-                    visible: visWindow.peakHoldEnabled && parent.peak > 0.01
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: parent.height * parent.peak
-                    width:  parent.width
-                    height: 2
-                    color:  Theme.fgSurface
-                }
-            }
-        }
+        playback: visWindow.engine
+        visualizer: visWindow.visualizer
+        visualizerConfig: visWindow.visualizerConfig
+        backgroundOpacity: visWindow.paneOpacity
     }
 }

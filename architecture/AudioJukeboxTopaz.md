@@ -652,7 +652,7 @@ Topaz module
 │                         property var engine  (one-way ref to PlaybackEngine, read-only — used only to recognize the playlist currently active in the queue)
 │                         property var playlists, property string selectedFileName/selectedDisplayName, property var albums, property var selectedRawTracks, property var selectedMissingTracks
 │                         property int resultScrollIndex, property real resultScrollOffset  (PlaylistViewer's top-visible-row anchor, persisted here so it survives the Loader swap; index-based for the same reason as LibraryData.albumScrollIndex/Offset — see UC-12/UC-22)
-├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, SearchData, PlaylistsData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, AudioVisualizerController, SetupDialog, NewPlaylistDialog
+├── Main.qml            ApplicationWindow root; owns AppConfig, LibraryData, SearchData, PlaylistsData, LibraryModel, PlaybackEngine, PlaylistManager, SystemVolumeController, AudioVisualizerController, AudioMeterController, SetupDialog, NewPlaylistDialog
 │                         property string activeTab ("library"/"playlists"/"search")  — drives TopBar's tab highlighting and which components the SplitView's first two Loaders load, see UC-21/UC-22
 │                         property bool bigCoverPaneOpen  (toggled by NowPlaying.onBigCoverRequested / BigCoverWindow.onCloseRequested)
 │                         Loader { active: bigCoverPaneOpen; sourceComponent: BigCoverWindow {...} }  — see "Detachable panes" below
@@ -660,11 +660,16 @@ Topaz module
 │                         Loader { active: tagInfoPaneOpen; sourceComponent: TagInfoWindow {...} }  — see UC-18
 │                         property bool audioVisualizerPaneOpen  (toggled by BottomBar.onAudioVisualizerToggleRequested / AudioVisualizerWindow.onCloseRequested)
 │                         Loader { active: audioVisualizerPaneOpen; sourceComponent: AudioVisualizerWindow {...} }  — see UC-19
+│                         property bool audioMeterPaneOpen  (toggled by BottomBar.onAudioMeterToggleRequested / AudioMeterWindow.onCloseRequested)
+│                         Loader { active: audioMeterPaneOpen; sourceComponent: AudioMeterWindow {...} }  — see UC-37
 │                         property bool milkdropPaneOpen  (toggled by BottomBar.onMilkdropToggleRequested / MilkdropWindow.onCloseRequested)
 │                         Loader { active: milkdropPaneOpen; sourceComponent: MilkdropWindow {...} }  — see UC-20
+│                         Dockable panes (audioMeter, audioVisualizer, milkdrop): their floating loaders are active only while
+│                         open AND not docked; dockablePanes registry, dockTop/dockBottom, lastDockSlot, dockPane()/undockPane()/
+│                         closePane()/togglePane() — see UC-38
 │                         SplitView slot 1: Loader { sourceComponent: activeTab === "search" ? SearchPanel : activeTab === "playlists" ? PlaylistsPanel : LibraryTree }  — see UC-21/UC-22
 │                         SplitView slot 2: Loader { sourceComponent: activeTab === "search" ? SearchResultBrowser : activeTab === "playlists" ? PlaylistViewer : AlbumBrowser }  — see UC-21/UC-22
-├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | PLAYBACK | AUTO PLAY | AUDIO VISUALIZER | MILKDROP, see UC-15 / UC-14 / UC-19 / UC-20)
+├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | PLAYBACK | AUTO PLAY | AUDIO VISUALIZER | AUDIO METER | MILKDROP | MISC, see UC-15 / UC-14 / UC-19 / UC-37 / UC-20)
 ├── NewPlaylistDialog.qml Modal popup — user enters a name; calls PlaylistManager.createPlaylist(); shows MessageBox on name collision
 │                         signal playlistCreated()  ← emitted on success; Main.qml calls playlistsData.refreshPlaylists() so the PLAYLISTS tab stays live even while already active, see UC-22
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
@@ -690,10 +695,19 @@ Topaz module
 │                         PlaylistViewer's LOAD flows via a missingPlaylistTracks(missingTracks)
 │                         signal — see UC-10/UC-22
 ├── FloatingPane.qml    Reusable base Window for detachable panes (frameless, movable, resizable, right-click-to-close) — see "Detachable panes" below
+│                         Docking API (UC-38): dockable, dockTopAvailable, dockBottomAvailable, signal dockRequested(slot); hover buttons
 ├── BigCoverWindow.qml  FloatingPane specialization: shows only the current track's cover art
 ├── TagInfoWindow.qml   FloatingPane specialization: shows the current track's tag metadata, content scales with pane size — see UC-18
-├── AudioVisualizerWindow.qml FloatingPane specialization: renders bumping bars from AudioVisualizerController's barLevels/peakLevels — see UC-19
-├── MilkdropWindow.qml  FloatingPane specialization: hosts a MilkdropView (C++ QQuickItem, owns the projectM render pipeline directly) — see UC-20
+├── AudioVisualizerWindow.qml FloatingPane specialization (dockable): hosts AudioVisualizerView — see UC-19
+├── AudioVisualizerView.qml The bar visualizer's content (bars, peak ticks, NO TRACK placeholder), shared by the window and
+│                         the docked copy — renders AudioVisualizerController's barLevels/peakLevels — see UC-19/UC-38
+├── AudioMeterWindow.qml FloatingPane specialization (dockable): hosts AudioMeterView (the Audio Meter) — see UC-37
+├── AudioMeterView.qml  The Audio Meter's content, independent of its host window: loads the style chosen in Setup
+│                         (audioMeterStyle) and acquire()/release()s AudioMeterController while it exists — see UC-37
+├── AudioMeterHiFi90s.qml First meter style: 90s HiFi segment meter (23 segments per side, dBFS scale, peak hold, OVER lamp)
+├── MilkdropWindow.qml  FloatingPane specialization (dockable): hosts MilkdropPaneView; keeps the window-only features (F10, double-click positions, cursor auto-hide) — see UC-20
+├── MilkdropPaneView.qml Milkdrop's content: a MilkdropView (C++ QQuickItem, owns the projectM render pipeline directly) + NO TRACK /
+│                         PAUSED / unavailable placeholders + preset-name toast; shared by the window and the docked copy — see UC-20/UC-38
 ├── TopBar.qml          Header (app_icon.png logo + neon "TOPAZ JUKEBOX" wordmark [+ Hi-Res badge] | navigation tabs | loudspeaker + gear + info +
 │                         fullscreen/window toggle [+ divider + minimize + close, full screen only])  height 76 px (= MatryoshkaV2 on screen: 56 × its fontScale 1.35; logo 46 px)
 │                         Wordmark: Topaz_Wordmark_Topaz.svg + Topaz_Wordmark_Jukebox.svg, one per word, sharing one
@@ -818,6 +832,13 @@ Topaz module
 │                         property int albumYear  (0 = unknown, hides the label; left-aligned under the cover, Theme.labelMd, literal white)
 │                         property string albumGenre  (empty = hidden; renders as "Genre | Year" when both set — SearchResultBrowser-only, see UC-21; AlbumBrowser leaves it unset so Library-tab cards are unchanged)
 ├── PlaybackQueue.qml   Queue panel  default width 374 px, user-resizable  (bound to PlaybackEngine model; DropArea; move/remove; shows activePlaylistName in header when set; shows LOCK PLAYLIST toggle when a playlist is active)
+│                         Sits in Main.qml's vertical `queueColumn` SplitView between two QueueDockAreas, so its
+│                         height is adjustable from above and below (1.2.0, see "Layout persistence")
+├── QueueDockArea.qml   Free area above/below the queue: Rectangle in the queue's surface colour. Empty: a faint dashed
+│                         rounded outline (Canvas, setLineDash) and a "FREE SPACE / Hover over a pane …" hint, both hidden
+│                         below 48 px (second line below 72 px). Occupied: property Component paneComponent (a docked pane's
+│                         content view) loaded to fill it; hover buttons float again / close, right-click closes;
+│                         signals undockRequested(), closeRequested() — see UC-38
 │                         Auto-scrolls to keep the current track topmost (and upcoming tracks visible below it) on every add/remove, whenever the queue overflows the panel — independent of AUTO PLAY/MANUAL MODE, see UC-11
 │                         property var autoPlay  (gates clear/remove/move/reorder/drop via autoPlay.manualQueueEditingAllowed + autoPlay.queueClearAllowed; row click (select another track) via autoPlay.trackNavigationAllowed; clear button routes through autoPlay.clearQueueAndHistory(), see UC-16)
 ├── NowPlaying.qml      Right panel  default width 359 px, user-resizable  (bound to PlaybackEngine + PlaylistManager: art + transport + progress + playlists + 10-star rating row, see UC-14)
@@ -829,7 +850,7 @@ Topaz module
 |                         Playlist row 1: NEW | LOAD (disabled whenever an AUTO PLAY session is active; when enabled, clears active playlist first if one is loaded, then opens file dialog)
 |                         Playlist row 2: EXPORT (permanently disabled — not yet implemented) | REMOVE (active only when playlist loaded AND queue-clear is allowed; routes through autoPlay.clearQueueAndHistory())
 │                         signal newPlaylistRequested()  ← “+ NEW” button click
-└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all (together with autoPlay.genreRequirementMet/ratingRequirementMet, but those only while no session is running); autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16)
+└── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all (together with autoPlay.genreRequirementMet/ratingRequirementMet, but those only while no session is running); autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16). Icons are text glyphs (AUDIO VISUALIZER ▃▅▇) except AUDIO METER, drawn as two rows of six small Rectangles (L/R level bars, the lower one's last two dimmed) in the button colour
                           signal tagInfoToggleRequested()  ← TAG INFORMATION button click; property tagInfoPaneOpen (bound from Main.qml) drives its on/off color — same "dumb button, owner decides" split as scanRequested()/scanning, see UC-18
                           signal audioVisualizerToggleRequested()  ← AUDIO VISUALIZER button click; property audioVisualizerPaneOpen (bound from Main.qml) drives its on/off color — same split, see UC-19
                           signal milkdropToggleRequested()  ← MILKDROP button click; property milkdropPaneOpen (bound from Main.qml) drives its on/off color — same split, see UC-20
@@ -1535,6 +1556,10 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     },
     "audioVisualizerPane": {
         "x": 100, "y": 100, "width": 500, "height": 260, "screenName": "DISPLAY1"
+    },
+    "audioMeter": { "style": "hifi90s", "colorScheme": "hifi", "peakHoldEnabled": true, "paneOpacity": 1.0 },
+    "audioMeterPane": {
+        "x": 100, "y": 100, "width": 520, "height": 150, "screenName": "DISPLAY1"
     }
 }
 ```
@@ -1579,6 +1604,9 @@ what "configured" means — absent means that pane has never been positioned yet
 | `setFolderActive(index, flag)` | Toggle whether this folder is scanned at all (default `true`); auto-saves. Takes effect on the next scan, not immediately — see UC-04/UC-05. |
 | `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth, fullscreen = false)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. `fullscreen` selects the panel-width set written: windowed (`libraryTreeWidth`/`playbackQueueWidth`/`nowPlayingWidth`) or full screen (below). |
 | `fullscreenLibraryTreeWidth` / `fullscreenPlaybackQueueWidth` / `fullscreenNowPlayingWidth` | Full-screen mode's own panel widths (1.1.0), default `0` = not set yet; NOTIFY `panelWidthsChanged`. Written by `saveLayout(..., true)`, applied by `Main.qml`'s `applyPanelWidths()` — see "Layout persistence". |
+| `queueTopDockHeight` / `queueBottomDockHeight` / `fullscreenQueueTopDockHeight` / `fullscreenQueueBottomDockHeight` | Heights (px) of the free areas above/below the playback queue (1.2.0), per mode. Windowed default `0` (no area); full screen default `-1` = not set yet (keep current). NOTIFY `panelWidthsChanged`. Applied by `applyPanelWidths()` — see "Layout persistence" → "Free areas above/below the queue". Since UC-38 only written while the area holds a docked pane. |
+| `queueTopDockPane` / `queueBottomDockPane`, `saveDockedPanes(top, bottom)` | The pane docked above / below the queue (`"audioMeter"`, `"audioVisualizer"`, `"milkdrop"`, `""` = none), set only while a pane is docked **and** open there; `Main.qml` saves on every dock change and reopens those panes docked at startup. NOTIFY `dockedPanesChanged` (emitted on load only). See UC-38. |
+| `saveQueueDockHeights(topHeight, bottomHeight, fullscreen = false)` | Persists the two free-area heights for one mode (clamped ≥ 0; no write if unchanged; no NOTIFY). Called from `saveLayoutTimer` with the areas' `SplitView.preferredHeight`. |
 | `windowX` / `windowY` / `windowScreenName` / `windowPositionConfigured` / `saveWindowPosition(x, y, screenName)` | Persist the main window's last windowed (non-fullscreen) position and which monitor it was on; same debounce timer and calling convention as `saveLayout` above (called alongside it). `windowPositionConfigured` distinguishes "never positioned yet" (fresh config) from "restore to this position", same convention as `bigCoverPaneConfigured` below. `windowScreenName` is also consulted on startup to pick which monitor `Window.FullScreen` lands on — see UC-28. |
 | `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s PLAYBACK tab toggle (see UC-15). |
 | `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 12.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s PLAYBACK tab slider. |
@@ -1612,6 +1640,11 @@ what "configured" means — absent means that pane has never been positioned yet
 | `audioVisualizerBarOpacity` / `setAudioVisualizerBarOpacity(opacity)` | Foreground-only opacity for the Audio Visualizer's bars and peak-hold ticks (default `1.0`, fully opaque); clamped to `[0.0, 1.0]`; auto-saves. Independent of `audioVisualizerPaneOpacity` — applied as an ordinary `opacity:` binding on `AudioVisualizerWindow`'s `barsRow` (level bars + peak ticks together), not `Window.color`, so no premultiply treatment is needed (unlike the pane background, this isn't a native window clear color — Qt Quick's scenegraph alpha blending already composites it correctly). Set from `SetupDialog`'s AUDIO VISUALIZER tab slider (0–100%). |
 | `audioVisualizerPaneConfigured` / `audioVisualizerPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable AudioVisualizerWindow pane's last-saved geometry (defaults `500`×`260`, `configured` starts `false`). Same convention as `bigCoverPane*`/`tagInfoPane*` above. See UC-19. |
 | `saveAudioVisualizerPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles. Same calling convention as `saveBigCoverPaneGeometry`. |
+| `audioMeterStyle` / `setAudioMeterStyle(style)` | Visual style of the Audio Meter (default `"hifi90s"`, the only one so far); auto-saves; unknown names fall back to the first style in `AudioMeterView.qml`. Set from Setup → AUDIO METER. See UC-37. |
+| `audioMeterPeakHoldEnabled` / `setAudioMeterPeakHoldEnabled(enabled)` | Show the peak-hold segment (default `true`); auto-saves. See UC-37. |
+| `audioMeterColorScheme` / `setAudioMeterColorScheme(scheme)` | Colours of the 90s HiFi style: `"hifi"` (default, classic green/yellow/orange) or `"topaz"` (theme teal/violet/neon pink); anything else is stored as `"hifi"`; auto-saves, NOTIFY `audioMeterChanged`. See UC-37. |
+| `audioMeterPaneOpacity` / `setAudioMeterPaneOpacity(opacity)` | Background-only opacity of the Audio Meter (window clear colour, premultiplied like the visualizer's, plus the meter's glass panel); segments stay opaque. Default `1.0`, clamped `[0,1]`; auto-saves. |
+| `audioMeterPaneConfigured` / `audioMeterPaneX` / `Y` / `Width` / `Height`, `saveAudioMeterPaneGeometry(...)` | The floating AudioMeterWindow's geometry (default `520`×`150`), same convention as `audioVisualizerPane*`. |
 | `save()` | Persist current state to `Topaz.config` (called automatically by all mutators). |
 
 ## Data Flow: Genre Filter (GenreBar toggle)
@@ -1833,6 +1866,36 @@ as the windowed start-up values). A full-screen width of `0` keeps the current w
 first full-screen use behaves exactly as before 1.1.0. `saveLayoutTimer` passes
 `root.layoutFullscreen` (not `visibility`, so a minimised full-screen window still saves to its
 own set) as `saveLayout()`'s `fullscreen` argument.
+
+**Free areas above/below the queue (1.2.0).** The queue's slot in the main horizontal
+`SplitView` is a vertical `SplitView` (`queueColumn`, carries the queue width's
+`SplitView.preferredWidth`/`minimumWidth`) of three children: `QueueDockArea` `queueTopDock` |
+`PlaybackQueue` (`SplitView.fillHeight`, `minimumHeight` 200) | `QueueDockArea`
+`queueBottomDock`. Its two handles sit directly above and below the queue, so the user makes the
+queue shorter from the top or the bottom; a dockable pane can be docked into the freed area
+(UC-38). Dragging a handle back to the
+edge collapses that area to 0 (the default — existing layouts are unchanged). The queue fills the
+remaining height, so window-height changes go to the queue and the areas keep their size.
+Persisted per mode like the widths: `queueTopDockHeight`/`queueBottomDockHeight` (windowed,
+default 0) and `fullscreenQueueTopDockHeight`/`fullscreenQueueBottomDockHeight` (default `-1` =
+never set → `applyPanelWidths()` keeps the current heights; `0` is a real value there).
+`saveLayoutTimer` calls `saveQueueDockHeights(top, bottom, layoutFullscreen)` with the areas'
+**`SplitView.preferredHeight`, not their `height`**: only a handle drag writes `preferredHeight`,
+whereas a window squeezed below "both areas + the queue's minimum" shrinks the actual heights —
+saving those would overwrite the user's sizes; growing the window again restores them. Each area
+also restarts the timer from `SplitView.onPreferredHeightChanged`. Like `saveLayout()`,
+`saveQueueDockHeights()` emits no NOTIFY.
+
+**Since docking (UC-38) the heights are those of a docked pane, and empty areas don't survive a
+restart.** Both areas start with `SplitView.preferredHeight: 0` (no longer bound to the config);
+at startup `restoreDockedPanes()` reopens the panes saved in `queueTopDockPane` /
+`queueBottomDockPane` docked, which gives their areas the stored height (or the pane's default if
+the stored one is below the pane's minimum). `saveLayoutTimer` writes an area's height **only
+while it holds a docked pane** — for an empty area it passes the stored value back unchanged
+(`saveQueueDockHeights()` therefore keeps a full-screen `-1`). On a windowed ↔ full-screen flip
+`applyPanelWidths()` → `applyDockHeights(full)` re-applies only occupied areas (a full-screen
+`-1` keeps the current height); empty areas keep whatever size they have in the session. This
+supersedes the 1.2.0 behaviour above, where an empty free area also came back after a restart.
 Nothing is persisted at all until `settleTimer` (~1.2 s after the window is
 shown) has fired (`Main.layoutSettled`), so transient startup geometry — a DPI
 re-scale, a `SplitView` squeeze — can never overwrite what the user configured.
@@ -4507,7 +4570,12 @@ frequency than useful for a UI update).
 ### `AudioVisualizerWindow.qml`
 
 A `FloatingPane` specialization with **no `fixedAspectRatio`** (freely resizable,
-like `TagInfoWindow`) and a `minPaneWidth: 400` / `minPaneHeight: 200` floor. Purely
+like `TagInfoWindow`) and a `minPaneWidth: 400` / `minPaneHeight: 200` floor. Since
+UC-38 the content described below lives in `AudioVisualizerView.qml` (shared with the
+docked copy; its engine property is named `playback` to avoid shadowing the outer
+`engine` id, and the NO TRACK background alpha is a `backgroundOpacity` property the
+window feeds with its Pane Opacity — docked it stays opaque); the window keeps the
+window clear colour and `dockable: true`. Purely
 a renderer — all analysis lives in the C++ controller. A `Row` of bar `Item`s, one
 per entry in `barModel` (`visualizer.barLevels`); each bar is a bottom-anchored
 `Rectangle` whose height is `parent.height * level`, plus a thin peak-hold
@@ -4891,6 +4959,11 @@ via `projectm_set_texture_search_paths()` — the common pack layout is
 textures render broken without this.
 
 ### `MilkdropWindow.qml`
+
+Since UC-38 the `MilkdropView`, the three placeholders and the preset toast described
+below live in `MilkdropPaneView.qml` (shared with the docked copy, engine property named
+`playback`); the window keeps F10, the double-click positions, the cursor auto-hide and
+`dockable: !_isFullscreen` (no dock buttons during F10).
 
 Structurally mirrors `AudioVisualizerWindow.qml` minus the opacity feature
 (not requested for this pane). Explicitly sets `color: Theme.surfaceContainerLowest` on the root
@@ -7839,3 +7912,167 @@ files read in 4 chunks with 5 live genre updates; STOP during listing and during
 (stops at the 200-file chunk boundary, keeps what it found); a restart during a scan reports
 exactly one finish, for the new scan; `listAudioFiles()` returns exactly the audio files a plain
 directory walk finds. **Not verified here**: the dialog's look and behaviour — the user's test.
+
+---
+
+## UC-37 Audio Meter (BottomBar → AUDIO METER)
+
+**Goal**: a level meter for the music that is playing, as a detachable pane that can also be docked
+into the queue column (UC-38). Opened/closed with the sixth BottomBar button **AUDIO METER** (between
+AUDIO VISUALIZER and MILKDROP; the row is now divided six ways). Settings: Setup → **AUDIO METER**
+(style, peak hold, pane opacity).
+
+### Measuring source — BASS when it plays, Topaz's own analysis otherwise
+`AudioMeterController` (`audiometercontroller.h/.cpp`, `QML_ELEMENT`, one instance in `Main.qml`)
+decides on every tick (~30 fps):
+1. **BASS** — when the active backend is BASS *and* `bass.dll` exports
+   `BASS_ChannelGetLevelEx` (`PlaybackEngine::levelsFromBackend()`):
+   `PlaybackEngine::readDeckLevels()` asks every audible deck via `AudioDeck::readLevels()`.
+   `BassAudioDeck` calls `BASS_ChannelGetLevelEx` twice on the playing stream — peak over 50 ms,
+   RMS over 300 ms, both with `BASS_LEVEL_STEREO | BASS_LEVEL_VOLPAN`, so the level includes
+   `BASS_ATTRIB_VOL` (crossfade ramp, Auto Loudness gain) = what is actually heard. Reading a
+   playing channel's level never consumes data. During a crossfade both decks are power-summed per
+   side, so it reads as one signal. `BASS_ChannelGetLevelEx` is resolved **optionally**
+   (`BassLibrary::hasLevelMeter()`), like the FX exports: an old `bass.dll` just means fallback.
+2. **Fallback (FFmpeg, or BASS without the export)** — the controller analyses
+   `PlaybackEngine::audioBufferAvailable` (the same always-on PCM tap the visualizer uses, Float32
+   or Int16): per side max |sample| per tick and RMS over a sliding 9-tick (~300 ms) window. Only
+   the active deck is tapped, before the deck volume, so a crossfade is not visible in the
+   fallback reading — an accepted simplification.
+
+The source is published as `sourceName` ("BASS" / "TOPAZ") and shown small under the OVER lamp.
+
+### Scale, ballistics, OVER (identical for both sources)
+- **dBFS** (0 dB = digital full scale) — decided with the user over a 90s-style 0 dB-reference
+  scale: playback is 16-bit, nothing can exceed full scale, so an "above 0" red zone would never
+  light. Floor −60 dB, ceiling +6 dB (float sources can exceed full scale).
+- Peak: instant attack, release 24 dB/s. RMS: release 18 dB/s. Peak hold: follows the peak up,
+  stays 1.5 s, then falls 30 dB/s (never below the moving peak).
+- **OVER**: a raw peak ≥ −0.01 dBFS on either side latches the lamp for 2 s.
+- `levelsChanged` is only emitted on a visible change (> 0.05 dB), so a silent meter stops
+  re-binding QML.
+- **Cost**: views call `acquire()` / `release()`; the timer and the fallback accumulation only run
+  while the count is > 0. A count, not a bool: when a pane moves between its floating window and a
+  dock area the new view is created before the old one is destroyed.
+
+### Controller API (`AudioMeterController`)
+| Member | |
+|---|---|
+| `engine`, `appConfig` | wiring |
+| `active` (read-only), `acquire()`, `release()` | see Cost |
+| `peakLeftDb`, `peakRightDb`, `rmsLeftDb`, `rmsRightDb`, `holdLeftDb`, `holdRightDb` | dBFS, NOTIFY `levelsChanged` |
+| `over` | OVER lamp state |
+| `sourceName` | "BASS" / "TOPAZ" |
+| `floorDb` | −60 (constant) |
+
+Backend side: `struct DeckLevels` + `virtual bool AudioDeck::readLevels(DeckLevels&) const`
+(default false; `BassAudioDeck` implements it), `PlaybackEngine::levelsFromBackend()`,
+`PlaybackEngine::readDeckLevels(DeckLevels&)`, `BassLibrary::BASS_ChannelGetLevelEx` /
+`hasLevelMeter()`, constants `BASS_LEVEL_STEREO/RMS/VOLPAN`.
+
+### QML
+- `AudioMeterView.qml` — content item, independent of the host (floating window or dock area,
+  UC-38). A `Loader` picks the style component (`audioMeterStyle`); a new style = a new
+  `AudioMeter<Style>.qml` + one entry there and one card in Setup.
+- `AudioMeterHiFi90s.qml` — the first style ("90s HiFi"): dark glass panel with a top sheen,
+  rows **L** and **R** of 23 segments with thresholds −50 −45 −40 −35 −30 −25 −20 −18 −16 −14
+  −12 −11 −10 −9 −8 −7 −6 −5 −4 −3 −2 −1 0 (a segment lights when the level reaches its
+  threshold), spaced so the scale labels −50 · −40 · −20 · −12 · −8 · −6 · −4 · −2 · 0 sit exactly
+  under their segments. Colours (`colorScheme`, from `audioMeterColorScheme`):
+  | Part | `"hifi"` (default) | `"topaz"` |
+  |---|---|---|
+  | up to −20 | green `#3DFF7A` | teal `Theme.secondary` |
+  | at −8 | yellow `#FFE14A` | violet `Theme.primaryContainer` |
+  | at −2 (and scale labels ≥ −8) | orange `#FF8A1F` | neon pink `#FF4FB8` (TOPAZ lettering glow) |
+  | at 0 | orange-red `#FF5A1F` | hot magenta `#FF2E8A` |
+  | OVER lamp | red `#FF2D45` | red `Theme.danger` |
+
+  Interpolated in between (`colorFor()`); the OVER lamp's "off" gradient is the lamp colour
+  darkened, so it stays red in both. Unlit segments stay faintly visible; lit segments have a glass highlight and glow — one
+  `MultiEffect` blur of the whole lit layer underneath it, not one effect per segment. The
+  peak-hold segment is drawn brighter. Red **OVER** lamp on the right (glow when lit). Everything
+  scales with the pane size. Purely a renderer.
+- `AudioMeterWindow.qml` — `FloatingPane` (min 360×100, default 520×150), background opacity
+  premultiplied like `AudioVisualizerWindow`'s. Wired in `Main.qml` exactly like the visualizer
+  pane (`audioMeterPaneOpen`, `audioMeterLoader`, kiosk list).
+- Setup → AUDIO METER (tab index 5; MILKDROP is now 6, MISC 7): style cards (a frozen sample of
+  the real style component with fixed demo levels), below the style cards a **Colours** row with
+  the switch HIFI | TOPAZ for the 90s HiFi style (the card's preview follows it live; below, not
+  beside, so further style cards can sit right of the first one), Peak Hold toggle, Pane Opacity slider, and a
+  short note on the measuring source and the dBFS scale.
+
+### Verification
+Build + `qmllint` clean. **Not verified here**: the meter's look and readings on BASS vs FFmpeg,
+OVER behaviour on real tracks, crossfade — the user's test.
+
+## UC-38 Dock Panes into the Queue Column
+
+**Goal**: the Audio Meter, the Audio Visualizer and Milkdrop (and future panes) can live either as
+their floating window or **docked** into one of the two free areas above / below the playback
+queue (`queueTopDock` / `queueBottomDock`, see "Layout persistence"). Decided with the user: dock
+via **hover buttons**; reopening a docked pane from the BottomBar puts it **back in its dock** if
+that area is free; after a restart only areas holding a docked pane come back (the persistence
+part: see "Persistence" below).
+
+### Flow
+1. Hovering a floating dockable pane shows a small button box in its top-right corner (inside the
+   resize grips): **Dock above the queue** / **Dock below the queue**, each only while that area
+   is empty; no box when both areas are occupied. Click → `FloatingPane.dockRequested(slot)` →
+   `Main.dockPane(id, slot)`.
+2. `dockPane()` sets `dockTop`/`dockBottom` to the pane id **before** setting the open flag, so the
+   floating loader (active only while open *and* not docked) never starts; the floating window of
+   an already open pane is destroyed by the same binding. The area gets room: its current height if
+   ≥ the pane's `minDockHeight`, else the mode's saved height if big enough, else the pane's
+   `defaultDockHeight`. While occupied, the area's `SplitView.minimumHeight` is the pane's
+   `minDockHeight` (0 when empty).
+3. Docked, the area loads the pane's content view (`paneComponent`). Hovering it shows
+   **Float as a separate window** (`undockPane()`: empties the area, the open flag stays true, so the
+   floating loader starts at the window's saved geometry; forgets `lastDockSlot`) and **Close**
+   (`closePane()`); a right-click closes too, like a floating pane (a `TapHandler`, so the docked
+   content keeps its hover and left clicks).
+4. `closePane()` clears the open flag **before** emptying the area (otherwise the floating window
+   would flash up). The area keeps its size and shows FREE SPACE again.
+5. BottomBar → `togglePane(id)`: open → `closePane()`; closed → `dockPane(id, lastDockSlot[id])`
+   when that area is free, else floating.
+
+### Pieces
+- **Content/window split** — the floating windows became thin hosts: `AudioVisualizerView.qml`
+  (bars, placeholder) and `MilkdropPaneView.qml` (MilkdropView, placeholders, preset toast);
+  `AudioMeterView.qml` already was one. Their engine property is named `playback` so `Main.qml`'s
+  dock components can bind it to the outer `engine` id without the shadowing gotcha. Window-only
+  features stay in the windows: Milkdrop's F10 full screen, double-click positions, cursor
+  auto-hide and keyboard nudging don't exist docked; `MilkdropWindow` sets `dockable:
+  !_isFullscreen`.
+- **Registry** (`Main.qml`, `dockablePanes`): id → `{ component, minDockHeight,
+  defaultDockHeight }` — `audioMeter` 90/140, `audioVisualizer` 120/200, `milkdrop` 160/260. The id
+  is also the prefix of the open flag (`root[id + "PaneOpen"]`). A future dockable pane = a content
+  view, one registry entry with its dock `Component`, and the dock properties on its floating
+  loader (`dockable: true` in the window, `dockTopAvailable`/`dockBottomAvailable`,
+  `onDockRequested`, `active: open && not docked`).
+- **State** (`Main.qml`): `dockTop`, `dockBottom` (pane id or ""; a pane counts as docked only
+  while open), `lastDockSlot` (session memory per pane).
+- **One instance per pane** — floating and docked never coexist, which matters for Milkdrop (its
+  own offscreen GL context + projectM instance; it renders offscreen and hands frames over as a
+  texture, so it works inside the main window as well). Moving between window and dock recreates
+  the content: Milkdrop restarts its preset playlist; the Audio Meter's `acquire()` count keeps
+  the controller running across the swap.
+- **Icons** (own geometry, `icons/`): `dock-top.svg`, `dock-bottom.svg` (column outline with a
+  band at the top/bottom and an arrow towards it), `undock.svg` (two overlapping windows with an
+  arrow out); close reuses `close.svg`. Buttons are `IconButton` (28 px).
+
+### Persistence
+- `onDockTopChanged` / `onDockBottomChanged` → `appConfig.saveDockedPanes(dockTop, dockBottom)`.
+  Since a pane counts as docked only while open, the config always holds exactly what a restart
+  should bring back (closing a docked pane empties its entry; quitting changes nothing).
+- Startup: `Component.onCompleted` (window still hidden, in the `finally` before it is shown, in
+  its own try/catch) → `restoreDockedPanes()` reads both keys first, then `dockPane()`s each known
+  id (unknown ids and a duplicate are ignored). Floating panes are not restored (unchanged).
+- Heights and empty areas: see "Layout persistence" → "Since docking".
+- A Backup/Restore of `Topaz.config` mid-session doesn't redock anything; the restored keys apply
+  at the next start (until the user changes the dock state, which overwrites them).
+
+### Verification
+Build + `qmllint` clean. User-confirmed on Windows: docking each pane top/bottom, float again, close
+from the dock and reopen via the BottomBar, Milkdrop rendering docked, restart with 0/1/2 docked
+panes (exactly those come back at their heights, empty areas collapsed), F11 per-mode heights.
+Not yet tested on Linux.

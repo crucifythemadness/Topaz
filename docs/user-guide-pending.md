@@ -55,6 +55,48 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
   the guide does).
   · Screenshots: Setup → AUDIO VISUALIZER tab.
 
+- **Queue height adjustable from above and below** — drag the thin strip directly above or
+  below the playback queue to make the queue shorter; the freed area shows a faint "FREE
+  SPACE" placeholder and can hold a docked pane (see "Docking panes" below). Dragging the
+  strip back to the edge removes the area again. After a restart only a free space that holds a
+  docked pane comes back (at its size — remembered separately for the window and for full screen,
+  like the panel widths); empty free space is gone again.
+  · Guide section: "Adjusting the layout".
+  · Screenshots: main window with free space above and/or below the queue (ideally with the
+  visualizer placed there).
+
+- **New Audio Meter** — a sixth button **AUDIO METER** in the bottom bar (between AUDIO
+  VISUALIZER and MILKDROP) opens a movable, resizable meter window in a 90s HiFi look: two rows
+  (L/R) of segments from green over yellow to orange, a digital dB scale (−50 … 0 dB, where 0 dB
+  is the loudest level a track can contain), a peak-hold segment and a red **OVER** lamp that
+  lights when a track reaches 0 dB. With the BASS Audio Library the levels come from BASS,
+  otherwise Topaz measures them itself (shown small under the OVER lamp: BASS / TOPAZ). Right-click
+  closes it, like the other panes. New Setup tab **AUDIO METER**: style (one style so far, "90s
+  HiFi") with a **Colours** switch below it — **HIFI** (default, the classic green/yellow/orange)
+  or **TOPAZ** (teal, violet and neon pink like the rest of Topaz; OVER stays red) — Peak Hold
+  on/off, Pane Opacity.
+  The bottom-bar icons changed too: AUDIO VISUALIZER now shows vertical bars (was ≡), AUDIO METER
+  two horizontal level bars.
+  · Guide sections: the bottom bar description (six buttons, icons), a new "Audio Meter" section next to
+  the audio visualizer, the Setup tab list (new AUDIO METER tab; MILKDROP and MISC move one to the
+  right).
+  · Screenshots: Audio Meter pane while music plays (ideally with OVER lit; optionally both colour
+  sets), Setup → AUDIO METER,
+  the bottom bar.
+
+- **Docking panes** — the Audio Meter, the audio visualizer and Milkdrop can be docked into the
+  free space above or below the queue: hover over the pane and click one of the small buttons in
+  its top-right corner (**Dock above the queue** / **Dock below the queue**; a button only shows
+  while that space is empty). A docked pane fills the space; hovering it shows **Float as a
+  separate window** and **Close** (right-click closes too). Closing a docked pane and opening it
+  again with its bottom-bar button puts it back in the same place. Panes that are docked when
+  Topaz is closed come back docked at the next start. Docked Milkdrop has no F10 full
+  screen and no double-click positions — float it again for that.
+  · Guide sections: "Adjusting the layout" (free space), the audio visualizer / Milkdrop / Audio
+  Meter sections (mention docking).
+  · Screenshots: main window with a docked pane (e.g. Audio Meter below the queue), a crop of the
+  dock buttons on a hovered pane.
+
 ### Release housekeeping
 - Title page "Version 1.1.0" and the text "Topaz 1.1.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.

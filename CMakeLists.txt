@@ -142,6 +142,8 @@ qt_add_executable(topaz
     hiresaudiologo.cpp
     audiovisualizercontroller.h
     audiovisualizercontroller.cpp
+    audiometercontroller.h
+    audiometercontroller.cpp
     milkdropview.h
     milkdropview.cpp
     milkdroppresetchecker.h
@@ -231,6 +233,12 @@ qt_add_qml_module(topaz
         IconButton.qml
         VolumeRing.qml
         NeonWordmark.qml
+        QueueDockArea.qml
+        AudioMeterWindow.qml
+        AudioMeterView.qml
+        AudioMeterHiFi90s.qml
+        AudioVisualizerView.qml
+        MilkdropPaneView.qml
     RESOURCES
         app.ico
         app_icon.png
@@ -244,6 +252,9 @@ qt_add_qml_module(topaz
         icons/close.svg
         icons/volume.svg
         icons/volume-mute.svg
+        icons/dock-top.svg
+        icons/dock-bottom.svg
+        icons/undock.svg
         Claude_Logo.png
         CrucifyTheMadness_Logo.png
         Qt_Logo.png
