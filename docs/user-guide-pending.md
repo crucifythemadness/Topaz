@@ -97,6 +97,39 @@ Each entry: what changed for the user · which guide section(s) · screenshots t
   · Screenshots: main window with a docked pane (e.g. Audio Meter below the queue), a crop of the
   dock buttons on a hovered pane.
 
+- **Audio Visualizer styles + Setup page in two parts** — Setup → **AUDIO VISUALIZER** now has
+  a switch at the top: **SETTINGS** (bar count, decay speed, sensitivity, peak hold, pane and bar
+  opacity) and **STYLE & COLOR**. New option **Style**: **TOPAZ** (the original bars, default),
+  **LED** (bars made of lit segments, like a 90s HiFi display), **GRADIENT** (green → yellow → red
+  with the height of each bar — uses its own colours, so the colour choice is greyed out),
+  **LINE** (a glowing spectrum curve with a soft fill below), **RADIAL** (the bars arranged in a
+  circle, mirrored left and right) and **SCOPE** (the waveform itself, like an oscilloscope; Bar
+  Count, Decay Speed, Sensitivity and Peak Hold are greyed out on SETTINGS because they don't
+  apply). The colour swatches moved to STYLE & COLOR.
+  **SCOPE options** (shown on STYLE & COLOR only when SCOPE is chosen): **Auto Level** ON / OFF
+  (default ON: the waveform follows the loudness of the music, so loud and quiet tracks show the
+  same size) and a **Size** slider (SMALL … LARGE, 10–200 %, default 70 %). Very loud peaks
+  round off softly at the edge instead of being cut flat.
+  New option **Spectrum Analysis** on SETTINGS, **only shown when BASS is the playback engine**:
+  **TOPAZ** (default) or **BASS** — with BASS the bars come straight from the BASS engine and
+  follow the music more tightly; "Currently:" shows which one is working. With FFmpeg nothing
+  changes. The visualizer settings work the same with both.
+  **Pane Opacity** now works the same in every style and also when the visualizer is docked
+  in the queue column (docked, it can only show Topaz's own background behind it, so the change
+  is subtler than in a floating window over the desktop); with LED, the dim unlit segments
+  fade with it.
+  **GRADIENT options** (shown on STYLE & COLOR only when GRADIENT is chosen): **Gradient Colours**
+  **HIFI / TOPAZ** — the same two colour schemes as the Audio Meter — and a **Colour Shift**
+  slider (GREEN … RED, 30 % = the original look): towards RED the bars turn orange and red sooner.
+  **When the music is stopped or paused, the visualizer bars now fall back to empty** (like the
+  Audio Meter) instead of freezing.
+  · Extra screenshots: STYLE & COLOR with GRADIENT selected (Gradient Colours row visible), and
+  with SCOPE selected (Auto Level + Size visible).
+  · Guide sections: the Setup → AUDIO VISUALIZER section (split pages, Style, Spectrum Analysis),
+  the Audio Visualizer section (mention the styles), the BASS section (mention the option).
+  · Screenshots: both Setup sub-pages (SETTINGS with BASS active so Spectrum Analysis shows, and
+  STYLE & COLOR), one visualizer shot per style (TOPAZ, LED, GRADIENT, LINE, RADIAL, SCOPE).
+
 ### Release housekeeping
 - Title page "Version 1.1.0" and the text "Topaz 1.1.0" in the introduction → the new version.
 - "Document history": add a line for the new edition.

@@ -517,7 +517,8 @@ ApplicationWindow {
     }
     Component {
         id: audioVisualizerDockComponent
-        AudioVisualizerView { playback: engine; visualizer: audioVisualizer; visualizerConfig: appConfig }
+        AudioVisualizerView { playback: engine; visualizer: audioVisualizer; visualizerConfig: appConfig
+                              drawsOwnBackground: true }
     }
     Component {
         id: milkdropDockComponent
@@ -746,6 +747,7 @@ ApplicationWindow {
         cleanupController: milkdropCleanupController
         backupRestoreController: backupRestoreController
         genreScanController: genreScanController
+        audioVisualizer:   audioVisualizer
     }
 
     // Genre discovery for Setup -> GENRES -> SCAN FOLDERS (UC-36). Owns its

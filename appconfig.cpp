@@ -611,6 +611,77 @@ void AppConfig::setAudioVisualizerBarOpacity(double opacity)
     save();
 }
 
+namespace {
+QString normalizedVisualizerStyle(const QString &style)
+{
+    static const QStringList kStyles = { QStringLiteral("topaz"), QStringLiteral("led"),
+                                         QStringLiteral("gradient"), QStringLiteral("line"),
+                                         QStringLiteral("radial"), QStringLiteral("scope") };
+    return kStyles.contains(style) ? style : QStringLiteral("topaz");
+}
+QString normalizedSpectrumSource(const QString &source)
+{
+    return source == QStringLiteral("bass") ? source : QStringLiteral("topaz");
+}
+QString normalizedGradientScheme(const QString &scheme)
+{
+    return scheme == QStringLiteral("topaz") ? scheme : QStringLiteral("hifi");
+}
+}
+
+void AppConfig::setAudioVisualizerGradientScheme(const QString &scheme)
+{
+    const QString s = normalizedGradientScheme(scheme);
+    if (m_audioVisualizerGradientScheme == s) return;
+    m_audioVisualizerGradientScheme = s;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerGradientShift(double shift)
+{
+    shift = qBound(0.0, shift, 1.0);
+    if (qFuzzyCompare(m_audioVisualizerGradientShift, shift)) return;
+    m_audioVisualizerGradientShift = shift;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerScopeAutoLevel(bool on)
+{
+    if (m_audioVisualizerScopeAutoLevel == on) return;
+    m_audioVisualizerScopeAutoLevel = on;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerScopeSize(double size)
+{
+    size = qBound(0.1, size, 2.0);
+    if (qFuzzyCompare(m_audioVisualizerScopeSize, size)) return;
+    m_audioVisualizerScopeSize = size;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerStyle(const QString &style)
+{
+    const QString s = normalizedVisualizerStyle(style);
+    if (m_audioVisualizerStyle == s) return;
+    m_audioVisualizerStyle = s;
+    emit audioVisualizerChanged();
+    save();
+}
+
+void AppConfig::setAudioVisualizerSpectrumSource(const QString &source)
+{
+    const QString s = normalizedSpectrumSource(source);
+    if (m_audioVisualizerSpectrumSource == s) return;
+    m_audioVisualizerSpectrumSource = s;
+    emit audioVisualizerChanged();
+    save();
+}
+
 // ── Audio visualizer pane geometry ──────────────────────────────────────────
 
 void AppConfig::saveAudioVisualizerPaneGeometry(int x, int y, int width, int height,
@@ -940,6 +1011,18 @@ void AppConfig::applyJson(const QJsonObject &root)
         audioVisualizer[QStringLiteral("peakHoldEnabled")].toBool(true);
     m_audioVisualizerPaneOpacity = audioVisualizer[QStringLiteral("paneOpacity")].toDouble(1.0);
     m_audioVisualizerBarOpacity  = audioVisualizer[QStringLiteral("barOpacity")].toDouble(1.0);
+    m_audioVisualizerStyle = normalizedVisualizerStyle(
+        audioVisualizer[QStringLiteral("style")].toString(QStringLiteral("topaz")));
+    m_audioVisualizerSpectrumSource = normalizedSpectrumSource(
+        audioVisualizer[QStringLiteral("spectrumSource")].toString(QStringLiteral("topaz")));
+    m_audioVisualizerGradientScheme = normalizedGradientScheme(
+        audioVisualizer[QStringLiteral("gradientScheme")].toString(QStringLiteral("hifi")));
+    m_audioVisualizerGradientShift = qBound(0.0,
+        audioVisualizer[QStringLiteral("gradientShift")].toDouble(0.3), 1.0);
+    m_audioVisualizerScopeAutoLevel =
+        audioVisualizer[QStringLiteral("scopeAutoLevel")].toBool(true);
+    m_audioVisualizerScopeSize = qBound(0.1,
+        audioVisualizer[QStringLiteral("scopeSize")].toDouble(0.7), 2.0);
 
     m_audioVisualizerPaneConfigured = root.contains(QStringLiteral("audioVisualizerPane"));
     const QJsonObject audioVisualizerPane = root[QStringLiteral("audioVisualizerPane")].toObject();
@@ -1156,6 +1239,12 @@ void AppConfig::save()
     audioVisualizer[QStringLiteral("peakHoldEnabled")] = m_audioVisualizerPeakHoldEnabled;
     audioVisualizer[QStringLiteral("paneOpacity")]     = m_audioVisualizerPaneOpacity;
     audioVisualizer[QStringLiteral("barOpacity")]      = m_audioVisualizerBarOpacity;
+    audioVisualizer[QStringLiteral("style")]           = m_audioVisualizerStyle;
+    audioVisualizer[QStringLiteral("spectrumSource")]  = m_audioVisualizerSpectrumSource;
+    audioVisualizer[QStringLiteral("gradientScheme")]  = m_audioVisualizerGradientScheme;
+    audioVisualizer[QStringLiteral("gradientShift")]   = m_audioVisualizerGradientShift;
+    audioVisualizer[QStringLiteral("scopeAutoLevel")]  = m_audioVisualizerScopeAutoLevel;
+    audioVisualizer[QStringLiteral("scopeSize")]       = m_audioVisualizerScopeSize;
     root[QStringLiteral("audioVisualizer")] = audioVisualizer;
 
     if (m_audioVisualizerPaneConfigured) {

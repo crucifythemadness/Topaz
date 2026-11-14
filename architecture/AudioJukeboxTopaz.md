@@ -700,7 +700,8 @@ Topaz module
 ├── TagInfoWindow.qml   FloatingPane specialization: shows the current track's tag metadata, content scales with pane size — see UC-18
 ├── AudioVisualizerWindow.qml FloatingPane specialization (dockable): hosts AudioVisualizerView — see UC-19
 ├── AudioVisualizerView.qml The bar visualizer's content (bars, peak ticks, NO TRACK placeholder), shared by the window and
-│                         the docked copy — renders AudioVisualizerController's barLevels/peakLevels — see UC-19/UC-38
+│                         the docked copy — renders AudioVisualizerController's barLevels/peakLevels in the style chosen
+│                         in Setup (TOPAZ default, LED, GRADIENT; LINE, RADIAL, SCOPE via VisualizerShapeItem) — see UC-19/UC-38
 ├── AudioMeterWindow.qml FloatingPane specialization (dockable): hosts AudioMeterView (the Audio Meter) — see UC-37
 ├── AudioMeterView.qml  The Audio Meter's content, independent of its host window: loads the style chosen in Setup
 │                         (audioMeterStyle) and acquire()/release()s AudioMeterController while it exists — see UC-37
@@ -1552,7 +1553,9 @@ macOS:    ~/Library/Preferences/Topaz/Topaz.config
     },
     "audioVisualizer": {
         "barCount": 24, "color": "#00DAF3", "decaySpeed": 0.5, "sensitivity": 0.5,
-        "peakHoldEnabled": true, "paneOpacity": 1.0
+        "peakHoldEnabled": true, "paneOpacity": 1.0, "barOpacity": 1.0,
+        "style": "topaz", "spectrumSource": "topaz", "gradientScheme": "hifi", "gradientShift": 0.3,
+        "scopeAutoLevel": true, "scopeSize": 0.7
     },
     "audioVisualizerPane": {
         "x": 100, "y": 100, "width": 500, "height": 260, "screenName": "DISPLAY1"
@@ -1634,10 +1637,16 @@ what "configured" means — absent means that pane has never been positioned yet
 | `audioVisualizerBarCount` / `setAudioVisualizerBarCount(count)` | Number of bars the Audio Visualizer pane renders (default `24`); clamped to `[8, 64]`; auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider. Read live by `AudioVisualizerController` on every processed audio block — never cached, same convention `PlaybackEngine` uses for crossfade settings. See UC-19. |
 | `audioVisualizerColor` / `setAudioVisualizerColor(color)` | Hex color string for the bars (default `"#00DAF3"`); no validation beyond non-empty. Set from 40 preset swatches (20-column `Grid`, two full rows — user wants two rows only; keep it at 40) on the AUDIO VISUALIZER tab (not a full color picker — see UC-19). |
 | `audioVisualizerDecaySpeed` / `setAudioVisualizerDecaySpeed(speed)` | How quickly bars fall after a peak (default `0.5`); clamped to `[0.0, 1.0]`; auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider ("SLOW"…"FAST"). |
-| `audioVisualizerSensitivity` / `setAudioVisualizerSensitivity(sensitivity)` | Gain offset applied before dB normalization in `AudioVisualizerController::processBlock` (default `0.5` = no change from the original fixed mapping); clamped to `[0.0, 1.0]`; auto-saves. Mapped to ±18dB (`(sensitivity - 0.5) * 2 * 18`) — `1.0` boosts bars closer to full height on loud passages, `0.0` cuts them noticeably lower. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider ("LOW"…"HIGH", displayed 0–100%). See UC-19. |
+| `audioVisualizerSensitivity` / `setAudioVisualizerSensitivity(sensitivity)` | Gain offset applied before dB normalization in `AudioVisualizerController::applySpectrum` (both spectrum sources) (default `0.5` = no change from the original fixed mapping); clamped to `[0.0, 1.0]`; auto-saves. Mapped to ±18dB (`(sensitivity - 0.5) * 2 * 18`) — `1.0` boosts bars closer to full height on loud passages, `0.0` cuts them noticeably lower. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider ("LOW"…"HIGH", displayed 0–100%). See UC-19. |
 | `audioVisualizerPeakHoldEnabled` / `setAudioVisualizerPeakHoldEnabled(enabled)` | Whether a slowly-decaying peak marker is drawn above each bar (default `true`); auto-saves. Set from `SetupDialog`'s AUDIO VISUALIZER tab toggle. |
 | `audioVisualizerPaneOpacity` / `setAudioVisualizerPaneOpacity(opacity)` | Background-only opacity for the Audio Visualizer pane (default `1.0`, fully opaque); clamped to `[0.0, 1.0]`; auto-saves. Applied to `AudioVisualizerWindow`'s `Window.color` alpha channel only — never to the bars/peak ticks, which stay fully opaque regardless. Set from `SetupDialog`'s AUDIO VISUALIZER tab slider (0–100%). |
 | `audioVisualizerBarOpacity` / `setAudioVisualizerBarOpacity(opacity)` | Foreground-only opacity for the Audio Visualizer's bars and peak-hold ticks (default `1.0`, fully opaque); clamped to `[0.0, 1.0]`; auto-saves. Independent of `audioVisualizerPaneOpacity` — applied as an ordinary `opacity:` binding on `AudioVisualizerWindow`'s `barsRow` (level bars + peak ticks together), not `Window.color`, so no premultiply treatment is needed (unlike the pane background, this isn't a native window clear color — Qt Quick's scenegraph alpha blending already composites it correctly). Set from `SetupDialog`'s AUDIO VISUALIZER tab slider (0–100%). |
+| `audioVisualizerStyle` / `setAudioVisualizerStyle(style)` | Look of the bars: `"topaz"` (default — the original look), `"led"`, `"gradient"`, `"line"`, `"radial"`, `"scope"`; anything else (incl. a missing key in an older config, and `"mirrored"` from a removed test style) is normalized to `"topaz"`; auto-saves. Set from the STYLE & COLOR page of the AUDIO VISUALIZER tab. See UC-19 "Styles, spectrum source, split Setup page". |
+| `audioVisualizerSpectrumSource` / `setAudioVisualizerSpectrumSource(source)` | `"topaz"` (default, own KissFFT analysis) or `"bass"` (BASS's built-in FFT); anything else → `"topaz"`; auto-saves. Only *in effect* while BASS is the active engine — otherwise `AudioVisualizerController` silently uses KissFFT and the saved value is kept. Set from the SETTINGS page (row visible only with BASS). See UC-19. |
+| `audioVisualizerGradientScheme` / `setAudioVisualizerGradientScheme(scheme)` | GRADIENT style colours: `"hifi"` (default — the Audio Meter's classic green/yellow/orange/red) or `"topaz"` (the meter's Topaz colours); anything else → `"hifi"`; auto-saves. Set from the STYLE & COLOR page (row visible only for GRADIENT). See UC-19. |
+| `audioVisualizerGradientShift` / `setAudioVisualizerGradientShift(shift)` | GRADIENT "Colour Shift" (default `0.3` = the original gradient); clamped to `[0.0, 1.0]`; auto-saves. Mapped to a colour-ramp span of `1.3 − shift` × the bar height: higher values reach orange/red at lower bars. Set from the STYLE & COLOR page slider ("GREEN"…"RED", 0–100 %). See UC-19. |
+| `audioVisualizerScopeAutoLevel` / `setAudioVisualizerScopeAutoLevel(on)` | SCOPE "Auto Level" (default `true`): the waveform's gain follows the music's peaks, so peaks stay at Size for loud and quiet tracks alike; auto-saves. Set from the STYLE & COLOR page (ON / OFF pill, SCOPE only). See UC-19 "SCOPE level". |
+| `audioVisualizerScopeSize` / `setAudioVisualizerScopeSize(size)` | SCOPE "Size" (default `0.7`), clamped to `[0.1, 2.0]`; auto-saves. With Auto Level on, the peak height relative to the music's peaks; off, a plain gain (1.0 = full scale fills the height). Set from the STYLE & COLOR slider ("SMALL"…"LARGE", 10–200 %). See UC-19. |
 | `audioVisualizerPaneConfigured` / `audioVisualizerPaneX` / `Y` / `Width` / `Height` | Read-only; the detachable AudioVisualizerWindow pane's last-saved geometry (defaults `500`×`260`, `configured` starts `false`). Same convention as `bigCoverPane*`/`tagInfoPane*` above. See UC-19. |
 | `saveAudioVisualizerPaneGeometry(x, y, width, height, screenName)` | Persists the pane's geometry after a move/resize settles. Same calling convention as `saveBigCoverPaneGeometry`. |
 | `audioMeterStyle` / `setAudioMeterStyle(style)` | Visual style of the Audio Meter (default `"hifi90s"`, the only one so far); auto-saves; unknown names fall back to the first style in `AudioMeterView.qml`. Set from Setup → AUDIO METER. See UC-37. |
@@ -2565,6 +2574,18 @@ crossfades — see UC-19's "Known limitations"). `FfmpegAudioDeck` sources it fr
 `QAudioBufferOutput` (Qt Multimedia's FFmpeg backend); `BassAudioDeck` polls
 `BASS_ChannelGetData()` on its own timer, since BASS has no equivalent push
 notification.
+
+**`spectrumFromBackend()` / `readDeckSpectrum(QVector<float>&, int &sampleRate)`**
+(plain C++, for `AudioVisualizerController`'s optional BASS spectrum source, UC-19): the
+first is true while a BASS deck is active and `bass.dll` is loaded; the second fills
+`AudioDeck::kSpectrumBins` (512) magnitudes from every audible deck's
+`AudioDeck::readSpectrum()` (BASS: `BASS_DATA_FFT1024`; default implementation: false),
+power-summed weighted by each deck's crossfade level — the spectrum counterpart of
+`readDeckLevels()` (UC-37). `sampleRate` is the louder deck's (BASS plays each file at its
+own rate, so the two tracks of a crossfade can differ, e.g. 44.1 vs 48 kHz). **`readDeckWaveform(float *mono, int n)`** (SCOPE style with the
+BASS source): the newest `n` mono samples of every audible deck via
+`AudioDeck::readWaveform()` (BASS: `BASS_ChannelGetData(… | BASS_DATA_FLOAT)`, right-aligned
+if fewer frames are available), summed linearly × crossfade level.
 
 ### Queue model roles (used by PlaybackQueue.qml delegate)
 
@@ -4688,7 +4709,8 @@ once in `Main.qml` alongside `AutoPlayController`/`SystemVolumeController`.
 Two separate nested JSON objects, matching how pane geometry is already kept
 separate from feature settings elsewhere (`bigCoverPane` vs. nothing analogous,
 `tagInfoPane` vs. nothing analogous — this is the first pane with *both* kinds):
-- `"audioVisualizer"`: `barCount`/`color`/`decaySpeed`/`peakHoldEnabled`, each a
+- `"audioVisualizer"`: `barCount`/`color`/`decaySpeed`/`sensitivity`/`peakHoldEnabled`/
+  `paneOpacity`/`barOpacity`/`style`/`spectrumSource`, each a
   normal scalar `Q_PROPERTY` + dedicated `Q_INVOKABLE` setter — the
   `autoPlayQueueHorizon`/`setAutoPlayQueueHorizon` convention, not the
   single-geometry-setter one.
@@ -4698,6 +4720,12 @@ See the `AppConfig` public API table and Config file format section above for th
 full property list and JSON shape.
 
 ### `SetupDialog.qml` — "AUDIO VISUALIZER" tab
+
+*Since 2026-11-14 split into two sub-pages by a pill switch* (**SETTINGS** | **STYLE &
+COLOR**, an inline `VizPill` component with the AUDIO METER tab's HIFI/TOPAZ look):
+SETTINGS holds every control below except the colour swatches, plus **Spectrum
+Analysis**; STYLE & COLOR holds the **Style** pill and the swatch grid. See "Styles,
+spectrum source, split Setup page" below. The original description:
 
 Fifth tab, appended to the existing tab-strip `Repeater`'s model array. Styled
 identically to the PLAYBACK/AUTO PLAY tabs it was built from: custom-styled
@@ -4726,9 +4754,150 @@ existing selections stay stable. A full HSV/RGB color picker was deliberately
 not built for this first version — presets are simpler and consistent with
 starting small; a real picker is a reasonable later enhancement.
 
+### Styles, spectrum source, split Setup page (2026-11-14)
+
+**Styles** (`AppConfig::audioVisualizerStyle`, rendered in `AudioVisualizerView.qml`, so
+the floating and the docked copy follow it alike). The bars `Repeater`'s *delegate* is
+bound to one inline `Component` per style — only the chosen one exists; switching style
+recreates the delegates once, never per frame.
+
+| Style | Drawing | Colour swatch |
+|---|---|---|
+| `topaz` (default) | The original delegate, unchanged: bar `Rectangle` + peak tick | used |
+| `led` | Per bar one `Image` (`fillMode: Image.Tile`, `verticalAlignment: AlignBottom`) whose height is the level rounded to whole segments (~24 per pane height, 30 % gap); a static, dim (14 %) full-height copy behind it shows the unlit segments | used |
+| `gradient` | Per bar one tiled `Image` of a full-pane-height low→mid→high→top strip (stops 0/55/85/100 %), bottom-aligned and cut off at the bar height — a colour sits at a fixed height. Colours: the Audio Meter's **HIFI** (`#3DFF7A`/`#FFE14A`/`#FF8A1F`/`#FF2D45`) or **TOPAZ** scheme (`Theme.secondary`/`Theme.primaryContainer`/`#FF4FB8`/`#FF2E8A`, as in `AudioMeterHiFi90s.qml`), `audioVisualizerGradientScheme`. **Colour Shift** (`audioVisualizerGradientShift`, default 0.3): the ramp spans `1.3 − shift` × the bar height (padded with the top colour above), so 0.3 = the original, higher = orange/red at lower bars — added because music rarely drives bars near the top, so the original looked mostly green | not used (Setup dims the swatches; the saved colour stays) |
+| `line` | `VisualizerShapeItem`: spectrum curve through the bar levels (Catmull-Rom, 4 sub-points per segment), 8 px faint glow + 2.5 px core stroke, area below filled with a vertical alpha fade (35 % → 0); peak hold = thin 1.2 px curve | used |
+| `radial` | `VisualizerShapeItem`: bars as spokes around a centre ring (inner radius 28 % of the short side), mirrored left/right with low frequencies at the top; peak hold = a short mark per spoke | used |
+| `scope` | `VisualizerShapeItem`: the waveform (oscilloscope), 7 px glow + 2 px core, faint centre line, rising-zero-crossing trigger. Bar Count / Decay Speed / Sensitivity / Peak Hold don't apply (dimmed in Setup); own level options **Auto Level** + **Size** (see "SCOPE waveform") | used |
+
+A `mirrored` style (bars growing up and down from the centre) existed briefly during
+development and was removed at the user's request; a saved `"mirrored"` loads as TOPAZ.
+
+**`VisualizerShapeItem`** (`visualizershapeitem.h/.cpp`, `QQuickItem` + `QML_ELEMENT`,
+`updatePaintNode()` like `MilkdropView`) draws LINE/RADIAL/SCOPE as **one vertex-coloured
+geometry** (`QSGVertexColorMaterial`, premultiplied colours, non-indexed triangles,
+`StreamPattern`) — one draw call, no per-bar items. Rejected: QML `Canvas` (CPU painting)
+and `Shape` (path rebuilt from JS arrays per frame). It copies the controller's plain-float
+vectors (`barLevelsVec()` / `peakLevelsVec()` / `waveform()`, no QVariant) on the GUI thread
+when `barLevelsChanged` / `waveformChanged` fire and rebuilds only then (or on resize/colour
+change). Anti-aliasing without MSAA: each stroke is three quads per segment — core plus a
+feathered band on each side whose outer vertices have alpha 0; joints are mitred (capped 2×).
+`AudioVisualizerView.qml` shows it through a `Loader` (`active` only for these styles; the
+bars `Repeater` then has model 0), with the same 12 px margins, Bar Opacity and visibility.
+SCOPE uses at most one point per 2 px of width (the 512 waveform values are resampled):
+measured, it was the costliest style before that cap.
+
+**SCOPE waveform** (`AudioVisualizerController`): computed only while a SCOPE view holds
+`acquireWaveform()` (reference count, released in the item's destructor / mode change).
+On every 33 ms tick `updateWaveform()` takes the newest 2048 mono samples — Spectrum
+Analysis **TOPAZ**: a ring buffer filled in `appendSamples()` (only while acquired);
+**BASS**: `PlaybackEngine::readDeckWaveform()` → `AudioDeck::readWaveform()` →
+`BASS_ChannelGetData(… | BASS_DATA_FLOAT)` on each audible deck (what is audible now,
+consumes nothing, mixed to mono, summed × crossfade level) — then looks for the first rising
+zero crossing (steady picture), applies the SCOPE level, and averages 2:1 into
+`kWaveformPoints` (512) values in −1..1. Stopped/paused: the waveform is multiplied by 0.7
+per tick until flat.
+
+**SCOPE level** (Sensitivity is *not* used — with it as the only gain, ×1 at the default, a
+modern master peaking near 0 dBFS sat at the edges and was clamped into flat lines, and
+tracks of different loudness needed different settings): `audioVisualizerScopeSize`
+(0.1–2.0, default 0.7) and `audioVisualizerScopeAutoLevel` (default on).
+- **Auto Level on**: a peak envelope `m_scopeEnv` over the 1024 displayed samples, with
+  instant attack and a release of −6 dB per 1.5 s (time-scaled by the tick interval,
+  `m_clock`). Gain = `size / max(env, 0.03)`; the 0.03 floor (≈ −30 dB) keeps silence and
+  fade-outs from being blown up into noise. The envelope resets on stop/pause, so the next
+  track starts fresh.
+- **Auto Level off**: gain = `size` (1.0 = the earlier look, full scale fills the height).
+- **Soft limit**: |s| ≤ 0.9 passes unchanged; above that, `0.9 + 0.1·tanh((|s|−0.9)/0.1)`, so
+  peaks round off toward the edge instead of being cut flat.
+
+Cost: one max and one multiply per displayed sample per tick.
+
+**Measured 2026-11-14** (Release, docked, BASS source, `QSG_RENDER_TIMING`): TOPAZ 2.56 ms
+sync+render / ~32–33 % CPU; LED 2.76–2.86 ms; GRADIENT 2.18–2.55 ms; LINE 2.23 ms / 32.0 %;
+RADIAL 2.66 ms / 32.3 %; SCOPE 2.81 ms / 34.2 % (before its point cap, 18 % of frames ≥ 6 ms).
+Second run, **TOPAZ source** (own PCM tap + KissFFT), SCOPE with the point cap: LED 2.40 ms /
+34.0 %; GRADIENT 2.43 ms / 35.4 %; LINE 2.33 ms / 30.1 %; RADIAL 2.23 ms / 31.0 %; SCOPE
+2.49 ms / 34.7 % (8 % of frames ≥ 6 ms, like the other styles). Run-to-run spread is about
+±0.25 ms (GRADIENT: 2.19 vs 2.43 ms). All within the pass criterion "not noticeably above TOPAZ".
+
+**Performance rules** (the user's top priority — a style that breaks them is reworked or
+dropped): delegates created once (model = bar count, as before); only per-bar height /
+position bindings change per frame; no `Canvas`, no per-frame item creation; LED and
+GRADIENT draw each bar as *one* item. Their textures come from `VizStyleImageProvider`
+(`vizstyleimageprovider.h/.cpp`, registered as `image://vizstyle` in `main.cpp`): a 1 px
+wide LED tile (`led/<rrggbb>/<segPx>/<gapPx>` — colour as bare hex, a `#` would start the
+URL fragment) or gradient strip (`gradient/<heightPx>`, height rounded up to 16 px steps so
+resizing the pane doesn't regenerate it per pixel). All bars share one texture, so they
+batch like the TOPAZ rectangles; textures are only regenerated on colour/size change.
+Bar Opacity, peak hold and NO TRACK work unchanged in every style.
+
+**Pane Opacity — same in every style, floating and docked.** `AudioVisualizerView`'s
+`backgroundOpacity` now defaults to `audioVisualizerPaneOpacity` and applies to everything
+that is "the pane's background", never to the bars: the NO TRACK placeholder, LED's dim
+unlit segments (`0.14 × backgroundOpacity` — at 0 % only lit segments remain, like the bars
+of the other styles), and the pane surface. Floating, that surface is
+`AudioVisualizerWindow`'s own (premultiplied) window colour, translucent over the desktop.
+Docked (UC-38) there is no own window: until 2026-11-14 the docked copy painted no surface
+at all and passed a fixed `backgroundOpacity: 1`, so Pane Opacity had no effect there. Now
+`Main.qml`'s dock component sets `drawsOwnBackground: true` and the view paints the same
+pane colour (`Theme.surfaceContainerLowest`) at the same alpha over the dock area
+(`Theme.surfaceContainerLow`). Docked, a translucent pane can only reveal Topaz's own
+surface behind it, so the visible range is subtle (#0E0E0E at 100 % → #1C1B1B at 0 %).
+
+**Spectrum source** (`AppConfig::audioVisualizerSpectrumSource`, `"topaz"` default /
+`"bass"`). Why BASS can sync tighter: with BASS playing, the KissFFT path gets PCM from
+`BassAudioDeck::pollAudioBuffer()` (~25 ms snapshots of the playback buffer) and queues
+those non-contiguous snapshots in `m_sampleBuffer` until `kFftSize` samples exist — lag and
+jitter. In BASS mode `AudioVisualizerController::onUpdateTick()` instead asks, once per
+33 ms tick, `PlaybackEngine::readDeckSpectrum()` → `AudioDeck::readSpectrum()` →
+`BASS_ChannelGetData(stream, buf, BASS_DATA_FFT1024)`: a 1024-point FFT of what is audible
+right now (512 magnitudes, Hann window, channels combined — the same resolution as
+KissFFT, so the band mapping is identical). During a crossfade all audible decks are
+power-summed, each weighted by its crossfade level (`m_fadeVolume`, pre loudness gain —
+like the PCM tap, independent of the user's volume): one continuous spectrum, no jump.
+- **Shared code path**: both sources feed `applySpectrum(mags, binCount, sampleRate,
+  decayScale)` (log bands, dB, Sensitivity, decay, peak hold), so every SETTINGS option
+  behaves identically. The KissFFT path passes `|X|/N` with `decayScale = 1` — FFmpeg /
+  TOPAZ behaviour is unchanged. The BASS path scales decay by `dt / (kFftSize/sampleRate)`
+  because it decays per 33 ms tick instead of per ~23 ms block.
+- **Calibration** `kBassCalibration = 0.25`: measured 2026-11-14 with a standalone harness
+  (BASS decode streams of sine WAVs, 63 Hz–9 kHz, 0/−12/−30 dBFS, mono + stereo, both paths
+  through the same band mapping): BASS's magnitudes are exactly 4.00 × KissFFT's `|X|/N`
+  everywhere (spread 0.005 dB) — so the same Sensitivity gives the same bar height.
+- **Gating / fallback**: in effect only when chosen **and** `PlaybackEngine::spectrumFromBackend()`
+  (BASS deck active, `bass.dll` loaded; `BASS_ChannelGetData` is already resolved for the
+  tap, no new export). Re-checked every tick (`updateSource()`); switching clears the
+  KissFFT queue. Otherwise KissFFT is used silently and the saved choice stays. While BASS
+  mode is in effect `onAudioBufferAvailable()` returns early (no KissFFT work); the PCM tap
+  keeps running for Milkdrop (UC-20).
+- **Stopped/paused → bars fall to empty** (both sources, since 2026-11-14; before, they froze
+  at the last analysed frame because no more audio arrives). `onUpdateTick()` checks
+  `PlaybackEngine::isPlaying()`; when not playing, `releaseToZero()` lowers bars at the
+  Decay Speed rate and peaks at their slower peak rate (time-scaled like the BASS path),
+  until everything is 0 — then publishing stops again (`m_dirty` stays false). Like the
+  Audio Meter's release. On entering idle it drops a half-filled KissFFT block, and late
+  PCM buffers that arrive after the stop are ignored so they can't lift the bars again.
+- `AudioVisualizerController::sourceName` (`"BASS"`/`"TOPAZ"`, NOTIFY `sourceNameChanged`)
+  drives Setup's "Currently: …" readout — same idea as `AudioMeterController::sourceName`.
+
+**Setup** (`SetupDialog.qml`, `audioVisualizer` property bound from `Main.qml`): pill
+**SETTINGS | STYLE & COLOR** at the top, reset to SETTINGS whenever the tab is shown.
+SETTINGS = Bar Count, Decay Speed, Sensitivity, Peak Hold, Pane Opacity, Bar Opacity, and
+**Spectrum Analysis** (pill TOPAZ | BASS + live readout + one-line hint), whose row is
+visible only while `playbackEngine.activeBackendName === "BASS Audio Library"`. STYLE &
+COLOR = Style pill (TOPAZ | LED | GRADIENT | LINE | RADIAL | SCOPE + one-line description);
+with SCOPE the SETTINGS rows Bar Count / Decay Speed / Sensitivity / Peak Hold are dimmed and
+disabled (`vizPanel.scopeStyle`, values kept); for SCOPE only a "Scope" row (Auto Level ON | OFF
+pill + Size slider SMALL…LARGE, 10–200 %); for GRADIENT
+only a "Gradient Colours" row (HIFI | TOPAZ pill + Colour Shift slider GREEN…RED), and the 40
+swatches, dimmed/disabled with "This style uses its own colours" for GRADIENT. All pills
+call setters (no imperative `current = …` write, see the binding-kill gotcha).
+
 ### Known limitations (not fixed, not requested)
 
-- Crossfade audio mixing simplification — see the `PlaybackEngine` section above.
+- Crossfade audio mixing simplification — see the `PlaybackEngine` section above
+  (KissFFT path only; the BASS spectrum source combines both decks).
 - Only `Float`/`Int16` sample formats are handled; other formats are silently
   skipped (no visible error, bars just stay flat).
 - dB floor/ceiling for level normalization (-60dB/0dB) are hardcoded constants,

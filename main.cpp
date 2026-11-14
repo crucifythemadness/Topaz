@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
+#include "vizstyleimageprovider.h"
 
 // QApplication (not QGuiApplication) is required here even though Topaz is a
 // QML-only UI: QSystemTrayIcon (used by AutoPlayController for AUTO PLAY
@@ -27,6 +28,9 @@ int main(int argc, char *argv[])
 #endif
 
     QQmlApplicationEngine engine;
+    // Generated textures for the Audio Visualizer's LED / GRADIENT styles
+    // (image://vizstyle/..., see vizstyleimageprovider.h). Engine takes ownership.
+    engine.addImageProvider(QStringLiteral("vizstyle"), new VizStyleImageProvider);
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,

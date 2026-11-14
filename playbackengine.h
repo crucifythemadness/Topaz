@@ -185,6 +185,17 @@ public:
     bool levelsFromBackend() const;
     bool readDeckLevels(DeckLevels &out) const;
 
+    // Audio Visualizer (UC-19), optional BASS spectrum source.
+    // spectrumFromBackend(): the active backend can deliver an FFT itself
+    // (BASS). readDeckSpectrum(): AudioDeck::kSpectrumBins magnitudes of every
+    // audible deck, power-summed weighted by crossfade level (one continuous
+    // spectrum during a crossfade); false when no deck delivers one right now.
+    bool spectrumFromBackend() const;
+    bool readDeckSpectrum(QVector<float> &mags, int &sampleRate) const;
+    // SCOPE style with the BASS source: newest n mono samples of every
+    // audible deck, summed weighted by crossfade level (signals add linearly).
+    bool readDeckWaveform(float *mono, int n) const;
+
     // Sets the active playlist name (called from QML after creating/loading a playlist).
     Q_INVOKABLE void setActivePlaylistName(const QString &name);
     // Locks or unlocks playlist sync.  When unlocked, the XSPF is immediately

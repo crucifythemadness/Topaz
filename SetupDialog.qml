@@ -51,6 +51,9 @@ Popup {
     // Main.qml -- backs the GENRES tab's SCAN FOLDERS button / FOUND GENRES
     // dialog (genre discovery, see UC-36).
     property var genreScanController: null
+    // Main.qml's AudioVisualizerController -- read-only here, for the AUDIO
+    // VISUALIZER tab's live "Currently: BASS/TOPAZ" spectrum readout (UC-19).
+    property var audioVisualizer: null
 
     // ── Internal selection state ─────────────────────────────────────────
     property int selectedGenreIndex:  -1
@@ -2701,17 +2704,93 @@ Popup {
             // PANEL 5 — AUDIO VISUALIZER
             // ────────────────────────────────────────────────────────────
             Item {
+                id: vizPanel
                 anchors.fill: parent
                 visible: tabBar.currentTab === 4
 
+                // Two sub-pages chosen by a pill switch: SETTINGS (everything
+                // but the colours, plus Spectrum Analysis) and STYLE & COLOR.
+                // Opens on SETTINGS every time the tab is shown.
+                property int page: 0
+                // SCOPE draws the waveform: Bar Count, Decay Speed, Sensitivity
+                // and Peak Hold don't apply -- those rows are dimmed (values
+                // kept). SCOPE has its own level options on STYLE & COLOR.
+                readonly property bool scopeStyle:
+                    root.appConfig !== null && root.appConfig.audioVisualizerStyle === "scope"
+                onVisibleChanged: if (visible) page = 0
+
+                // Segmented pill switch, same look as the AUDIO METER tab's
+                // HIFI / TOPAZ colour switch. options: [{ key, label }].
+                // Selecting calls picked(key) -- the owner calls a setter, no
+                // imperative write to "current" (binding stays intact).
+                component VizPill: Rectangle {
+                    id: pill
+                    property var options: []
+                    property string current: ""
+                    property int segmentWidth: 84
+                    signal picked(string key)
+
+                    width: pillRow.implicitWidth + 6
+                    height: 34
+                    radius: 17
+                    color: Theme.surfaceContainer
+                    border.width: 1
+                    border.color: Theme.outlineVariant
+
+                    Row {
+                        id: pillRow
+                        anchors.centerIn: parent
+                        spacing: 2
+                        Repeater {
+                            model: pill.options
+                            delegate: Rectangle {
+                                id: pillSeg
+                                required property var modelData
+                                readonly property bool on: pill.current === modelData.key
+                                width: pill.segmentWidth; height: 28
+                                radius: 14
+                                color: on ? Theme.secondary : "transparent"
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: pillSeg.modelData.label
+                                    font.family:        Theme.fontFamilyBody
+                                    font.pixelSize:     Theme.labelMd
+                                    font.weight:        Font.Bold
+                                    font.letterSpacing: 1
+                                    color: pillSeg.on ? Theme.fgSecondary : Theme.fgSurfaceVariant
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: pill.picked(pillSeg.modelData.key)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                VizPill {
+                    x: 24; y: 16
+                    segmentWidth: 150
+                    options: [ { key: "settings", label: "SETTINGS" },
+                               { key: "style",    label: "STYLE & COLOR" } ]
+                    current: vizPanel.page === 0 ? "settings" : "style"
+                    onPicked: (key) => vizPanel.page = (key === "settings" ? 0 : 1)
+                }
+
+                // ── SETTINGS page ───────────────────────────────────────
                 ColumnLayout {
-                    anchors { fill: parent; margins: 24 }
+                    visible: vizPanel.page === 0
+                    anchors { fill: parent; margins: 24; topMargin: 16 + 34 + 28 }
                     spacing: 40
 
                     // ── Bar Count row ──────────────────────────────────
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 8
+                        enabled: !vizPanel.scopeStyle
+                        opacity: enabled ? 1.0 : 0.35
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -2814,6 +2893,8 @@ Popup {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 8
+                        enabled: !vizPanel.scopeStyle
+                        opacity: enabled ? 1.0 : 0.35
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -2920,6 +3001,8 @@ Popup {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 8
+                        enabled: !vizPanel.scopeStyle
+                        opacity: enabled ? 1.0 : 0.35
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -3021,6 +3104,8 @@ Popup {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 16
+                        enabled: !vizPanel.scopeStyle
+                        opacity: enabled ? 1.0 : 0.35
 
                         Text {
                             text: "Peak Hold"
@@ -3282,6 +3367,407 @@ Popup {
                         }
                     }
 
+                    // ── Spectrum Analysis row (BASS engine only) ────────
+                    // Shown only while BASS is the active engine; with FFmpeg
+                    // there is nothing to choose and the visualizer works as
+                    // it always did. A saved "BASS" choice without BASS falls
+                    // back to Topaz's own analysis (AudioVisualizerController
+                    // ::updateSource) and is kept for when BASS is back.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        visible: root.playbackEngine !== null
+                                 && root.playbackEngine.activeBackendName === "BASS Audio Library"
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 16
+
+                            Text {
+                                text: "Spectrum Analysis"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Bold
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("Who analyses the music for the bars: Topaz itself, or the BASS engine (in tighter sync with what you hear)")
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: qsTr("Currently: ") + (root.audioVisualizer ? root.audioVisualizer.sourceName : "TOPAZ")
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+
+                            VizPill {
+                                options: [ { key: "topaz", label: "TOPAZ" },
+                                           { key: "bass",  label: "BASS"  } ]
+                                current: root.appConfig ? root.appConfig.audioVisualizerSpectrumSource : "topaz"
+                                onPicked: (key) => { if (root.appConfig) root.appConfig.setAudioVisualizerSpectrumSource(key) }
+                            }
+                        }
+
+                        Text {
+                            text: qsTr("BASS: the spectrum comes straight from the BASS engine, in tighter sync with what you hear")
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.labelMd
+                            color: Theme.fgSurfaceVariant
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }   // push content to top
+                }
+
+                // ── STYLE & COLOR page ──────────────────────────────────
+                ColumnLayout {
+                    id: vizStylePage
+                    visible: vizPanel.page === 1
+                    anchors { fill: parent; margins: 24; topMargin: 16 + 34 + 28 }
+                    spacing: 40
+
+                    readonly property string vizStyle:
+                        root.appConfig ? root.appConfig.audioVisualizerStyle : "topaz"
+                    // Styles with their own colours make the colour choice
+                    // irrelevant -- swatches are dimmed, the saved colour stays.
+                    readonly property bool styleHasOwnColors: vizStyle === "gradient"
+
+                    // ── Style row ───────────────────────────────────────
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text {
+                            text: "Style"
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.titleMd
+                            font.weight:    Font.Bold
+                            color: Theme.fgSurface
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay:   600
+                                ToolTip.text:    qsTr("How the bars look. TOPAZ is the original Topaz look")
+                            }
+                        }
+
+                        VizPill {
+                            Layout.leftMargin: 24
+                            segmentWidth: 116
+                            options: [ { key: "topaz",    label: "TOPAZ"    },
+                                       { key: "led",      label: "LED"      },
+                                       { key: "gradient", label: "GRADIENT" },
+                                       { key: "line",     label: "LINE"     },
+                                       { key: "radial",   label: "RADIAL"   },
+                                       { key: "scope",    label: "SCOPE"    } ]
+                            current: vizStylePage.vizStyle
+                            onPicked: (key) => { if (root.appConfig) root.appConfig.setAudioVisualizerStyle(key) }
+                        }
+
+                        Text {
+                            Layout.leftMargin: 28
+                            text: {
+                                switch (vizStylePage.vizStyle) {
+                                case "led":      return qsTr("LED: bars made of lit segments, like a 90s HiFi display")
+                                case "gradient": return qsTr("GRADIENT: green → yellow → red with the height of each bar")
+                                case "line":     return qsTr("LINE: a glowing spectrum curve with a soft fill below")
+                                case "radial":   return qsTr("RADIAL: the bars arranged in a circle, mirrored left and right")
+                                case "scope":    return qsTr("SCOPE: the waveform itself, like an oscilloscope (Bar Count, Decay Speed, Sensitivity and Peak Hold are not used)")
+                                default:         return qsTr("TOPAZ: the original Topaz bars (default)")
+                                }
+                            }
+                            font.family:    Theme.fontFamilyBody
+                            font.pixelSize: Theme.labelMd
+                            color: Theme.fgSurfaceVariant
+                        }
+                    }
+
+                    // ── Gradient row (GRADIENT style only) ─────────────
+                    // Colour scheme = the Audio Meter's two (HIFI / TOPAZ);
+                    // Colour Shift moves where the warm colours begin.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+                        visible: vizStylePage.vizStyle === "gradient"
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 16
+
+                            Text {
+                                text: "Gradient Colours"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Bold
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("The same two colour schemes as the Audio Meter: classic HiFi colours or the colours of Topaz")
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            VizPill {
+                                options: [ { key: "hifi",  label: "HIFI"  },
+                                           { key: "topaz", label: "TOPAZ" } ]
+                                current: root.appConfig ? root.appConfig.audioVisualizerGradientScheme : "hifi"
+                                onPicked: (key) => { if (root.appConfig) root.appConfig.setAudioVisualizerGradientScheme(key) }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "Colour Shift"
+                                Layout.preferredWidth: 140
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.labelLg
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("Towards RED, the bars reach orange and red sooner (30 % is the original gradient)")
+                                }
+                            }
+
+                            Text {
+                                text: "GREEN"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: gradientShiftSlider
+                                Layout.fillWidth: true
+                                from: 0.0
+                                to:   1.0
+                                stepSize: 0.05
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.audioVisualizerGradientShift : 0.3
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioVisualizerGradientShift(value)
+                                }
+
+                                background: Rectangle {
+                                    x: gradientShiftSlider.leftPadding
+                                    y: gradientShiftSlider.topPadding
+                                       + gradientShiftSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  gradientShiftSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  gradientShiftSlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: gradientShiftSlider.leftPadding
+                                       + gradientShiftSlider.visualPosition
+                                         * (gradientShiftSlider.availableWidth - width)
+                                    y: gradientShiftSlider.topPadding
+                                       + gradientShiftSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "RED"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Text {
+                                text: Math.round(gradientShiftSlider.value * 100) + " %"
+                                Layout.preferredWidth: 56
+                                horizontalAlignment: Text.AlignRight
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+                    }
+
+                    // ── Scope row (SCOPE style only) ───────────────────
+                    // Auto Level follows the music's peaks so the waveform
+                    // keeps the chosen Size for loud and quiet tracks alike;
+                    // off, Size is relative to full scale (100 % = maximum
+                    // signal fills the height). See updateWaveform() in
+                    // audiovisualizercontroller.cpp.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+                        visible: vizStylePage.vizStyle === "scope"
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 16
+
+                            Text {
+                                text: "Auto Level"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Bold
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    qsTr("ON: the waveform follows the loudness of the music, so loud and quiet tracks show the same size")
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            VizPill {
+                                options: [ { key: "on",  label: "ON"  },
+                                           { key: "off", label: "OFF" } ]
+                                current: (root.appConfig && !root.appConfig.audioVisualizerScopeAutoLevel) ? "off" : "on"
+                                onPicked: (key) => { if (root.appConfig) root.appConfig.setAudioVisualizerScopeAutoLevel(key === "on") }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "Size"
+                                Layout.preferredWidth: 140
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.labelLg
+                                color: Theme.fgSurface
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay:   600
+                                    ToolTip.text:    root.appConfig && !root.appConfig.audioVisualizerScopeAutoLevel
+                                                     ? qsTr("How high the waveform reaches: at 100 % the loudest possible signal fills the pane")
+                                                     : qsTr("How high the loudest parts of the music reach in the pane")
+                                }
+                            }
+
+                            Text {
+                                text: "SMALL"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Slider {
+                                id: scopeSizeSlider
+                                Layout.fillWidth: true
+                                from: 0.1
+                                to:   2.0
+                                stepSize: 0.05
+                                snapMode: Slider.SnapAlways
+                                value: root.appConfig ? root.appConfig.audioVisualizerScopeSize : 0.7
+
+                                onMoved: {
+                                    if (root.appConfig)
+                                        root.appConfig.setAudioVisualizerScopeSize(value)
+                                }
+
+                                background: Rectangle {
+                                    x: scopeSizeSlider.leftPadding
+                                    y: scopeSizeSlider.topPadding
+                                       + scopeSizeSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  200
+                                    implicitHeight: 4
+                                    width:  scopeSizeSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 2
+                                    color:  Theme.surfaceContainerHighest
+
+                                    Rectangle {
+                                        width:  scopeSizeSlider.visualPosition * parent.width
+                                        height: parent.height
+                                        radius: 2
+                                        color:  Theme.secondary
+                                    }
+                                }
+
+                                handle: Rectangle {
+                                    x: scopeSizeSlider.leftPadding
+                                       + scopeSizeSlider.visualPosition
+                                         * (scopeSizeSlider.availableWidth - width)
+                                    y: scopeSizeSlider.topPadding
+                                       + scopeSizeSlider.availableHeight / 2 - height / 2
+                                    implicitWidth:  16
+                                    implicitHeight: 16
+                                    width:  implicitWidth
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Theme.secondary
+                                }
+                            }
+
+                            Text {
+                                text: "LARGE"
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelSm
+                                color: Theme.fgSurfaceVariant
+                            }
+
+                            Text {
+                                text: Math.round(scopeSizeSlider.value * 100) + " %"
+                                Layout.preferredWidth: 56
+                                horizontalAlignment: Text.AlignRight
+                                font.family:    Theme.fontFamilyMono
+                                font.pixelSize: Theme.labelLg
+                                font.weight:    Font.Bold
+                                color: Theme.secondary
+                            }
+                        }
+                    }
+
                     // ── Color row ───────────────────────────────────────
                     // Preset swatches rather than a full HSV/RGB picker —
                     // same "Repeater over an options array compared against
@@ -3292,16 +3778,29 @@ Popup {
                         Layout.fillWidth: true
                         spacing: 12
 
-                        Text {
-                            text: "Color"
-                            font.family:    Theme.fontFamilyBody
-                            font.pixelSize: Theme.titleMd
-                            font.weight:    Font.Bold
-                            color: Theme.fgSurface
+                        RowLayout {
+                            spacing: 16
+                            Text {
+                                text: "Color"
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.titleMd
+                                font.weight:    Font.Bold
+                                color: Theme.fgSurface
+                                opacity: vizStylePage.styleHasOwnColors ? 0.4 : 1.0
+                            }
+                            Text {
+                                visible: vizStylePage.styleHasOwnColors
+                                text: qsTr("This style uses its own colours")
+                                font.family:    Theme.fontFamilyBody
+                                font.pixelSize: Theme.labelMd
+                                color: Theme.fgSurfaceVariant
+                            }
                         }
 
                         Grid {
                             Layout.leftMargin: 24
+                            enabled: !vizStylePage.styleHasOwnColors
+                            opacity: enabled ? 1.0 : 0.3
                             columns: 20   // 40 swatches → exactly two full rows (944 px of the ~1024 available)
                             spacing: 16
 

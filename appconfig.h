@@ -69,7 +69,10 @@ class QJsonObject;
 //                      "screenName": "DISPLAY1" },
 //     "audioVisualizer": { "barCount": 24, "color": "#00DAF3",
 //                           "decaySpeed": 0.5, "peakHoldEnabled": true,
-//                           "paneOpacity": 1.0, "sensitivity": 0.5 },
+//                           "paneOpacity": 1.0, "sensitivity": 0.5,
+//                           "style": "topaz", "spectrumSource": "topaz",
+//                           "gradientScheme": "hifi", "gradientShift": 0.3,
+//                           "scopeAutoLevel": true, "scopeSize": 0.7 },
 //     "audioVisualizerPane": { "x": 100, "y": 100, "width": 500, "height": 260,
 //                              "screenName": "DISPLAY1" },
 //     "audioMeter": { "style": "hifi90s", "peakHoldEnabled": true, "paneOpacity": 1.0 },
@@ -240,7 +243,7 @@ class AppConfig : public QObject
     Q_PROPERTY(double  audioVisualizerDecaySpeed    READ audioVisualizerDecaySpeed     NOTIFY audioVisualizerChanged)
     // Gain offset applied before dB normalization — 0.5 is "no change" (today's
     // default response); 1.0 boosts by +18dB, 0.0 cuts by -18dB. See
-    // AudioVisualizerController::processBlock.
+    // AudioVisualizerController::applySpectrum.
     Q_PROPERTY(double  audioVisualizerSensitivity   READ audioVisualizerSensitivity    NOTIFY audioVisualizerChanged)
     Q_PROPERTY(bool    audioVisualizerPeakHoldEnabled READ audioVisualizerPeakHoldEnabled NOTIFY audioVisualizerChanged)
     // Background-only opacity for the pane window itself (Window.color alpha) —
@@ -250,6 +253,24 @@ class AppConfig : public QObject
     // Foreground-only opacity for the bars/peak ticks themselves, independent
     // of audioVisualizerPaneOpacity above. See AudioVisualizerWindow.qml.
     Q_PROPERTY(double  audioVisualizerBarOpacity      READ audioVisualizerBarOpacity     NOTIFY audioVisualizerChanged)
+    // Look of the bars: "topaz" (default, the original look), "led",
+    // "gradient", "line", "radial", "scope". Unknown/missing values (incl. the
+    // removed "mirrored") read as "topaz". See AudioVisualizerView.qml.
+    Q_PROPERTY(QString audioVisualizerStyle           READ audioVisualizerStyle          NOTIFY audioVisualizerChanged)
+    // Where the spectrum comes from: "topaz" (default, own KissFFT analysis)
+    // or "bass" (BASS's built-in FFT -- only in effect while BASS is the
+    // active engine, otherwise Topaz's analysis is used and the choice kept).
+    Q_PROPERTY(QString audioVisualizerSpectrumSource  READ audioVisualizerSpectrumSource NOTIFY audioVisualizerChanged)
+    // GRADIENT style only: colour scheme "hifi" (default, the Audio Meter's
+    // classic green/yellow/orange/red) or "topaz" (the meter's Topaz colours),
+    // and Colour Shift 0..1 -- how early the warm colours start: 0.3 (default)
+    // is the original gradient, higher reaches orange/red at lower bars.
+    Q_PROPERTY(QString audioVisualizerGradientScheme  READ audioVisualizerGradientScheme NOTIFY audioVisualizerChanged)
+    Q_PROPERTY(double  audioVisualizerGradientShift   READ audioVisualizerGradientShift  NOTIFY audioVisualizerChanged)
+    // SCOPE style: Auto Level (follow the music's peaks) + Size (0.1..2.0,
+    // peak height relative to the music's peaks / to full scale when off).
+    Q_PROPERTY(bool    audioVisualizerScopeAutoLevel  READ audioVisualizerScopeAutoLevel NOTIFY audioVisualizerChanged)
+    Q_PROPERTY(double  audioVisualizerScopeSize       READ audioVisualizerScopeSize      NOTIFY audioVisualizerChanged)
 
     // ── Detachable "audio visualizer" pane geometry (see FloatingPane.qml / AudioVisualizerWindow.qml) ──
     // Same READ-only + Q_INVOKABLE-setter convention as bigCoverPane/tagInfoPane above.
@@ -362,6 +383,12 @@ public:
     bool    audioVisualizerPeakHoldEnabled()  const { return m_audioVisualizerPeakHoldEnabled;  }
     double  audioVisualizerPaneOpacity()      const { return m_audioVisualizerPaneOpacity;      }
     double  audioVisualizerBarOpacity()       const { return m_audioVisualizerBarOpacity;       }
+    QString audioVisualizerStyle()            const { return m_audioVisualizerStyle;            }
+    QString audioVisualizerSpectrumSource()   const { return m_audioVisualizerSpectrumSource;   }
+    QString audioVisualizerGradientScheme()   const { return m_audioVisualizerGradientScheme;   }
+    double  audioVisualizerGradientShift()    const { return m_audioVisualizerGradientShift;    }
+    bool    audioVisualizerScopeAutoLevel()   const { return m_audioVisualizerScopeAutoLevel;   }
+    double  audioVisualizerScopeSize()        const { return m_audioVisualizerScopeSize;        }
 
     bool audioVisualizerPaneConfigured() const { return m_audioVisualizerPaneConfigured; }
     int  audioVisualizerPaneX()          const { return m_audioVisualizerPaneX;          }
@@ -549,6 +576,12 @@ public:
     // Foreground-only bar opacity; clamped to [0.0, 1.0]. Independent of
     // setAudioVisualizerPaneOpacity above — see AudioVisualizerWindow.qml.
     Q_INVOKABLE void setAudioVisualizerBarOpacity(double opacity);
+    Q_INVOKABLE void setAudioVisualizerStyle(const QString &style);
+    Q_INVOKABLE void setAudioVisualizerSpectrumSource(const QString &source);
+    Q_INVOKABLE void setAudioVisualizerGradientScheme(const QString &scheme);
+    Q_INVOKABLE void setAudioVisualizerGradientShift(double shift);
+    Q_INVOKABLE void setAudioVisualizerScopeAutoLevel(bool on);
+    Q_INVOKABLE void setAudioVisualizerScopeSize(double size);
 
     // ── Audio visualizer pane geometry ───────────────────────────────────
     // Same calling convention as saveBigCoverPaneGeometry above.
@@ -724,6 +757,12 @@ private:
     bool    m_audioVisualizerPeakHoldEnabled = true;
     double  m_audioVisualizerPaneOpacity     = 1.0;
     double  m_audioVisualizerBarOpacity      = 1.0;
+    QString m_audioVisualizerStyle           = QStringLiteral("topaz");
+    QString m_audioVisualizerSpectrumSource  = QStringLiteral("topaz");
+    QString m_audioVisualizerGradientScheme  = QStringLiteral("hifi");
+    double  m_audioVisualizerGradientShift   = 0.3;
+    bool    m_audioVisualizerScopeAutoLevel  = true;
+    double  m_audioVisualizerScopeSize       = 0.7;
 
     bool    m_audioVisualizerPaneConfigured = false;
     int     m_audioVisualizerPaneX          = 0;

@@ -48,6 +48,11 @@ inline constexpr BASS_DWORD BASS_SYNC_END       = 2;
 // float samples regardless of the stream's own native format. See UC-15
 // "Step 3" / BassAudioDeck's buffer tap.
 inline constexpr BASS_DWORD BASS_DATA_FLOAT     = 0x40000000u;
+// Passed as BASS_ChannelGetData()'s length: returns a 1024-sample FFT of what
+// the channel is playing right now -- 512 float magnitudes, Hann-windowed,
+// all channels combined. The Audio Visualizer's optional BASS spectrum
+// source (UC-19), same resolution as its own KissFFT path (kFftSize 1024).
+inline constexpr BASS_DWORD BASS_DATA_FFT1024   = 0x80000002u;
 // Stream-creation flags (bass.h). Auto Loudness Correction's analysis pass
 // (loudnessanalyzer.cpp) opens the file as a DECODE stream: nothing is played,
 // no output device is involved, and the file is only ever read.

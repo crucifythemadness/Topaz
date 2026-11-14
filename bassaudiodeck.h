@@ -81,6 +81,13 @@ public:
     // is actually heard). false when not playing or the export is missing.
     bool readLevels(DeckLevels &out) const override;
 
+    // Audio Visualizer (UC-19): BASS_ChannelGetData(BASS_DATA_FFT1024) on the
+    // playing stream -- read from the playback buffer, consumes nothing.
+    bool readSpectrum(float *mags, int &sampleRate, float &weight) const override;
+    // SCOPE style: BASS_ChannelGetData(... | BASS_DATA_FLOAT) on the playing
+    // stream (playback buffer, consumes nothing), mixed to mono.
+    bool readWaveform(float *mono, int n, float &weight) const override;
+
 private:
     // Writes m_fadeVolume x linear(m_gainDbCurrent) to BASS_ATTRIB_VOL.
     void applyVolume();

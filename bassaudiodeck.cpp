@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QMetaObject>
 #include <QTimer>
+#include <QVarLengthArray>
 
 #include <cmath>
 #include <string>
@@ -187,6 +188,45 @@ bool BassAudioDeck::readLevels(DeckLevels &out) const
         return false;
     out.peakL = peak[0]; out.peakR = peak[1];
     out.rmsL  = rms[0];  out.rmsR  = rms[1];
+    return true;
+}
+
+bool BassAudioDeck::readSpectrum(float *mags, int &sampleRate, float &weight) const
+{
+    auto &bass = BassLibrary::instance();
+    if (!m_stream || m_streamFreq == 0 || !isPlaying()) return false;
+
+    // Like readLevels(): a playing (non-decode) channel's FFT is taken from
+    // its playback buffer (what is about to be heard), consuming nothing.
+    const BASS_DWORD got = bass.BASS_ChannelGetData(m_stream, mags, BASS_DATA_FFT1024);
+    if (got == static_cast<BASS_DWORD>(-1) || got == 0) return false;
+    sampleRate = static_cast<int>(m_streamFreq);
+    weight     = m_fadeVolume;
+    return true;
+}
+
+bool BassAudioDeck::readWaveform(float *mono, int n, float &weight) const
+{
+    auto &bass = BassLibrary::instance();
+    if (!m_stream || m_streamChans == 0 || n <= 0 || !isPlaying()) return false;
+
+    const int chans = static_cast<int>(m_streamChans);
+    QVarLengthArray<float, 4096> buf(n * chans);
+    const BASS_DWORD want = static_cast<BASS_DWORD>(buf.size() * sizeof(float));
+    const BASS_DWORD got  = bass.BASS_ChannelGetData(m_stream, buf.data(), want | BASS_DATA_FLOAT);
+    if (got == static_cast<BASS_DWORD>(-1) || got == 0) return false;
+
+    // Fewer frames than asked (right after play()): right-align them so the
+    // newest samples stay at the end, zeros before.
+    const int frames = static_cast<int>(got / (sizeof(float) * chans));
+    const int pad = n - frames;
+    for (int i = 0; i < pad; ++i) mono[i] = 0.0f;
+    for (int f = 0; f < frames; ++f) {
+        float sum = 0.0f;
+        for (int c = 0; c < chans; ++c) sum += buf[f * chans + c];
+        mono[pad + f] = sum / float(chans);
+    }
+    weight = m_fadeVolume;
     return true;
 }
 

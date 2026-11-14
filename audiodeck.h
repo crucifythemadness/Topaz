@@ -74,6 +74,22 @@ public:
     // path). BassAudioDeck answers via BASS_ChannelGetLevelEx() while playing.
     virtual bool readLevels(DeckLevels &out) const { Q_UNUSED(out) return false; }
 
+    // Audio Visualizer (UC-19), optional "BASS" spectrum source: a 1024-point
+    // FFT of what the deck is playing right now -- kSpectrumBins magnitudes
+    // into mags, the stream's sample rate, and the deck's crossfade level
+    // (0..1, pre loudness gain) as weight. Default: false = "can't" (FFmpeg);
+    // AudioVisualizerController then uses its own KissFFT analysis.
+    static constexpr int kSpectrumBins = 512;
+    virtual bool readSpectrum(float *mags, int &sampleRate, float &weight) const
+    { Q_UNUSED(mags) Q_UNUSED(sampleRate) Q_UNUSED(weight) return false; }
+
+    // Audio Visualizer SCOPE style with the BASS source: the newest n mono
+    // samples of what the deck is playing right now (-1..1) plus its crossfade
+    // level as weight. Default: false (FFmpeg -- the controller then uses its
+    // own ring buffer from the PCM tap).
+    virtual bool readWaveform(float *mono, int n, float &weight) const
+    { Q_UNUSED(mono) Q_UNUSED(n) Q_UNUSED(weight) return false; }
+
 signals:
     // Fired whenever position advances during playback (poll-driven for
     // BassAudioDeck, native for FfmpegAudioDeck) -- drives both

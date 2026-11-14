@@ -9,6 +9,7 @@
 
 #include <QCursor>
 #include <QFileInfo>
+#include <QVarLengthArray>
 #include <cmath>
 #include <QGuiApplication>
 #include <QUrl>
@@ -176,6 +177,53 @@ bool PlaybackEngine::readDeckLevels(DeckLevels &out) const
     out.peakL = std::sqrt(pl); out.peakR = std::sqrt(pr);
     out.rmsL  = std::sqrt(rl); out.rmsR  = std::sqrt(rr);
     return true;
+}
+
+bool PlaybackEngine::spectrumFromBackend() const
+{
+    return m_decks[0] && qobject_cast<BassAudioDeck *>(m_decks[0])
+        && BassLibrary::instance().isLoaded();
+}
+
+bool PlaybackEngine::readDeckSpectrum(QVector<float> &mags, int &sampleRate) const
+{
+    constexpr int kBins = AudioDeck::kSpectrumBins;
+    float deckMags[kBins];
+    float sumSq[kBins] = {};
+    bool any = false;
+    float bestWeight = -1.0f;
+    for (AudioDeck *deck : m_decks) {
+        int sr = 0;
+        float w = 0.0f;
+        if (!deck || !deck->readSpectrum(deckMags, sr, w)) continue;
+        // During a crossfade the two tracks may have different rates (BASS
+        // plays each file at its own, e.g. 44.1 vs 48 kHz): the bins are
+        // mapped with the rate of the louder deck.
+        if (w > bestWeight) { bestWeight = w; sampleRate = sr; }
+        any = true;
+        for (int k = 0; k < kBins; ++k) {
+            const float m = deckMags[k] * w;
+            sumSq[k] += m * m;
+        }
+    }
+    if (!any) return false;
+    mags.resize(kBins);
+    for (int k = 0; k < kBins; ++k) mags[k] = std::sqrt(sumSq[k]);
+    return true;
+}
+
+bool PlaybackEngine::readDeckWaveform(float *mono, int n) const
+{
+    QVarLengthArray<float, 2048> deckSamples(n);
+    bool any = false;
+    for (int i = 0; i < n; ++i) mono[i] = 0.0f;
+    for (AudioDeck *deck : m_decks) {
+        float w = 0.0f;
+        if (!deck || !deck->readWaveform(deckSamples.data(), n, w)) continue;
+        any = true;
+        for (int i = 0; i < n; ++i) mono[i] += deckSamples[i] * w;
+    }
+    return any;
 }
 
 // ── QAbstractListModel ────────────────────────────────────────────────────

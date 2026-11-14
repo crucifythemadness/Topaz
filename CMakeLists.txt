@@ -142,6 +142,10 @@ qt_add_executable(topaz
     hiresaudiologo.cpp
     audiovisualizercontroller.h
     audiovisualizercontroller.cpp
+    vizstyleimageprovider.h
+    vizstyleimageprovider.cpp
+    visualizershapeitem.h
+    visualizershapeitem.cpp
     audiometercontroller.h
     audiometercontroller.cpp
     milkdropview.h
