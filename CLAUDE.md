@@ -30,6 +30,8 @@ every change.
 **Also once per release, before the Release build:** `powershell -ExecutionPolicy Bypass -File
 tools/count-loc.ps1` rewrites the tracked `codestats.h` (non-blank lines of Topaz code + of the
 vendored `third_party/` code), which the About dialog's TOPAZ tab shows. Commit it with the release.
+Run it **after the last code change** (in 1.2.0 it ran before the About-dialog edit itself and had
+to be redone, with a second Release + Linux build).
 
 ## Build
 

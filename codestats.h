@@ -2,5 +2,5 @@
 // Non-blank lines of code, shown in the About dialog (BuildInfo::topazLines / thirdPartyLines).
 #pragma once
 
-#define TOPAZ_CODE_LINES        35095   // 131 files: C++, QML, CMake, scripts
+#define TOPAZ_CODE_LINES        35157   // 131 files: C++, QML, CMake, scripts
 #define TOPAZ_THIRD_PARTY_LINES 8921   // 8 files: KISS FFT + miniz (third_party/)
