@@ -39,12 +39,14 @@ and let it play — simple enough for a party, detailed enough for critical list
 - **Ratings** (1–10 stars) that survive a library rebuild
 - **AUTO PLAY**: keeps the music going on its own, picking tracks by your rules
 - **Crossfades** and **Auto Loudness Correction**
-- An **audio visualizer** and **Milkdrop** visuals (via projectM)
-- **Detachable panes** (big cover, visuals, tag information) for a second screen, and a
-  full-screen mode
+- An **audio visualizer** in six styles, a 90s HiFi **Audio Meter**, and **Milkdrop** visuals
+  (via projectM)
+- **Detachable panes** (big cover, visuals, meter, tag information) for a second screen — or
+  **docked** into the main window around the queue and Now Playing — and a full-screen mode
 - **Backup and restore** of all settings, ratings and playlists in a single file
 - **Never changes your music files** — everything Topaz remembers lives in its own folder
-- **Portable**: no installer, runs from any folder or USB stick
+- **Windows installer** with one-click updates, or **portable**: runs from any folder or USB
+  stick
 
 The full manual is the **[Topaz User Guide](docs/Topaz%20User%20Guide.md)**. It is also
 included as a PDF in every download.
@@ -55,8 +57,9 @@ Get the latest version from the **[Releases page](https://github.com/crucifythem
 
 | Platform | File |
 |---|---|
-| Windows 10/11 (64-bit) | `Topaz-1.1.0-Windows-x64.7z` |
-| Linux (64-bit, x86_64) | `Topaz-1.1.0-Linux-x64.7z` |
+| Windows 10/11 (64-bit) — installer | `Topaz-1.2.0-setup.exe` |
+| Windows 10/11 (64-bit) — portable | `Topaz-1.2.0-Windows-x64.7z` |
+| Linux (64-bit, x86_64) | `Topaz-1.2.0-Linux-x64.7z` |
 
 ## Windows
 
@@ -69,16 +72,24 @@ Get the latest version from the **[Releases page](https://github.com/crucifythem
 
 ### Installation
 
-Topaz needs no installer.
+**With the installer (recommended):** download and run `Topaz-1.2.0-setup.exe`. It installs
+for your user account without administrator rights (or for all users, if you choose so) into
+`%LOCALAPPDATA%\Programs\Topaz`, and adds Topaz and the User Guide to the Start menu.
+**To update**, simply run the setup of the newer version — it finds the installation, closes
+Topaz if it is running and replaces the program files. Uninstall via Windows Settings → Apps.
 
-1. Download `Topaz-1.1.0-Windows-x64.7z`.
+**Portable, without installer:**
+
+1. Download `Topaz-1.2.0-Windows-x64.7z`.
 2. Unpack it to any folder you like — your hard disk, another drive or a USB stick.
    Windows 11 can open `.7z` files directly (right-click → **Extract All**). On Windows 10,
    use the free [7-Zip](https://www.7-zip.org/).
 3. Double-click **`Topaz.exe`**.
 
-To remove Topaz, delete its folder. Your settings stay in `%LOCALAPPDATA%\Topaz\`; delete
-that folder too if you want them gone.
+To remove the portable version, delete its folder.
+
+Either way, your settings, library, playlists and ratings stay in `%LOCALAPPDATA%\Topaz\` —
+updates and uninstalling never touch them; delete that folder too if you want them gone.
 
 > **"Windows protected your PC"?** Topaz is not digitally signed, so Microsoft Defender
 > SmartScreen may warn you on the first start. Click **More info → Run anyway**.
@@ -104,11 +115,11 @@ else.
 
 ### Installation
 
-1. Download `Topaz-1.1.0-Linux-x64.7z` and unpack it to any folder in your home directory:
+1. Download `Topaz-1.2.0-Linux-x64.7z` and unpack it to any folder in your home directory:
 
    ```sh
    sudo apt install 7zip        # Ubuntu/Mint/Debian; on older releases: p7zip-full
-   7z x Topaz-1.1.0-Linux-x64.7z
+   7z x Topaz-1.2.0-Linux-x64.7z
    ```
 
 2. Make the start scripts executable (7-Zip archives don't keep Linux file permissions):

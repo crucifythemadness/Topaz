@@ -1,39 +1,39 @@
 # Topaz User Guide
 
-**Topaz Jukebox — Version 1.1.0** · for Windows 10/11 and Linux
+**Topaz Jukebox — Version 1.2.0** · for Windows 10/11 and Linux
 
 ![Topaz with a playlist playing](images/main-window.png)
 
 Topaz is a desktop jukebox for your own music collection. It plays **FLAC, MP3 and Opus**
 files, organizes them by **Genre → Artist → Album**, plays them from a **queue**, and keeps
 **playlists** in the open XSPF format. On top of that it offers ratings, an automatic
-**AUTO PLAY** mode, crossfades, loudness correction, a bar visualizer, **Milkdrop**
-visuals, and detachable panes for a second screen.
+**AUTO PLAY** mode, crossfades, loudness correction, an audio visualizer with six styles, a
+90s HiFi **Audio Meter**, **Milkdrop** visuals, and panes that float on a second screen or
+dock into the main window.
 
-This guide explains everything you can do with Topaz 1.1.0, step by step. The screenshots
-were taken with Topaz 1.1.0 on Windows; on Linux Topaz looks the same apart from fonts and
+This guide explains everything you can do with Topaz 1.2.0, step by step. The screenshots
+were taken with Topaz 1.2.0 on Windows; on Linux Topaz looks the same apart from fonts and
 the window frame.
 
 | Document history | |
 |---|---|
 | October 2026 | First edition, for Topaz 1.0.0 |
-| October 2026 | Second edition, for Topaz 1.1.0 — see [What is new in this version](#what-is-new-in-this-version) |
+| October 2026 | Second edition, for Topaz 1.1.0 |
+| November 2026 | Third edition, for Topaz 1.2.0 — see [What is new in this version](#what-is-new-in-this-version) |
 
 ### What is new in this version
 
-- **Let Topaz find your genres:** Setup → GENRES → **SCAN FOLDERS** lists every genre in your
-  music folders; pick the ones you want. Up to 48 genres and 40 genre buttons.
-- **Always measure** loudness instead of trusting ReplayGain / R128 tags (Audiophile loudness
-  correction).
-- **Create M3U Playlist** when exporting — for car stereos that read playlist files.
-- **VBR / CBR** shown for MP3s in NowPlaying, with the correct average bitrate for VBR files.
-- **Modify the Rating …** (Setup → MISC) can now lock your ratings against accidental clicks.
-- **Redesigned** Play/Pause, Previous and Next buttons.
-- **Panel sizes** are remembered separately for the window and for full screen.
-- **Fine-tune a pane's position** with the arrow keys.
-
-The first start of 1.1.0 re-reads your MP3 files once in the background (for the bitrate
-information); the library stays usable meanwhile.
+- **Windows installer:** install and update Topaz with `Topaz-1.2.0-setup.exe` — no
+  administrator rights needed.
+- **New look:** a neon "TOPAZ JUKEBOX" top bar with new icons, a new app icon, restyled genre
+  buttons, and a reworked About dialog.
+- **Full screen with the mouse:** a full screen button in the top bar; in full screen also
+  minimize and close.
+- **Audio Meter:** a 90s HiFi level meter with peak hold and an OVER lamp.
+- **Audio visualizer styles:** TOPAZ, LED, GRADIENT, LINE, RADIAL and SCOPE, plus 40 colours.
+- **Docking panes:** the Audio Meter, the audio visualizer and Milkdrop can be docked above or
+  below the queue and Now Playing.
+- **Playlist buttons** are now a pane of their own that you can move to another place.
 
 ---
 
@@ -60,15 +60,33 @@ information); the library stays usable meanwhile.
 
 ## Getting Topaz running
 
-Topaz needs no installer. It comes as a folder that you copy anywhere you like — your
-hard disk, another drive, or a USB stick — and start from there.
+On Windows, Topaz comes with an installer. It is also available as a folder that you copy
+anywhere you like — your hard disk, another drive, or a USB stick — and start from there
+(Windows and Linux).
 
 ### Windows
 
-1. Copy the Topaz folder to any location.
-2. Double-click **`Topaz.exe`**.
+**With the installer (recommended):**
 
-That's all. Everything Topaz needs is inside the folder.
+1. Run **`Topaz-1.2.0-setup.exe`**.
+2. Choose **Install for me only** (no administrator rights needed) or **Install for all users**
+   (Windows asks for administrator rights), accept the license, and optionally tick **Create a
+   desktop shortcut**.
+3. Start Topaz from the Start menu. The entry **Topaz User Guide** opens this guide.
+
+![The installer asks who Topaz is installed for](images/installer-mode.png)
+
+![The installer's additional tasks](images/installer-tasks.png)
+
+Topaz is installed in `%LOCALAPPDATA%\Programs\Topaz` (for all users: `C:\Program
+Files\Topaz`). To find the folder, right-click the Start menu entry → **Open file location**.
+
+**Updating:** simply run the setup of the newer version. It finds your installation, closes
+Topaz if it is running, and replaces the program files. Your library, playlists, ratings and
+settings are kept — also when you uninstall Topaz (Windows Settings → Apps).
+
+**Without installer:** unpack the 7z archive to any location and double-click
+**`Topaz.exe`**. Everything Topaz needs is inside the folder.
 
 ### Linux
 
@@ -85,7 +103,8 @@ Linux Mint 22 (Cinnamon, X11) and Ubuntu Studio.
 
 Topaz works out of the box. Three optional add-ons unlock extra features. They are **not
 included** for licensing reasons — download them yourself and place them **next to
-`Topaz.exe`** (Windows) or **next to `topaz-bin`** (Linux).
+`Topaz.exe`** (Windows: the installation folder, see above) or **next to `topaz-bin`**
+(Linux). They stay there when you update Topaz with the installer.
 
 | Add-on | Files | What it unlocks |
 |---|---|---|
@@ -119,8 +138,8 @@ genres you want to see.
 
 ![Topaz on its first start](images/first-start.png)
 
-Setting it up takes three steps, all in the **Setup** dialog. Open it with the **gear icon
-⚙** in the top-right corner.
+Setting it up takes three steps, all in the **Setup** dialog. Open it with the **gear icon**
+in the top-right corner.
 
 ### Step 1: add your music folders
 
@@ -204,16 +223,16 @@ Your library is now ready. Click a genre button to see it.
 | # | Area | What it is for |
 |---|---|---|
 | 1 | **LIBRARY · SEARCH · PLAYLISTS** | Switch between browsing, searching and playlists. The left two panels change; the queue and NowPlaying stay. |
-| 2 | **Speaker · gear · ⓘ** | System volume and mute · Setup · About Topaz |
-| 3 | **Genre bar** | One button per genre. Lit buttons are active. |
+| 2 | **Speaker · gear · info · full screen** | System volume and mute (the thin ring around the speaker shows the current volume) · Setup · About Topaz · switch between full screen and window (same as **F11**). In full screen, **minimize** and **close (✕)** follow. |
+| 3 | **Genre bar** | One button per genre. A switched-on genre has a teal frame and a bold teal name. |
 | 4 | **Library tree** | Genre → Artist → Album, for narrowing down what the Album Browser shows |
 | 5 | **Album Browser** | Album cards with cover, year and all tracks |
 | 6 | **Queue** | What plays next |
 | 7 | **NowPlaying** | Cover, title, artist and genre of the current track. Click the cover for the Big Cover pane. |
 | 8 | **Format · rating** | File format and bitrate (plus the loudness correction, when used) · your rating, 1–10 stars. For MP3s the bitrate says **VBR** (variable — the average is shown) or **CBR** (constant), for example `MP3 \| VBR 182 KBPS`. |
 | 9 | **Seek bar and transport** | Elapsed/total time, seek, Previous · Play/Pause · Next |
-| 10 | **Playlist buttons** | + NEW · LOAD · EXPORT · REMOVE |
-| 11 | **Bottom bar** | AUTO PLAY · AUDIO VISUALIZER · MILKDROP · TAG INFORMATION · SCAN FOLDERS |
+| 10 | **Playlist buttons** | NEW · LOAD · EXPORT · REMOVE, with the name of the loaded playlist. A pane of its own that can be moved (see [Docking panes](#docking-panes)). |
+| 11 | **Bottom bar** | AUTO PLAY · AUDIO VISUALIZER · AUDIO METER · MILKDROP · TAG INFORMATION · SCAN FOLDERS |
 
 ### Adjusting the layout
 
@@ -224,6 +243,50 @@ Your library is now ready. Click a genre button to see it.
   The panel widths are remembered **separately** for the normal window and for full screen
   (**F11**): each mode gets back the sizes you last used in it. The first time you use full
   screen, the panels keep their current sizes until you adjust them.
+- **Free space above and below the queue and Now Playing:** drag the thin strip at the top or
+  bottom edge of the queue (or of Now Playing) to make it shorter. The freed area shows a faint
+  **FREE SPACE** placeholder; a pane docked there takes it over (see below). Dragging the strip
+  back to the edge removes the area again. While all places of a column are taken, there is no
+  free space there. Empty free space is gone after a restart. When Now Playing gets shorter,
+  its content can be scrolled.
+
+### Docking panes
+
+The **Audio Meter**, the **audio visualizer** and **Milkdrop** can float as separate windows
+(see [Detachable panes and full screen](#detachable-panes-and-full-screen)) or be **docked**
+into the main window: **up to 4 panes around the queue** (any mix above and below it) and **up
+to 3 around Now Playing** (the playlist buttons count as one of them).
+
+![Panes docked around the queue and Now Playing](images/docked-panes.png)
+
+- **Docking:** hover over a floating pane and click one of the small buttons in its top-right
+  corner — **Dock above the queue**, **Dock below the queue**, **Dock above Now Playing** or
+  **Dock below Now Playing**. A button only shows while that place still has room, so on a
+  smaller screen you get fewer choices. A new pane is added at the outer edge; if that place
+  has free space, the pane takes it over.
+
+  ![The dock buttons of a floating pane](images/dock-buttons-floating.png)
+
+- **Hovering a docked pane** shows **Move up** / **Move down** (swap it with its neighbour in
+  the same place), **Float as a separate window** and **Close**. Right-click closes it too.
+  Closing or floating a pane leaves free space where it was.
+
+  ![The buttons of a docked pane](images/dock-buttons-docked.png)
+
+- **Height:** drag the strip between two panes. Each docked pane keeps its own height, also
+  when it is swapped. Clicking a docked pane shows a thin **turquoise frame** around it for a
+  few seconds; while you drag a strip, all docked panes of that column show their frame.
+- Closing a docked pane and opening it again with its bottom-bar button puts it back in the
+  same place. Docked panes come back docked, in the same order and size, at the next start
+  (sizes are remembered separately for the window and for full screen).
+- Docked Milkdrop has no F10 full screen and no double-click positions — float it again for
+  that.
+
+**The playlist buttons** (NEW, LOAD, EXPORT, REMOVE) are a pane too. They start directly
+below Now Playing, and they are always docked somewhere: they can't float or be closed. Hover
+over them to **move** them — **Move above / below the queue**, **Move above / below Now
+Playing** (only where there is room), or **Move up** / **Move down**. They come back where you
+left them after a restart.
 
 ---
 
@@ -318,7 +381,9 @@ trash bin can be clicked — useful at a party, or when others use Topaz. It is 
 ### System volume and mute
 
 The **speaker icon** in the top-right corner opens the volume knob. It controls your
-computer's **system volume** (not just Topaz).
+computer's **system volume** (not just Topaz). The thin ring around the speaker icon shows
+the current volume at a glance (dimmed when muted); its tooltip shows the value, for example
+"System volume: 60 %".
 
 ![The volume knob](images/volume-knob.png)
 
@@ -338,11 +403,13 @@ a different letter.
 ### Saving the queue as a playlist
 
 1. Fill the queue.
-2. Click **+ NEW** in NowPlaying, type a name and click **OK**.
+2. Click **NEW** in the playlist buttons (below Now Playing, unless you moved them), type a
+   name and click **OK**.
 
 ![Creating a new playlist](images/new-playlist.png)
 
-The playlist is now **active**: its name appears in the queue header.
+The playlist is now **active**: its name appears in the queue header and above the playlist
+buttons.
 
 ![The queue header with an active playlist](images/queue-playlist-header.png)
 
@@ -353,7 +420,7 @@ into the file.
 
 ### Loading a playlist
 
-- **LOAD** in NowPlaying opens a file picker in the playlists folder. A playlist from
+- **LOAD** in the playlist buttons opens a file picker in the playlists folder. A playlist from
   somewhere else (another computer, a USB stick) is first **copied into** Topaz's playlists
   folder, then loaded.
 - Loading **replaces the queue**. If something is playing and Crossfade is on, the current
@@ -394,7 +461,7 @@ Click **PLAYLISTS** in the top bar to browse all your playlists.
 Export copies all tracks of a playlist to another place — typically a **USB stick for the
 car** — with neatly numbered file names.
 
-Start it with **EXPORT** in NowPlaying (exports the playlist in the queue) or **EXPORT** in
+Start it with **EXPORT** in the playlist buttons (exports the playlist in the queue) or **EXPORT** in
 the PLAYLISTS tab (exports the previewed playlist).
 
 ![The Export Playlist dialog](images/export-dialog.png)
@@ -490,7 +557,7 @@ All of these are on the **PLAYBACK** tab of the Setup dialog.
 | Engine | |
 |---|---|
 | **FFmpeg** | Built in, needs nothing. The default. |
-| **BASS Audio Library** | Needs the BASS files (see [Optional extras](#optional-extras-you-can-add-yourself)). Required for Auto Loudness Correction and Replay Gain export. |
+| **BASS Audio Library** | Needs the BASS files (see [Optional extras](#optional-extras-you-can-add-yourself)). Required for Auto Loudness Correction and Replay Gain export. With BASS, the audio visualizer can also take its bars straight from BASS (Spectrum Analysis, see [AUDIO VISUALIZER](#audio-visualizer)). |
 
 Switching the engine takes effect **after restarting Topaz**; Topaz reminds you. "Currently
 active" shows the engine that is really running.
@@ -566,14 +633,16 @@ bar while a FLAC track is playing. The logo is a trademark and therefore not inc
 
 ## Detachable panes and full screen
 
-Four extra windows ("panes") can float anywhere — on the same screen or a second monitor —
-for example as a "now playing" display at a party.
+Five extra windows ("panes") can float anywhere — on the same screen or a second monitor —
+for example as a "now playing" display at a party. The Audio Visualizer, the Audio Meter and
+Milkdrop can also be docked into the main window (see [Docking panes](#docking-panes)).
 
 | Pane | Opens with | |
 |---|---|---|
 | **Big Cover** | a click on the cover in NowPlaying | ![Big Cover pane](images/pane-big-cover.png) |
 | **Tag Information** | **TAG INFORMATION** in the bottom bar | ![Tag Information pane](images/pane-tag-information.png) |
 | **Audio Visualizer** | **AUDIO VISUALIZER** in the bottom bar | ![Audio Visualizer pane](images/pane-audio-visualizer.png) |
+| **Audio Meter** | **AUDIO METER** in the bottom bar | ![Audio Meter pane](images/pane-audio-meter.png) |
 | **Milkdrop** | **MILKDROP** in the bottom bar | ![Milkdrop pane](images/pane-milkdrop.png) |
 
 Working with panes:
@@ -594,15 +663,49 @@ Working with panes:
 - **F10** switches the Milkdrop pane to full screen on the monitor it is on, and back.
 - Topaz remembers where each pane was, including on which monitor.
 
-The **Audio Visualizer** (bars) and **Milkdrop** are configured on their own Setup tabs — see
-the [Setup reference](#setup-reference). Milkdrop needs **preset files** (`.milk`, freely
-available on the internet); add the folder holding them on the MILKDROP tab. Milkdrop also
-needs a graphics driver with OpenGL 3.3 or newer.
+The **Audio Visualizer**, the **Audio Meter** and **Milkdrop** are configured on their own
+Setup tabs — see the [Setup reference](#setup-reference). Milkdrop needs **preset files**
+(`.milk`, freely available on the internet); add the folder holding them on the MILKDROP tab.
+Milkdrop also needs a graphics driver with OpenGL 3.3 or newer.
+
+### Audio Visualizer styles
+
+The audio visualizer shows the music in one of six **styles** (Setup → AUDIO VISUALIZER →
+STYLE & COLOR):
+
+| Style | Look |
+|---|---|
+| **TOPAZ** | The original bars (default) |
+| **LED** | Bars made of lit segments, like a 90s HiFi display |
+| **GRADIENT** | Bars running from green over yellow to red with their height |
+| **LINE** | A glowing spectrum curve with a soft fill below |
+| **RADIAL** | The bars arranged in a circle, mirrored left and right |
+| **SCOPE** | The waveform itself, like an oscilloscope |
+
+![The six audio visualizer styles](images/visualizer-styles.png)
+
+When the music is stopped or paused, the bars fall back to empty.
+
+### Audio Meter
+
+The Audio Meter is a level meter in a 90s HiFi look: two rows (left and right channel) of
+segments from green over yellow to orange, a digital dB scale from −50 to 0 dB (0 dB is the
+loudest level a track can contain), a **peak-hold** segment and a red **OVER** lamp that lights
+when a track reaches 0 dB. With the BASS Audio Library the levels come from BASS, otherwise
+Topaz measures them itself — shown small under the OVER lamp (**BASS** / **TOPAZ**).
+
+![The Audio Meter](images/pane-audio-meter.png)
 
 ### Full screen
 
-- **F11** switches the main window between full screen and a normal window. Each mode
-  remembers its own panel widths.
+- **F11** — or the **full screen button** at the right end of the top bar — switches the main
+  window between full screen and a normal window. Each mode remembers its own panel widths.
+- In full screen, two more buttons follow in the top bar: **minimize** and **close (✕)**
+  (red under the mouse). Restoring Topaz after minimizing it from full screen returns to full
+  screen.
+
+  ![The top bar in full screen, with minimize and close](images/topbar-fullscreen.png)
+
 - **Start Topaz in Full Screen** (Setup → MISC) starts Topaz that way, on the monitor it was
   last on.
 - In full screen the **mouse pointer hides** after 5 seconds without movement and comes back
@@ -644,7 +747,11 @@ See [AUTO PLAY settings](#auto-play-settings).
 
 ### AUDIO VISUALIZER
 
-![Setup → AUDIO VISUALIZER](images/setup-audio-visualizer.png)
+The tab has two pages, chosen with the switch at the top: **SETTINGS** and **STYLE & COLOR**.
+
+![Setup → AUDIO VISUALIZER → SETTINGS](images/setup-audio-visualizer.png)
+
+**SETTINGS**
 
 | Setting | Meaning |
 |---|---|
@@ -652,8 +759,33 @@ See [AUTO PLAY settings](#auto-play-settings).
 | **Decay Speed** | How fast the bars fall back |
 | **Sensitivity** | How strongly the bars react |
 | **Peak Hold** | Small markers that show each bar's recent peak |
-| **Pane Opacity** · **Bar Opacity** | Transparency of the pane background and of the bars — at low pane opacity the bars float over your desktop |
-| **Color** | Color of the bars |
+| **Pane Opacity** · **Bar Opacity** | Transparency of the pane background and of the bars — at low pane opacity the bars float over your desktop. Docked, the pane can only show Topaz's own background behind it, so the change is subtler. |
+| **Spectrum Analysis** | Only shown when BASS is the playback engine: **TOPAZ** (default) or **BASS** — with BASS the bars come straight from the BASS engine and follow the music more tightly. "Currently:" shows which one is working. |
+
+With the SCOPE style, Bar Count, Decay Speed, Sensitivity and Peak Hold are greyed out because
+they don't apply.
+
+![Setup → AUDIO VISUALIZER → STYLE & COLOR](images/setup-audio-visualizer-style.png)
+
+**STYLE & COLOR**
+
+| Setting | Meaning |
+|---|---|
+| **Style** | TOPAZ · LED · GRADIENT · LINE · RADIAL · SCOPE (see [Audio Visualizer styles](#audio-visualizer-styles)) |
+| **Color** | 40 colours for the bars (greyed out for GRADIENT, which uses its own colours) |
+| **Gradient Colours** · **Colour Shift** | GRADIENT only: **HIFI** or **TOPAZ** colours (the same two as the Audio Meter), and how soon the bars turn orange and red (GREEN … RED, 30 % = the original look) |
+| **Auto Level** · **Size** | SCOPE only: Auto Level ON (default) makes loud and quiet tracks show the same size; Size sets the height of the waveform (10–200 %, default 70 %). Very loud peaks round off softly at the edge. |
+
+### AUDIO METER
+
+![Setup → AUDIO METER](images/setup-audio-meter.png)
+
+| Setting | Meaning |
+|---|---|
+| **Style** | 90s HiFi (one style so far) |
+| **Colours** | **HIFI** (default — the classic green, yellow and orange) or **TOPAZ** (teal, violet and neon pink like the rest of Topaz; OVER stays red) |
+| **Peak Hold** | Keep the highest recent level lit for a moment |
+| **Pane Opacity** | How visible the meter's background is — the segments always stay fully visible |
 
 ### MILKDROP
 
@@ -718,10 +850,19 @@ for your FLAC collection and one for an MP3 collection.
 
 ### About Topaz
 
-The **ⓘ** icon in the top-right corner shows the version, the build date and some statistics
-about your library.
+The **info icon** in the top-right corner opens the About dialog, with three tabs:
+
+- **TOPAZ** — the version, the build date, some statistics about your library, and how many
+  lines of code Topaz has (its own code, and the code of the small libraries built into it).
+- **DEVELOPED BY** — who made Topaz and with which tools.
+- **POWERED BY** — the libraries and assets Topaz uses (Qt, FFmpeg, projectM, KISS FFT, GLEW,
+  miniz, BASS, Monoton), each on a card with what it does and its license. Click a card for a
+  details page (version, license, what it does in Topaz, copyright, links); **BACK** and
+  **NEXT** move between them.
 
 ![About Topaz](images/about.png)
+
+![About Topaz → POWERED BY](images/about-powered-by.png)
 
 ---
 
@@ -771,7 +912,7 @@ day.
 
 | Key | Action |
 |---|---|
-| **F11** | Main window: full screen on/off |
+| **F11** | Main window: full screen on/off (same as the full screen button in the top bar) |
 | **F10** | Milkdrop pane: full screen on/off |
 | **Enter** | Setup → GENRES: add the typed genre · New Playlist: OK · selected pane: end fine-tuning |
 | **Esc** | New Playlist: cancel · selected pane: end fine-tuning |
@@ -794,7 +935,10 @@ day.
 | Volume knob | drag / mouse wheel / click the speaker | set the system volume / mute |
 | Any pane | drag / drag the edges | move / resize |
 | Any pane | click | select it for fine-tuning with the arrow keys |
-| Any pane | right-click | close the pane |
+| Any pane | right-click | close the pane (not the playlist buttons) |
+| Floating pane — top-right buttons | click | dock it above/below the queue or Now Playing |
+| Docked pane — top-right buttons | click | move up / move down / float / close |
+| Strip between docked panes, or at the queue / Now Playing edge | drag | change heights, make free space |
 | Big Cover / Milkdrop pane | double-click | move across the screen |
 | Tag Information pane | double-click | full width on/off |
 | Panel dividers | drag | resize the panels |
