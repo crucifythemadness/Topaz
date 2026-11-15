@@ -91,34 +91,35 @@ ApplicationWindow {
         const np    = full ? appConfig.fullscreenNowPlayingWidth    : appConfig.nowPlayingWidth
         if (lib   > 0) libraryTreePanel.SplitView.preferredWidth   = lib
         if (queue > 0) queueColumn.SplitView.preferredWidth        = queue
-        if (np    > 0) nowPlayingPanel.SplitView.preferredWidth    = np
+        if (np    > 0) nowPlayingColumn.SplitView.preferredWidth   = np
 
         root.applyDockHeights(full)
     }
 
-    // The stored height of a free area for one mode (-1 = full screen never set).
-    function savedDockHeight(slot, full) {
-        return slot === "top"
-               ? (full ? appConfig.fullscreenQueueTopDockHeight    : appConfig.queueTopDockHeight)
-               : (full ? appConfig.fullscreenQueueBottomDockHeight : appConfig.queueBottomDockHeight)
+    // The stored height of a docked pane for one mode (-1 = not set yet).
+    function savedDockHeight(id, full) {
+        const h = appConfig.dockPaneHeights[id]
+        if (!h) return -1
+        return full ? h.fullscreen : h.window
     }
 
-    // Gives each area holding a docked pane the mode's stored height (if it
-    // fits the pane's minimum; else keeps the current height if that does,
-    // else the pane's default). Empty areas keep their current size during a
-    // session -- they only start collapsed (see the dock areas' preferredHeight).
+    // Gives each docked pane's slot the mode's stored height (if it fits the
+    // pane's minimum; else keeps the current height if that does, else the
+    // pane's default). Free areas keep their current size during a session --
+    // they only start collapsed (see the free areas' preferredHeight).
     function applyDockHeights(full) {
-        const slots = ["top", "bottom"]
-        for (let i = 0; i < slots.length; i++) {
-            const id = slots[i] === "top" ? root.dockTop : root.dockBottom
-            if (id === "") continue
-            const entry = root.dockablePanes[id]
-            const area  = root.dockArea(slots[i])
-            const saved = root.savedDockHeight(slots[i], full)
-            if (saved >= entry.minDockHeight)
-                area.SplitView.preferredHeight = saved
-            else if (area.SplitView.preferredHeight < entry.minDockHeight)
-                area.SplitView.preferredHeight = entry.defaultDockHeight
+        for (let z = 0; z < root.dockZoneKeys.length; z++) {
+            const zone  = root.dockZoneKeys[z]
+            const list  = root.dockZones[zone]
+            const slots = root.zoneSlots(zone)
+            for (let i = 0; i < list.length; i++) {
+                const entry = root.dockablePanes[list[i]]
+                const saved = root.savedDockHeight(list[i], full)
+                if (saved >= entry.minDockHeight)
+                    slots[i].SplitView.preferredHeight = saved
+                else if (slots[i].SplitView.preferredHeight < entry.minDockHeight)
+                    slots[i].SplitView.preferredHeight = entry.defaultDockHeight
+            }
         }
     }
 
@@ -378,8 +379,7 @@ ApplicationWindow {
     Loader {
         id: audioVisualizerLoader
         // Floating only while not docked (UC-38, see "Docking panes" below)
-        active: root.audioVisualizerPaneOpen
-                && root.dockTop !== "audioVisualizer" && root.dockBottom !== "audioVisualizer"
+        active: root.audioVisualizerPaneOpen && !root.isDocked("audioVisualizer")
         onLoaded: {
             if (item) {
                 item.engine           = engine
@@ -406,9 +406,8 @@ ApplicationWindow {
             onGeometrySettled: (x, y, width, height, screenName) =>
                 appConfig.saveAudioVisualizerPaneGeometry(x, y, width, height, screenName)
             onCloseRequested: root.closePane("audioVisualizer")
-            dockTopAvailable:    root.dockTop === ""
-            dockBottomAvailable: root.dockBottom === ""
-            onDockRequested: (slot) => root.dockPane("audioVisualizer", slot)
+            dockZones: root.availableZones("audioVisualizer")
+            onDockRequested: (zone) => root.dockPane("audioVisualizer", zone)
         }
     }
 
@@ -420,8 +419,7 @@ ApplicationWindow {
 
     Loader {
         id: audioMeterLoader
-        active: root.audioMeterPaneOpen
-                && root.dockTop !== "audioMeter" && root.dockBottom !== "audioMeter"
+        active: root.audioMeterPaneOpen && !root.isDocked("audioMeter")
         onLoaded: {
             if (item) {
                 item.meter       = audioMeter
@@ -447,9 +445,8 @@ ApplicationWindow {
             onGeometrySettled: (x, y, width, height, screenName) =>
                 appConfig.saveAudioMeterPaneGeometry(x, y, width, height, screenName)
             onCloseRequested: root.closePane("audioMeter")
-            dockTopAvailable:    root.dockTop === ""
-            dockBottomAvailable: root.dockBottom === ""
-            onDockRequested: (slot) => root.dockPane("audioMeter", slot)
+            dockZones: root.availableZones("audioMeter")
+            onDockRequested: (zone) => root.dockPane("audioMeter", zone)
         }
     }
 
@@ -464,8 +461,7 @@ ApplicationWindow {
 
     Loader {
         id: milkdropLoader
-        active: root.milkdropPaneOpen
-                && root.dockTop !== "milkdrop" && root.dockBottom !== "milkdrop"
+        active: root.milkdropPaneOpen && !root.isDocked("milkdrop")
         onLoaded: {
             if (item) {
                 item.engine         = engine
@@ -491,24 +487,30 @@ ApplicationWindow {
             onGeometrySettled: (x, y, width, height, screenName) =>
                 appConfig.saveMilkdropPaneGeometry(x, y, width, height, screenName)
             onCloseRequested: root.closePane("milkdrop")
-            dockTopAvailable:    root.dockTop === ""
-            dockBottomAvailable: root.dockBottom === ""
-            onDockRequested: (slot) => root.dockPane("milkdrop", slot)
+            dockZones: root.availableZones("milkdrop")
+            onDockRequested: (zone) => root.dockPane("milkdrop", zone)
         }
     }
 
-    // ── Docking panes into the queue column (UC-38) ──────────────────────
+    // ── Docking panes (UC-38) ────────────────────────────────────────────
     // A dockable pane is either floating (its own loader above, a
-    // FloatingPane window) or docked into one of the two free areas above /
-    // below the queue (queueTopDock / queueBottomDock, which load the pane's
-    // content view from this registry). Never both: each floating loader is
-    // active only while its pane is open AND not docked, so there is at most
-    // one instance (matters for Milkdrop's GL context / projectM).
+    // FloatingPane window) or docked into one of four zones: above / below
+    // the playback queue (queueColumn, together at most maxQueueDock panes)
+    // and above / below Now Playing (nowPlayingColumn, together at most
+    // maxNowPlayingDock).
+    // Each zone is a stack of static dock slots (QueueDockArea with
+    // dockHost/zone/slotIndex, which load the pane's content view from this
+    // registry) plus one free area. Never both floating and docked: each
+    // floating loader is active only while its pane is open AND not docked,
+    // so there is at most one instance (matters for Milkdrop's GL context /
+    // projectM).
     //
     // Registry: pane id -> content component + dock heights. The id is also
     // the prefix of the pane's open flag (root.<id>PaneOpen). A future
     // dockable pane = one entry here + a dock component + dock props on its
-    // floating loader.
+    // floating loader. `fixed` = always docked: no floating window, can't be
+    // closed or floated, only moved to another zone (moveDocked()); docked
+    // at startup if the saved zones don't contain it (restoreDockedPanes()).
     Component {
         id: audioMeterDockComponent
         Item {   // same 6 px margin as in AudioMeterWindow
@@ -524,93 +526,335 @@ ApplicationWindow {
         id: milkdropDockComponent
         MilkdropPaneView { playback: engine; milkdropConfig: appConfig }
     }
+    // NEW / LOAD / EXPORT / REMOVE. The LOAD dialog chain stays in NowPlaying
+    // (always alive -- this view is recreated on every swap / move).
+    Component {
+        id: playlistButtonsDockComponent
+        PlaylistButtonsView {
+            playback: engine
+            autoPlayController: autoPlay
+            onNewRequested:    newPlaylistDialog.open()
+            onLoadRequested:   nowPlayingPanel.openLoadPlaylist()
+            onExportRequested: root.openExportPlaylist()
+            onRemoveRequested: {
+                if (autoPlay) autoPlay.clearQueueAndHistory()
+                else engine.clearQueue()
+            }
+        }
+    }
     readonly property var dockablePanes: ({
         audioMeter:      { component: audioMeterDockComponent,      minDockHeight: 90,  defaultDockHeight: 140 },
         audioVisualizer: { component: audioVisualizerDockComponent, minDockHeight: 120, defaultDockHeight: 200 },
-        milkdrop:        { component: milkdropDockComponent,        minDockHeight: 160, defaultDockHeight: 260 }
+        milkdrop:        { component: milkdropDockComponent,        minDockHeight: 160, defaultDockHeight: 260 },
+        playlistButtons: { component: playlistButtonsDockComponent, minDockHeight: 118, defaultDockHeight: 132,
+                           fixed: true, home: "nowPlayingBottom" }
     })
+    // The playlist buttons pane is always open (fixed, see the registry).
+    property bool playlistButtonsPaneOpen: true
 
-    // Which pane is docked in each area ("" = empty). A pane counts as docked
-    // only while open: closing a docked pane empties its area.
-    property string dockTop: ""
-    property string dockBottom: ""
-    // Session memory: the area a pane was last docked in, so reopening it from
-    // the BottomBar puts it back there (if that area is free). Forgotten when
-    // the user floats the pane again.
-    property var lastDockSlot: ({})
-
-    function dockSlotOf(id) {
-        return root.dockTop === id ? "top" : root.dockBottom === id ? "bottom" : ""
+    function openExportPlaylist() {
+        exportPlaylistDialog.tracks = engine.trackList()
+        exportPlaylistDialog.playlistName = engine.activePlaylistName
+        exportPlaylistDialog.open()
     }
-    function dockArea(slot) { return slot === "top" ? queueTopDock : queueBottomDock }
 
-    // Dock pane `id` into `slot` ("top"/"bottom") and open it there. The slot
-    // is set BEFORE the open flag, so the floating loader never starts.
-    function dockPane(id, slot) {
+    readonly property var dockZoneKeys: ["queueTop", "queueBottom", "nowPlayingTop", "nowPlayingBottom"]
+    readonly property int maxQueueDock:      4   // above + below the queue together
+    readonly property int maxNowPlayingDock: 3   // above + below Now Playing (incl. the playlist buttons)
+    // The hosts' own minimum heights (PlaybackQueue / NowPlaying below), used
+    // by the "does one more pane fit?" check.
+    readonly property int queueMinHeight:      200
+    readonly property int nowPlayingMinHeight: 300
+    readonly property int dockHandleSize:      5     // the columns' SplitView handles
+
+    // The docked panes per zone, each list running from the host (queue /
+    // Now Playing) OUTWARDS: queueTop[0] / nowPlayingTop[0] sit directly above
+    // their host, queueBottom[0] / nowPlayingBottom[0] directly below it. A
+    // new pane is appended (= the outer edge), so the panes already docked
+    // keep their slot and aren't reloaded. A pane counts as docked only while
+    // open: closing a docked pane removes it. Always replaced as a whole
+    // (setZone()), never mutated in place, so every binding on it re-evaluates.
+    property var dockZones: ({ queueTop: [], queueBottom: [], nowPlayingTop: [], nowPlayingBottom: [] })
+    // Session memory: where a pane was last docked ({ zone, index }), so
+    // reopening it from the BottomBar puts it back there (if that zone still
+    // has room). Forgotten when the user floats the pane again.
+    property var lastDockZone: ({})
+
+    // The docked pane showing the selection outline (clicked last), like a
+    // floating pane's: set by QueueDockArea on a left press, cleared after
+    // 4 s (selectDockPane() restarts it), when the main window loses focus
+    // or when that pane leaves its slot.
+    property string selectedDockPane: ""
+    function selectDockPane(id) {
+        root.selectedDockPane = id
+        dockSelectTimer.restart()
+    }
+    Timer {
+        id: dockSelectTimer
+        interval: 4000
+        onTriggered: root.selectedDockPane = ""
+    }
+
+    function zoneSlots(zone) {
+        switch (zone) {
+        case "queueTop":      return [queueTopSlot0, queueTopSlot1, queueTopSlot2, queueTopSlot3]
+        case "queueBottom":   return [queueBottomSlot0, queueBottomSlot1, queueBottomSlot2, queueBottomSlot3]
+        case "nowPlayingTop": return [nowPlayingTopSlot0, nowPlayingTopSlot1, nowPlayingTopSlot2]
+        default:              return [nowPlayingBottomSlot0, nowPlayingBottomSlot1, nowPlayingBottomSlot2]
+        }
+    }
+    function zoneFree(zone) {
+        switch (zone) {
+        case "queueTop":      return queueTopFree
+        case "queueBottom":   return queueBottomFree
+        case "nowPlayingTop": return nowPlayingTopFree
+        default:              return nowPlayingBottomFree
+        }
+    }
+    function isNowPlayingZone(zone) { return zone.indexOf("nowPlaying") === 0 }
+    // Both zones of `zone`'s column (they share the column's capacity + room).
+    function columnZones(zone) {
+        return root.isNowPlayingZone(zone) ? ["nowPlayingTop", "nowPlayingBottom"] : ["queueTop", "queueBottom"]
+    }
+    // Places left in `zone`'s column; `exceptId` (a pane being moved) doesn't count.
+    function zoneCapacityLeft(zone, exceptId) {
+        const zones = root.columnZones(zone)
+        let n = 0
+        for (let z = 0; z < zones.length; z++) {
+            const list = root.dockZones[zones[z]]
+            for (let i = 0; i < list.length; i++) if (list[i] !== exceptId) n++
+        }
+        return (root.isNowPlayingZone(zone) ? root.maxNowPlayingDock : root.maxQueueDock) - n
+    }
+    function dockZoneOf(id) {
+        for (let z = 0; z < root.dockZoneKeys.length; z++)
+            if (root.dockZones[root.dockZoneKeys[z]].indexOf(id) >= 0) return root.dockZoneKeys[z]
+        return ""
+    }
+    function isDocked(id) { return root.dockZoneOf(id) !== "" }
+
+    // Does pane `id` still fit into `zone`'s column? Column height minus the
+    // host's minimum, every docked pane's minimum and the handles must leave
+    // at least the pane's own minimum -- so on a smaller screen the dock
+    // buttons simply disappear before a layout could break.
+    // `exceptId` (a pane being moved within the column) is left out.
+    function columnRoomFor(id, zone, exceptId) {
+        const entry  = root.dockablePanes[id]
+        const np     = root.isNowPlayingZone(zone)
+        const column = np ? nowPlayingColumn : queueColumn
+        const zones  = root.columnZones(zone)
+        let used    = np ? root.nowPlayingMinHeight : root.queueMinHeight
+        let handles = 2                                   // the host's + the new pane's
+        for (let z = 0; z < zones.length; z++) {
+            const list = root.dockZones[zones[z]]
+            for (let i = 0; i < list.length; i++) {
+                if (list[i] === exceptId) continue
+                used += root.dockablePanes[list[i]].minDockHeight
+                handles++
+            }
+        }
+        return column.height - used - handles * root.dockHandleSize >= entry.minDockHeight
+    }
+    function canDock(id, zone) {
+        return root.dockablePanes[id] !== undefined && !root.isDocked(id)
+               && root.zoneCapacityLeft(zone) > 0 && root.columnRoomFor(id, zone)
+    }
+    // The zones a floating pane offers dock buttons for right now.
+    function availableZones(id) {
+        return root.dockZoneKeys.filter(z => root.canDock(id, z))
+    }
+    // Can docked pane `id` move to another zone (the fixed panes' move buttons)?
+    function canMoveTo(id, zone) {
+        const current = root.dockZoneOf(id)
+        if (current === "" || current === zone) return false
+        return root.zoneCapacityLeft(zone, id) > 0 && root.columnRoomFor(id, zone, id)
+    }
+
+    // Height a new pane may take in `zone`'s column without pushing the host
+    // below its minimum (the free areas and the other slots keep theirs).
+    function spareHeight(zone) {
+        const np     = root.isNowPlayingZone(zone)
+        const column = np ? nowPlayingColumn : queueColumn
+        const zones  = root.columnZones(zone)
+        let used    = np ? root.nowPlayingMinHeight : root.queueMinHeight
+        let handles = 2
+        for (let z = 0; z < zones.length; z++) {
+            const free = root.zoneFree(zones[z])
+            if (free.SplitView.preferredHeight > 0) { used += free.SplitView.preferredHeight; handles++ }
+            const list  = root.dockZones[zones[z]]
+            const slots = root.zoneSlots(zones[z])
+            for (let i = 0; i < list.length; i++) {
+                used += slots[i].SplitView.preferredHeight
+                handles++
+            }
+        }
+        return column.height - used - handles * root.dockHandleSize
+    }
+
+    // id -> current height of every pane docked in `zone` (read from the
+    // slots, before the zone changes, so heights travel with their panes).
+    function zoneHeights(zone) {
+        const out   = {}
+        const list  = root.dockZones[zone]
+        const slots = root.zoneSlots(zone)
+        for (let i = 0; i < list.length; i++) out[list[i]] = slots[i].SplitView.preferredHeight
+        return out
+    }
+    // Replace `zone`'s list and give each slot the height of the pane it now holds.
+    function setZone(zone, list, heights) {
+        const zones = Object.assign({}, root.dockZones)
+        zones[zone] = list
+        root.dockZones = zones
+        const slots = root.zoneSlots(zone)
+        for (let i = 0; i < list.length; i++) slots[i].SplitView.preferredHeight = heights[list[i]]
+    }
+
+    // Dock pane `id` into `zone` (at `index` from the host outwards, default:
+    // the outer edge) and open it there. The zone is set BEFORE the open flag,
+    // so the floating loader never starts. Height: the zone's FREE SPACE if it
+    // is open and big enough (it is taken over and collapses, as before),
+    // else the mode's saved height, else the pane's default -- limited to what
+    // the column can spare unless `restoring` (startup: the column isn't laid
+    // out yet; applyDockHeights() follows). `height` (moveDocked()) replaces
+    // the saved height. A fixed pane being restored skips the capacity check
+    // (it must always be somewhere) -- the zone's slot count still applies.
+    function dockPane(id, zone, index, restoring, height) {
         const entry = root.dockablePanes[id]
-        if (!entry) return
-        const occupant = slot === "top" ? root.dockTop : root.dockBottom
-        if (occupant !== "" && occupant !== id) return
-        if (root.dockTop === id)    root.dockTop = ""
-        if (root.dockBottom === id) root.dockBottom = ""
-        if (slot === "top") root.dockTop = id
-        else                root.dockBottom = id
-        root.lastDockSlot[id] = slot
+        if (!entry || root.isDocked(id)) return
+        if (root.dockZones[zone].length >= root.zoneSlots(zone).length) return
+        if (!(restoring && entry.fixed) && root.zoneCapacityLeft(zone) <= 0) return
+        const heights = root.zoneHeights(zone)
+        const list = root.dockZones[zone].slice()
+        const pos = (index === undefined || index < 0 || index > list.length) ? list.length : index
+        list.splice(pos, 0, id)
+
+        const free = root.zoneFree(zone)
+        let h
+        if (free.SplitView.preferredHeight >= entry.minDockHeight) {
+            h = free.SplitView.preferredHeight
+            free.SplitView.preferredHeight = 0
+        } else {
+            const saved = height !== undefined ? height : root.savedDockHeight(id, root.layoutFullscreen)
+            h = saved >= entry.minDockHeight ? saved : entry.defaultDockHeight
+            if (!restoring)
+                h = Math.max(entry.minDockHeight, Math.min(h, root.spareHeight(zone)))
+        }
+        heights[id] = h
+        root.lastDockZone[id] = { zone: zone, index: pos }
+        root.setZone(zone, list, heights)
         root[id + "PaneOpen"] = true
-
-        // Give the area room for the pane: keep its current height if it is
-        // big enough, else the mode's saved height, else the pane's default.
-        const area  = root.dockArea(slot)
-        const saved = root.savedDockHeight(slot, root.layoutFullscreen)
-        if (area.SplitView.preferredHeight < entry.minDockHeight)
-            area.SplitView.preferredHeight = saved >= entry.minDockHeight ? saved : entry.defaultDockHeight
     }
 
-    // Float a docked pane again: emptying its area makes the floating loader
-    // start (the open flag stays true).
+    // Take pane `id` out of its zone; its height goes to the zone's free area,
+    // so the layout doesn't jump (FREE SPACE stays where the pane was, as
+    // before). Returns the index it had, or -1. `toHost` (moveDocked()): the
+    // host takes the space instead, so the pane can take it back elsewhere.
+    function removeDocked(id, toHost) {
+        const zone = root.dockZoneOf(id)
+        if (zone === "") return -1
+        const heights = root.zoneHeights(zone)
+        const list = root.dockZones[zone].slice()
+        const pos = list.indexOf(id)
+        list.splice(pos, 1)
+        if (!toHost) {
+            const free = root.zoneFree(zone)
+            // + the slot's own handle, which disappears with it
+            free.SplitView.preferredHeight += heights[id] + root.dockHandleSize
+        }
+        root.setZone(zone, list, heights)
+        if (root.selectedDockPane === id) root.selectedDockPane = ""
+        return pos
+    }
+
+    // Move docked pane `id` to the outer edge of another zone, keeping its
+    // height (the move buttons of fixed panes).
+    function moveDocked(id, zone) {
+        if (!root.canMoveTo(id, zone)) return
+        const h = root.zoneHeights(root.dockZoneOf(id))[id]
+        root.removeDocked(id, true)
+        root.dockPane(id, zone, -1, false, h)
+    }
+
+    // Float a docked pane again: removing it from its zone makes the floating
+    // loader start (the open flag stays true). Not for fixed panes.
     function undockPane(id) {
-        delete root.lastDockSlot[id]
-        if (root.dockTop === id)    root.dockTop = ""
-        if (root.dockBottom === id) root.dockBottom = ""
+        if (root.dockablePanes[id] && root.dockablePanes[id].fixed) return
+        delete root.lastDockZone[id]
+        root.removeDocked(id)
     }
 
-    // Close a pane wherever it is. The open flag goes false BEFORE the area is
-    // emptied, so a docked pane doesn't flash up as a floating window. The
-    // area keeps its size (FREE SPACE) and lastDockSlot is kept.
+    // Close a pane wherever it is. The open flag goes false BEFORE it leaves
+    // its zone, so a docked pane doesn't flash up as a floating window.
+    // lastDockZone remembers where it was. Fixed panes can't be closed.
     function closePane(id) {
+        if (root.dockablePanes[id] && root.dockablePanes[id].fixed) return
         root[id + "PaneOpen"] = false
-        if (root.dockTop === id)    root.dockTop = ""
-        if (root.dockBottom === id) root.dockBottom = ""
+        const zone = root.dockZoneOf(id)
+        const pos  = root.removeDocked(id)
+        if (pos >= 0) root.lastDockZone[id] = { zone: zone, index: pos }
     }
 
-    // Persistence: an area's entry is set exactly while a pane is docked and
-    // open there (closePane() empties it), so the config always holds what a
-    // restart should bring back.
-    onDockTopChanged:    appConfig.saveDockedPanes(root.dockTop, root.dockBottom)
-    onDockBottomChanged: appConfig.saveDockedPanes(root.dockTop, root.dockBottom)
+    // ▲/▼ on a docked pane: swap it with its neighbour in the same zone.
+    // `dir` is on screen (-1 = up); the zones above a host run upwards.
+    function swapDocked(id, dir) {
+        const zone = root.dockZoneOf(id)
+        if (zone === "") return
+        const step = zone.endsWith("Top") ? -dir : dir
+        const list = root.dockZones[zone].slice()
+        const i = list.indexOf(id)
+        const j = i + step
+        if (j < 0 || j >= list.length) return
+        const heights = root.zoneHeights(zone)
+        list[i] = list[j]
+        list[j] = id
+        root.setZone(zone, list, heights)
+    }
+
+    // Persistence: a pane is listed exactly while it is docked and open
+    // (closePane() removes it), so the config always holds what a restart
+    // should bring back.
+    // Only after restoreDockedPanes() ran: a change before it (the property's
+    // own initial value) would otherwise overwrite the saved zones with empty
+    // ones before they were read.
+    property bool dockZonesRestored: false
+    onDockZonesChanged: if (root.dockZonesRestored) appConfig.saveDockZones(root.dockZones)
 
     // Startup (Component.onCompleted, window still hidden): reopen the panes
-    // that were docked at the last exit, in their areas. Unknown ids (a pane
-    // removed in a later version) and a duplicate are ignored.
+    // that were docked at the last exit, in their zones and order. Unknown
+    // ids (a pane removed in a later version) and duplicates are ignored.
     function restoreDockedPanes() {
-        const top    = appConfig.queueTopDockPane
-        const bottom = appConfig.queueBottomDockPane
-        if (top !== "" && root.dockablePanes[top])
-            root.dockPane(top, "top")
-        if (bottom !== "" && bottom !== top && root.dockablePanes[bottom])
-            root.dockPane(bottom, "bottom")
+        const saved = appConfig.dockZones
+        for (let z = 0; z < root.dockZoneKeys.length; z++) {
+            const zone = root.dockZoneKeys[z]
+            const ids  = saved[zone] || []
+            for (let i = 0; i < ids.length; i++)
+                if (root.dockablePanes[ids[i]]) root.dockPane(ids[i], zone, -1, true)
+        }
+        // Fixed panes are always docked: at their home position (index 0 =
+        // next to the host) if the saved zones didn't have them, else in the
+        // first zone with a free slot.
+        const ids = Object.keys(root.dockablePanes)
+        for (let p = 0; p < ids.length; p++) {
+            const entry = root.dockablePanes[ids[p]]
+            if (!entry.fixed || root.isDocked(ids[p])) continue
+            const order = [entry.home].concat(root.dockZoneKeys)
+            for (let z = 0; z < order.length && !root.isDocked(ids[p]); z++)
+                root.dockPane(ids[p], order[z], 0, true)
+        }
+        root.dockZonesRestored = true
+        appConfig.saveDockZones(root.dockZones)   // drops ids that weren't restored
     }
 
-    // BottomBar button: close if open; otherwise reopen in the area it was
-    // last docked in when that area is free, else as a floating window.
+    // BottomBar button: close if open; otherwise reopen where it was last
+    // docked if that zone still has room, else as a floating window.
     function togglePane(id) {
         if (root[id + "PaneOpen"]) {
             root.closePane(id)
             return
         }
-        const slot = root.lastDockSlot[id]
-        if (slot && (slot === "top" ? root.dockTop : root.dockBottom) === "")
-            root.dockPane(id, slot)
+        const last = root.lastDockZone[id]
+        if (last && root.canDock(id, last.zone))
+            root.dockPane(id, last.zone, last.index)
         else
             root[id + "PaneOpen"] = true
     }
@@ -890,6 +1134,7 @@ ApplicationWindow {
                 root.restoreDockedPanes()
             } catch (e2) {
                 console.warn("Main: restoring the docked panes failed:", e2)
+                root.dockZonesRestored = true   // later changes are saved anyway
             }
             root.visibility = wantFullscreen ? Window.FullScreen : Window.Windowed
             settleTimer.start()
@@ -962,6 +1207,7 @@ ApplicationWindow {
             }
         }
         root.mainHadFocus = hasFocus
+        if (!hasFocus) root.selectedDockPane = ""   // the docked panes' outline (UC-38)
     }
 
     // Persist layout (window size + panel widths + position/monitor) 500 ms
@@ -995,20 +1241,21 @@ ApplicationWindow {
             appConfig.saveLayout(winW, winH,
                                  libraryTreePanel.width,
                                  queueColumn.width,
-                                 nowPlayingPanel.width,
+                                 nowPlayingColumn.width,
                                  root.layoutFullscreen)
-            // The free areas above/below the queue: their preferredHeight
-            // (only a handle drag writes it), not their current height -- a
-            // window squeezed too small must not overwrite what the user set.
-            // Only while an area holds a docked pane (UC-38); an empty area
-            // keeps the stored height of its last docked pane.
-            const full = root.layoutFullscreen
-            appConfig.saveQueueDockHeights(
-                root.dockTop !== "" ? Math.round(queueTopDock.SplitView.preferredHeight)
-                                    : root.savedDockHeight("top", full),
-                root.dockBottom !== "" ? Math.round(queueBottomDock.SplitView.preferredHeight)
-                                       : root.savedDockHeight("bottom", full),
-                full)
+            // Every docked pane's height (UC-38): its slot's preferredHeight
+            // (only a handle drag / Main.qml writes it), not its current
+            // height -- a window squeezed too small must not overwrite what
+            // the user set. Per pane; panes not docked keep their stored
+            // heights. Free areas aren't saved (they start collapsed).
+            const dockHeights = {}
+            for (let z = 0; z < root.dockZoneKeys.length; z++) {
+                const list  = root.dockZones[root.dockZoneKeys[z]]
+                const slots = root.zoneSlots(root.dockZoneKeys[z])
+                for (let i = 0; i < list.length; i++)
+                    dockHeights[list[i]] = Math.round(slots[i].SplitView.preferredHeight)
+            }
+            appConfig.saveDockPaneHeights(dockHeights, root.layoutFullscreen)
 
             const posX = (root.visibility !== Window.FullScreen) ? root.x : appConfig.windowX
             const posY = (root.visibility !== Window.FullScreen) ? root.y : appConfig.windowY
@@ -1143,13 +1390,15 @@ ApplicationWindow {
                 }
             }
 
-            // Queue column: a vertical SplitView of free area | queue | free
-            // area, so the queue can be made shorter from the top and from the
-            // bottom (its two handles sit directly above and below it). The
-            // free areas (QueueDockArea) can hold a docked pane (UC-38, see
-            // "Docking panes" above). The queue fills the rest, so window height
-            // changes go to the queue; the areas keep their size. Width (as
-            // before) and the two heights are persisted per mode -- see
+            // Queue column: a vertical SplitView of free area | 4 dock slots |
+            // queue | 4 dock slots | free area (UC-38, see "Docking panes"
+            // above). The free areas let the queue be made shorter from the
+            // top and the bottom and can take a docked pane; a slot is
+            // invisible (no handle) unless root.dockZones puts a pane in it.
+            // Slot index 0 sits next to the queue (zone lists run outwards).
+            // The queue fills the rest, so window height changes go to the
+            // queue; the slots and areas keep their size. Width (as before)
+            // and the docked panes' heights are persisted per mode -- see
             // applyPanelWidths() / saveLayoutTimer.
             SplitView {
                 id: queueColumn
@@ -1167,58 +1416,106 @@ ApplicationWindow {
                          :                       Theme.surfaceContainerLow
                 }
 
+                // Free areas start collapsed (not persisted); a handle drag
+                // opens them. Slots get their heights from dockPane() /
+                // setZone() / applyDockHeights().
                 QueueDockArea {
-                    id: queueTopDock
-                    // Starts collapsed; restoreDockedPanes() / applyDockHeights()
-                    // open it only when a pane comes back docked (UC-38).
+                    id: queueTopFree
                     SplitView.preferredHeight: 0
-                    // A docked pane can't be squeezed below its own minimum
-                    SplitView.minimumHeight: root.dockTop !== "" ? root.dockablePanes[root.dockTop].minDockHeight : 0
-                    SplitView.onPreferredHeightChanged: saveLayoutTimer.restart()
-                    paneComponent: root.dockTop !== "" ? root.dockablePanes[root.dockTop].component : null
-                    onUndockRequested: root.undockPane(root.dockTop)
-                    onCloseRequested:  root.closePane(root.dockTop)
+                    freeAllowed: root.zoneCapacityLeft("queueTop") > 0
                 }
+                QueueDockArea { id: queueTopSlot3; dockHost: root; zone: "queueTop"; slotIndex: 3
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: queueTopSlot2; dockHost: root; zone: "queueTop"; slotIndex: 2
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: queueTopSlot1; dockHost: root; zone: "queueTop"; slotIndex: 1
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: queueTopSlot0; dockHost: root; zone: "queueTop"; slotIndex: 0
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
 
                 PlaybackQueue {
                     id: playbackQueuePanel
                     SplitView.fillHeight:    true
-                    SplitView.minimumHeight: 200
+                    SplitView.minimumHeight: root.queueMinHeight
                     engine: engine
                     autoPlay: autoPlay
                     appConfig: appConfig
                 }
 
+                QueueDockArea { id: queueBottomSlot0; dockHost: root; zone: "queueBottom"; slotIndex: 0
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: queueBottomSlot1; dockHost: root; zone: "queueBottom"; slotIndex: 1
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: queueBottomSlot2; dockHost: root; zone: "queueBottom"; slotIndex: 2
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: queueBottomSlot3; dockHost: root; zone: "queueBottom"; slotIndex: 3
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
                 QueueDockArea {
-                    id: queueBottomDock
+                    id: queueBottomFree
                     SplitView.preferredHeight: 0
-                    SplitView.minimumHeight: root.dockBottom !== "" ? root.dockablePanes[root.dockBottom].minDockHeight : 0
-                    SplitView.onPreferredHeightChanged: saveLayoutTimer.restart()
-                    paneComponent: root.dockBottom !== "" ? root.dockablePanes[root.dockBottom].component : null
-                    onUndockRequested: root.undockPane(root.dockBottom)
-                    onCloseRequested:  root.closePane(root.dockBottom)
+                    freeAllowed: root.zoneCapacityLeft("queueBottom") > 0
                 }
             }
 
-            NowPlaying {
-                id: nowPlayingPanel
+            // Now Playing column: free area | 3 dock slots | NowPlaying |
+            // 3 dock slots | free area, built like queueColumn (UC-38; 3 per
+            // zone because one zone may hold all 3 panes the column allows).
+            // NowPlaying is a Flickable, so when the docked panes make it
+            // shorter its content just scrolls. Width and its minimum live on
+            // this column (applyPanelWidths() / saveLayoutTimer), like
+            // queueColumn.
+            SplitView {
+                id: nowPlayingColumn
+                orientation: Qt.Vertical
                 SplitView.preferredWidth: appConfig.nowPlayingWidth
                 SplitView.minimumWidth:   280
-                engine:          engine
-                playlistManager: playlistManager
-                autoPlay:        autoPlay
-                appConfig:       appConfig
                 onWidthChanged: saveLayoutTimer.restart()
-                onNewPlaylistRequested: newPlaylistDialog.open()
-                onExportPlaylistRequested: {
-                    exportPlaylistDialog.tracks = engine.trackList()
-                    exportPlaylistDialog.playlistName = engine.activePlaylistName
-                    exportPlaylistDialog.open()
+
+                handle: Rectangle {
+                    implicitWidth:  5
+                    implicitHeight: 5
+                    color: SplitHandle.pressed ? Theme.secondary
+                         : SplitHandle.hovered ? Theme.surfaceContainerHigh
+                         :                       Theme.surfaceContainerLow
                 }
-                onBigCoverRequested: root.bigCoverPaneOpen = true
-                onMissingPlaylistTracks: (missing) => {
-                    missingTracksDialog.missingTracks = missing
-                    missingTracksDialog.open()
+
+                QueueDockArea {
+                    id: nowPlayingTopFree
+                    SplitView.preferredHeight: 0
+                    freeAllowed: root.zoneCapacityLeft("nowPlayingTop") > 0
+                }
+                QueueDockArea { id: nowPlayingTopSlot2; dockHost: root; zone: "nowPlayingTop"; slotIndex: 2
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: nowPlayingTopSlot1; dockHost: root; zone: "nowPlayingTop"; slotIndex: 1
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: nowPlayingTopSlot0; dockHost: root; zone: "nowPlayingTop"; slotIndex: 0
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+
+                NowPlaying {
+                    id: nowPlayingPanel
+                    SplitView.fillHeight:    true
+                    SplitView.minimumHeight: root.nowPlayingMinHeight
+                    engine:          engine
+                    playlistManager: playlistManager
+                    autoPlay:        autoPlay
+                    appConfig:       appConfig
+                    onBigCoverRequested: root.bigCoverPaneOpen = true
+                    onMissingPlaylistTracks: (missing) => {
+                        missingTracksDialog.missingTracks = missing
+                        missingTracksDialog.open()
+                    }
+                }
+
+                QueueDockArea { id: nowPlayingBottomSlot0; dockHost: root; zone: "nowPlayingBottom"; slotIndex: 0
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: nowPlayingBottomSlot1; dockHost: root; zone: "nowPlayingBottom"; slotIndex: 1
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea { id: nowPlayingBottomSlot2; dockHost: root; zone: "nowPlayingBottom"; slotIndex: 2
+                                SplitView.onPreferredHeightChanged: saveLayoutTimer.restart() }
+                QueueDockArea {
+                    id: nowPlayingBottomFree
+                    SplitView.preferredHeight: 0
+                    freeAllowed: root.zoneCapacityLeft("nowPlayingBottom") > 0
                 }
             }
         }

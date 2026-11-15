@@ -107,6 +107,7 @@ qt_add_executable(topaz
     ratingcache.cpp
     buildinfo.h
     buildinfo.cpp
+    codestats.h
     libraryscanner.h
     libraryscanner.cpp
     librarymodel.h
@@ -238,6 +239,7 @@ qt_add_qml_module(topaz
         VolumeRing.qml
         NeonWordmark.qml
         QueueDockArea.qml
+        PlaylistButtonsView.qml
         AudioMeterWindow.qml
         AudioMeterView.qml
         AudioMeterHiFi90s.qml
@@ -258,6 +260,14 @@ qt_add_qml_module(topaz
         icons/volume-mute.svg
         icons/dock-top.svg
         icons/dock-bottom.svg
+        icons/dock-nowplaying-top.svg
+        icons/dock-nowplaying-bottom.svg
+        icons/playlist-new.svg
+        icons/playlist-load.svg
+        icons/playlist-export.svg
+        icons/playlist-remove.svg
+        icons/move-up.svg
+        icons/move-down.svg
         icons/undock.svg
         Claude_Logo.png
         CrucifyTheMadness_Logo.png

@@ -1,5 +1,6 @@
 #include "buildinfo.h"
 #include "topaz_build_date.h"   // generated, see cmake/WriteBuildDate.cmake
+#include "codestats.h"          // tools/count-loc.ps1, refreshed once per release
 
 QString BuildInfo::version() const
 {
@@ -16,4 +17,14 @@ QString BuildInfo::buildDate() const
 QString BuildInfo::qtVersion() const
 {
     return QString::fromLatin1(qVersion());
+}
+
+int BuildInfo::topazLines() const
+{
+    return TOPAZ_CODE_LINES;
+}
+
+int BuildInfo::thirdPartyLines() const
+{
+    return TOPAZ_THIRD_PARTY_LINES;
 }

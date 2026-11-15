@@ -27,6 +27,10 @@ number + a "Document history" line, PDF rebuild with `bash docs/build-user-guide
 (see "User guide" below) — then empty the list. The architecture doc is still updated with
 every change.
 
+**Also once per release, before the Release build:** `powershell -ExecutionPolicy Bypass -File
+tools/count-loc.ps1` rewrites the tracked `codestats.h` (non-blank lines of Topaz code + of the
+vendored `third_party/` code), which the About dialog's TOPAZ tab shows. Commit it with the release.
+
 ## Build
 
 Toolchain (pinned in `.vscode/settings.json`): Qt 6.10.2 mingw_64, MinGW 13.1.0, Ninja,
@@ -110,6 +114,24 @@ appears on stderr unless you set `QT_FORCE_STDERR_LOGGING=1` first. Only `qmldir
 (Qt Creator/`qmlls`) only and can be left out of the deploy folder.
 
 Re-run all of this after each Release rebuild; nothing here is incremental.
+
+### Windows installer (Inno Setup 6)
+
+After `deploy/` is assembled, `powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1`
+builds `dist\Topaz-<version>-setup.exe` (`dist/` gitignored; version read from `project(Topaz VERSION …)`).
+It robocopy-stages `deploy/` into `build-installer\stage` without `bass*.dll`, `ffmpeg.exe`,
+`Hi-Res_Audio.svg`, `*.log` (+ `LICENSE` → `LICENSE.txt`), checks `Topaz\qmldir` & co. are there, and
+runs ISCC (installed per user: `%LOCALAPPDATA%\Programs\Inno Setup 6\`) on `packaging\windows\topaz.iss`.
+- Per user by default (no admin; "all users" selectable) into `%LOCALAPPDATA%\Programs\Topaz` — not the
+  data folder `%LOCALAPPDATA%\Topaz`, which neither setup nor uninstall ever touches.
+- **Never change the `AppId`** in `topaz.iss`: an update = running the newer setup, which finds the
+  installation by it (same folder and tasks, one uninstall entry; `CloseApplications` closes a running Topaz).
+- `[InstallDelete]` removes only Qt's generated folders (`qml`, `Topaz`, `platforms`, …) on update; the
+  root folder is left alone because the user's own BASS DLLs / `ffmpeg.exe` live there (they survive
+  updates and uninstall). BASS and ffmpeg are never shipped (`Excludes` as a second safety net).
+- Verified 2026-11-15 by a silent install / update / uninstall into a scratch folder
+  (`/VERYSILENT /CURRENTUSER /DIR=…`, then `unins000.exe /VERYSILENT`).
+The 7z archive stays a release asset next to the installer.
 
 ### Linux build / deploy (experimental, via Docker Desktop)
 
@@ -279,7 +301,7 @@ headings free of numbers and punctuation so the manual Contents links resolve id
 GitHub and in the PDF.
 
 **Screenshots** are taken from `deploy/Topaz.exe` with the user's stream-safe demo library
-`G:\Topaz\MP3\` (never the user's own library — the PDF is public), after setting the real
+`H:\Topaz\MP3\` (`G:` until 1.1.0 — ask if it moved again; never the user's own library — the PDF is public), after setting the real
 `%LOCALAPPDATA%\Topaz` aside (rename + SHA-256 manifest, restored and verified afterwards).
 Mask any path that shows the Windows user name. Ask the user before taking over the screen.
 
@@ -357,12 +379,18 @@ state), `LibraryModel`, `PlaybackEngine`, `PlaylistManager`, and the modal dialo
 The four main panels (`LibraryTree`, `AlbumBrowser`, `PlaybackQueue`, `NowPlaying`) sit in
 a horizontal `SplitView`; only `AlbumBrowser` has `SplitView.fillWidth: true` and absorbs
 resize surplus. Panel widths and window size are persisted to `Topaz.config` via a
-debounced (500 ms) `AppConfig.saveLayout()` call. `PlaybackQueue` itself sits in a nested
-vertical `SplitView` (`queueColumn`) between two `QueueDockArea` free areas, so its height is
-adjustable from above and below; those heights are persisted per mode with
-`saveQueueDockHeights()` from their `SplitView.preferredHeight` (not `height` — see "Layout
-persistence" in the architecture doc). Anything addressing the queue *slot* (width, attached
-`SplitView.*`) targets `queueColumn`, not `playbackQueuePanel`.
+debounced (500 ms) `AppConfig.saveLayout()` call. `PlaybackQueue` and `NowPlaying` each sit
+in a nested vertical `SplitView` (`queueColumn` / `nowPlayingColumn`) with static
+`QueueDockArea` dock slots (shown only while `Main.dockZones` puts a pane in them) and one
+free area per zone — up to 4 docked panes above + below the queue, 3 above + below Now Playing
+(UC-38). The playlist buttons (NEW/LOAD/EXPORT/REMOVE, `PlaylistButtonsView.qml`) are such a pane,
+registered `fixed` (always docked, below Now Playing by default; only movable); their LOAD dialog
+chain stays in `NowPlaying.qml` (`openLoadPlaylist()`), which always exists.
+Docked panes' heights are persisted per pane and per mode with `saveDockPaneHeights()` from
+the slots' `SplitView.preferredHeight` (not `height` — see "Layout persistence" in the
+architecture doc). Anything addressing a column's *slot* in the main `SplitView` (width,
+attached `SplitView.*`) targets `queueColumn` / `nowPlayingColumn`, not `playbackQueuePanel` /
+`nowPlayingPanel`.
 
 Data flow for filtering follows one repeated pattern worth knowing before touching any
 of it: `GenreBar`/`LibraryTree` mutate `LibraryData` selection state → `LibraryTree`

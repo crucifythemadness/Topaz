@@ -20,6 +20,9 @@
 // qtVersion() — the Qt version Topaz is running with (qVersion(), the
 //               runtime library — normally the build version too); shown on
 //               the About dialog's POWERED BY → Qt details page.
+// topazLines() / thirdPartyLines() — non-blank lines of code of Topaz itself and
+//               of the vendored KISS FFT + miniz sources, from codestats.h
+//               (written once per release by tools/count-loc.ps1).
 class BuildInfo : public QObject
 {
     Q_OBJECT
@@ -28,6 +31,8 @@ class BuildInfo : public QObject
     Q_PROPERTY(QString version   READ version   CONSTANT)
     Q_PROPERTY(QString buildDate READ buildDate CONSTANT)
     Q_PROPERTY(QString qtVersion READ qtVersion CONSTANT)
+    Q_PROPERTY(int topazLines      READ topazLines      CONSTANT)
+    Q_PROPERTY(int thirdPartyLines READ thirdPartyLines CONSTANT)
 
 public:
     explicit BuildInfo(QObject *parent = nullptr) : QObject(parent) {}
@@ -35,4 +40,6 @@ public:
     QString version()   const;
     QString buildDate() const;
     QString qtVersion() const;
+    int topazLines() const;
+    int thirdPartyLines() const;
 };

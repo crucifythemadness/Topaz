@@ -82,6 +82,7 @@ CMakeLists.txt.user*
 /build*/
 /deploy/
 /deploy-linux/
+/dist/
 
 # Review sheet written by tools/generate-app-icon.py
 tools/app-icon-preview-*.png

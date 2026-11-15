@@ -1,30 +1,80 @@
 import QtQuick
 // qmllint: style-only hints switched off for this file (see "Editor diagnostics" in CLAUDE.md)
 // qmllint disable unqualified
+import QtQuick.Controls
 
-// Free area above or below the playback queue (Main.qml's vertical
-// queueColumn SplitView). Created when the user drags the queue smaller from
-// the top or the bottom. A pane (Audio Meter, Audio Visualizer, Milkdrop, ...)
-// can be docked into it (UC-38): Main.qml sets paneComponent (the pane's
-// content view from its dockablePanes registry) and this item loads it.
+// A dock area in one of Main.qml's dock columns (UC-38): the vertical
+// queueColumn SplitView (above / below the playback queue) or
+// nowPlayingColumn (below Now Playing). Two roles, chosen by Main.qml:
 //
-// Empty: a subtle placeholder -- a faint dashed outline and a small hint,
-// both hidden while the area is too thin to hold them, so a sliver stays clean.
-// Occupied: the pane fills the area; hovering shows two small buttons in the
-// top-right corner ("float again" / "close"), and a right-click closes the
-// pane, like on a floating pane. Generic: what those requests mean is up to
-// Main.qml (undockRequested / closeRequested).
+// - Free area (dockHost unset): the zone's single empty area, created when the
+//   user drags it open. A subtle placeholder -- a faint dashed outline and a
+//   small hint, both hidden while the area is too thin to hold them, so a
+//   sliver stays clean.
+// - Dock slot (dockHost + zone + slotIndex set): shows the pane at position
+//   slotIndex of dockHost.dockZones[zone], loaded from dockHost.dockablePanes;
+//   invisible (no SplitView handle, no cost) while that position is empty.
+//   Hovering shows small buttons in the top-right corner -- move up / move
+//   down (swap with the neighbour in the same zone, only when there is one),
+//   "float again" and "close" -- and a right-click closes the pane, like on a
+//   floating pane. A "fixed" pane (registry flag, e.g. the playlist buttons)
+//   can't float or close: instead of those two it gets one "move to" button
+//   per other zone that has room, and right-click does nothing. A left press
+//   selects the pane (turquoise outline, like a floating pane's, via
+//   dockHost.selectDockPane()); while a handle of the column is dragged every
+//   docked pane shows the outline, so its edges are visible while resizing.
+//   What all these requests do is up to dockHost (Main.qml).
 Rectangle {
     id: root
 
     color: Theme.surfaceContainerLow     // same surface as PlaybackQueue
 
+    property var    dockHost: null       // Main.qml's root (dockZones, dockablePanes, ...)
+    property string zone: ""
+    property int    slotIndex: -1
+
+    readonly property bool   isSlot: dockHost !== null && zone !== ""
+    readonly property var    zoneList: isSlot ? (dockHost.dockZones[zone] || []) : []
+    readonly property string paneId: (isSlot && slotIndex >= 0 && slotIndex < zoneList.length)
+                                     ? zoneList[slotIndex] : ""
+    readonly property var    paneEntry: paneId !== "" ? dockHost.dockablePanes[paneId] : null
+
     // The docked pane's content component, or null when the area is empty.
-    property Component paneComponent: null
+    readonly property Component paneComponent: paneEntry ? paneEntry.component : null
     readonly property bool occupied: paneComponent !== null
+    readonly property bool fixedPane: paneEntry !== null && paneEntry.fixed === true
+
+    // Zone lists run from the host (queue / Now Playing) outwards, so in the
+    // zones above a host a higher index is further UP on screen.
+    readonly property bool topZone: zone.endsWith("Top")
+    readonly property bool hasInner: occupied && slotIndex > 0
+    readonly property bool hasOuter: occupied && slotIndex < zoneList.length - 1
+    readonly property bool canMoveUp:   topZone ? hasOuter : hasInner
+    readonly property bool canMoveDown: topZone ? hasInner : hasOuter
+
+    // Selection outline: selected by a click, or the column is being resized.
+    // qmllint disable missing-property
+    readonly property bool columnResizing: SplitView.view ? SplitView.view.resizing : false
+    // qmllint enable missing-property
+    readonly property bool outlined: occupied && (columnResizing || dockHost.selectedDockPane === paneId)
+
+    // Free areas: Main.qml hides a column's free areas while the column is
+    // full (no FREE SPACE that nothing could be docked into). Hidden = no
+    // SplitView handle to drag it open; its space goes back to the host.
+    property bool freeAllowed: true
+    visible: isSlot ? occupied : freeAllowed
+    onVisibleChanged: if (!isSlot && !visible) SplitView.preferredHeight = 0
+    // A docked pane can't be squeezed below its own minimum
+    SplitView.minimumHeight: paneEntry ? paneEntry.minDockHeight : 0
 
     signal undockRequested()
     signal closeRequested()
+    signal moveRequested(int dir)        // on screen: -1 = up, +1 = down
+    signal moveToZoneRequested(string target)   // fixed panes: to another zone
+    onUndockRequested: if (isSlot) dockHost.undockPane(paneId)
+    onCloseRequested:  if (isSlot) dockHost.closePane(paneId)
+    onMoveRequested: (dir) => { if (isSlot) dockHost.swapDocked(paneId, dir) }
+    onMoveToZoneRequested: (target) => { if (isSlot) dockHost.moveDocked(paneId, target) }
 
     readonly property bool roomy: height >= 48
 
@@ -103,16 +153,38 @@ Rectangle {
     // Right-click closes, like a floating pane. A handler, not a MouseArea:
     // it must not take hover or left clicks away from the docked content.
     TapHandler {
-        enabled: root.occupied
+        enabled: root.occupied && !root.fixedPane
         acceptedButtons: Qt.RightButton
         onTapped: root.closeRequested()
+    }
+
+    // Left press anywhere selects the pane (outline). Passive: the docked
+    // content still gets every press and click.
+    PointHandler {
+        enabled: root.occupied
+        acceptedButtons: Qt.LeftButton
+        onActiveChanged: if (active) root.dockHost.selectDockPane(root.paneId)
+    }
+
+    // Selection outline, the same as FloatingPane's: above the content and
+    // the buttons, takes no mouse input.
+    Rectangle {
+        anchors.fill: parent
+        z: 20
+        visible: root.outlined
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.secondary
     }
 
     // Hover: the area's own HoverHandler OR one of the buttons (a hovered
     // button may take the hover away from what is beneath it), with a short
     // grace period so moving onto a button never flickers.
     HoverHandler { id: areaHover; enabled: root.occupied }
-    readonly property bool _hover: areaHover.hovered || undockBtn.hovered || closeBtn.hovered
+    readonly property bool _hover: areaHover.hovered || upBtn.hovered || downBtn.hovered
+                                   || undockBtn.hovered || closeBtn.hovered
+                                   || toQueueTopBtn.hovered || toQueueBottomBtn.hovered
+                                   || toNowPlayingTopBtn.hovered || toNowPlayingBottomBtn.hovered
     property bool _buttonsShown: false
     on_HoverChanged: {
         if (_hover) {
@@ -147,8 +219,58 @@ Rectangle {
             anchors.centerIn: parent
             spacing: 2
             IconButton {
+                id: upBtn
+                buttonSize: 28
+                visible: root.canMoveUp
+                iconName: "move-up"
+                tooltip: qsTr("Move up (swap with the pane above)")
+                onClicked: root.moveRequested(-1)
+            }
+            IconButton {
+                id: downBtn
+                buttonSize: 28
+                visible: root.canMoveDown
+                iconName: "move-down"
+                tooltip: qsTr("Move down (swap with the pane below)")
+                onClicked: root.moveRequested(1)
+            }
+            // Fixed panes: move to another zone (only where it fits)
+            IconButton {
+                id: toQueueTopBtn
+                buttonSize: 28
+                visible: root.fixedPane && root.dockHost.canMoveTo(root.paneId, "queueTop")
+                iconName: "dock-top"
+                tooltip: qsTr("Move above the queue")
+                onClicked: root.moveToZoneRequested("queueTop")
+            }
+            IconButton {
+                id: toQueueBottomBtn
+                buttonSize: 28
+                visible: root.fixedPane && root.dockHost.canMoveTo(root.paneId, "queueBottom")
+                iconName: "dock-bottom"
+                tooltip: qsTr("Move below the queue")
+                onClicked: root.moveToZoneRequested("queueBottom")
+            }
+            IconButton {
+                id: toNowPlayingTopBtn
+                buttonSize: 28
+                visible: root.fixedPane && root.dockHost.canMoveTo(root.paneId, "nowPlayingTop")
+                iconName: "dock-nowplaying-top"
+                tooltip: qsTr("Move above Now Playing")
+                onClicked: root.moveToZoneRequested("nowPlayingTop")
+            }
+            IconButton {
+                id: toNowPlayingBottomBtn
+                buttonSize: 28
+                visible: root.fixedPane && root.dockHost.canMoveTo(root.paneId, "nowPlayingBottom")
+                iconName: "dock-nowplaying-bottom"
+                tooltip: qsTr("Move below Now Playing")
+                onClicked: root.moveToZoneRequested("nowPlayingBottom")
+            }
+            IconButton {
                 id: undockBtn
                 buttonSize: 28
+                visible: !root.fixedPane
                 iconName: "undock"
                 tooltip: qsTr("Float as a separate window")
                 onClicked: root.undockRequested()
@@ -156,6 +278,7 @@ Rectangle {
             IconButton {
                 id: closeBtn
                 buttonSize: 28
+                visible: !root.fixedPane
                 iconName: "close"
                 danger: true
                 tooltip: qsTr("Close")

@@ -4,7 +4,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 
-// Now-Playing panel: album art, transport controls, and playlist management.
+// Now-Playing panel: album art, transport controls, and the playlist LOAD
+// dialog chain (its button is in the dockable PlaylistButtonsView).
 // Custom progress slider (no QtQuick.Controls Slider dependency) keeps it light.
 Rectangle {
     id: root
@@ -23,10 +24,6 @@ Rectangle {
     // async onChoiceMade -- see UC-30.
     property string _pendingImportSourcePath: ""
 
-    signal newPlaylistRequested()
-    // Emitted when the user clicks EXPORT with a named playlist loaded --
-    // Main.qml opens ExportPlaylistDialog. See UC-26.
-    signal exportPlaylistRequested()
     // Emitted when the user left-clicks the album cover — opens the
     // detachable BigCoverWindow pane (see Main.qml's Loader wiring).
     signal bigCoverRequested()
@@ -152,6 +149,25 @@ Rectangle {
     }
 
     // ── Load playlist file dialog ───────────────────────────────────────
+    // The LOAD button lives in the dockable PlaylistButtonsView (UC-38); its
+    // dialog chain stays here because this panel always exists, while the
+    // docked view is recreated on every swap / move. Main.qml calls this.
+    function openLoadPlaylist() {
+        if (root.autoPlay && !root.autoPlay.queueClearAllowed) return
+        // Clearing/crossfading happens in loadPlaylistDialog.onAccepted
+        // instead, once the new tracks are actually known (see UC-23) --
+        // clearing here, before the file is even picked, meant canceling the
+        // dialog used to leave the queue emptied for nothing.
+        if (root.playlistManager) {
+            // "file:///" + "C:/x" (Windows) but "file://" + "/home/x"
+            // (Linux) -- a blind "file:///" prefix yields four slashes there.
+            const plDir = root.playlistManager.playlistDirectory()
+            loadPlaylistDialog.currentFolder =
+                "file://" + (plDir.startsWith("/") ? "" : "/") + plDir
+        }
+        loadPlaylistDialog.open()
+    }
+
     FileDialog {
         id: loadPlaylistDialog
         title: qsTr("Select a XSPF Playlist")
@@ -717,9 +733,9 @@ Rectangle {
             // portion right above it, with a soft secondary halo behind it.
             // Previous/Next are 48 px ghost circles that light up in the
             // secondary colour on hover. Icons are vector-drawn
-            // (TransportIcon above). Row height 100 fits the halo; the
-            // playlist buttons below simply move down (same Column, same
-            // 16 px topPadding gap).
+            // (TransportIcon above). Row height 100 fits the halo. The
+            // playlist buttons that used to follow are now the dockable
+            // PlaylistButtonsView (UC-38), docked below this panel by default.
             Item {
                 width:  parent.width
                 height: 100
@@ -847,224 +863,6 @@ Rectangle {
                                 var navAllowed = !root.autoPlay || root.autoPlay.trackNavigationAllowed
                                 if (root.engine && navAllowed) root.engine.next()
                             }
-                        }
-                    }
-                }
-            }
-
-            // ── Playlist management ────────────────────────────────────────
-            Column {
-                id: playlistButtons
-                width: parent.width
-                topPadding: 16   // extra gap below the transport controls
-
-                // Row 1 — NEW  |  LOAD
-                Row {
-                    width:  parent.width
-                    height: 52
-
-                    Rectangle {
-                        width:  parent.width / 2
-                        height: parent.height
-                        color:  newHover.containsMouse ? Theme.surfaceContainerHigh
-                                                       : Theme.surfaceContainerHigh
-                        border.color: Theme.ov20
-                        border.width: 1
-
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 6
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "+"
-                                font.pixelSize: Theme.titleMd
-                                color: Theme.fgSurfaceVariant
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: qsTr("NEW")
-                                font.family:        Theme.fontFamilyBody
-                                font.pixelSize:     Theme.labelLg
-                                font.weight:        Font.Medium
-                                font.letterSpacing: Theme.lsWide
-                                color: Theme.fgSurface
-                            }
-                        }
-                        MouseArea {
-                            id: newHover; anchors.fill: parent
-                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: root.newPlaylistRequested()
-
-                            ToolTip.visible: containsMouse
-                            ToolTip.delay:   600
-                            ToolTip.text:    qsTr("NEW PLAYLIST")
-                        }
-                    }
-
-                    Rectangle {
-                        id: loadPlaylistBtn
-                        width:  parent.width / 2
-                        height: parent.height
-
-                        readonly property bool active: !root.autoPlay || root.autoPlay.queueClearAllowed
-
-                        color:  active && loadHover.containsMouse ? Theme.surfaceContainerHigh
-                                                                  : Theme.surfaceContainer
-                        border.color: Theme.ov20
-                        border.width: 1
-                        opacity: active ? 1.0 : 0.35
-
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 6
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "\u2191"
-                                font.pixelSize: Theme.titleMd
-                                color: Theme.fgSurfaceVariant
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: qsTr("LOAD")
-                                font.family:        Theme.fontFamilyBody
-                                font.pixelSize:     Theme.labelLg
-                                font.weight:        Font.Medium
-                                font.letterSpacing: Theme.lsWide
-                                color: Theme.fgSurface
-                            }
-                        }
-                        MouseArea {
-                            id: loadHover; anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: loadPlaylistBtn.active ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            onClicked: {
-                                if (!loadPlaylistBtn.active) return
-                                // Clearing/crossfading happens in
-                                // loadPlaylistDialog.onAccepted instead, once
-                                // the new tracks are actually known (see
-                                // UC-23) -- clearing here, before the file is
-                                // even picked, meant canceling the dialog
-                                // used to leave the queue emptied for nothing.
-                                if (root.playlistManager) {
-                                    // "file:///" + "C:/x" (Windows) but "file://" + "/home/x"
-                                    // (Linux) -- a blind "file:///" prefix yields four slashes there.
-                                    const plDir = root.playlistManager.playlistDirectory()
-                                    loadPlaylistDialog.currentFolder =
-                                        "file://" + (plDir.startsWith("/") ? "" : "/") + plDir
-                                }
-                                loadPlaylistDialog.open()
-                            }
-
-                            ToolTip.visible: containsMouse && loadPlaylistBtn.active
-                            ToolTip.delay:   600
-                            ToolTip.text:    qsTr("LOAD PLAYLIST")
-                        }
-                    }
-                }
-
-                // Row 2 — EXPORT  |  REMOVE
-                Row {
-                    width:  parent.width
-                    height: 52
-
-                    Rectangle {
-                        id: exportPlaylistBtn
-                        width:  parent.width / 2
-                        height: parent.height
-
-                        readonly property bool active:
-                            root.engine !== null && root.engine.activePlaylistName !== ""
-                            && root.engine.queueCount > 0
-
-                        color:  active && exportHover.containsMouse
-                                ? Theme.surfaceContainerHigh : Theme.surfaceContainer
-                        border.color: Theme.ov20
-                        border.width: 1
-                        opacity: active ? 1.0 : 0.35
-
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 6
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: qsTr("EXPORT")
-                                font.family:        Theme.fontFamilyBody
-                                font.pixelSize:     Theme.labelLg
-                                font.weight:        Font.Medium
-                                font.letterSpacing: Theme.lsWide
-                                color: Theme.fgSurface
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "\u2197"   // ↗ northeast arrow
-                                font.pixelSize: Theme.titleMd
-                                color: Theme.fgSurfaceVariant
-                            }
-                        }
-                        MouseArea {
-                            id: exportHover; anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: exportPlaylistBtn.active
-                                         ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            onClicked: {
-                                if (!exportPlaylistBtn.active) return
-                                root.exportPlaylistRequested()
-                            }
-
-                            ToolTip.visible: containsMouse && exportPlaylistBtn.active
-                            ToolTip.delay:   600
-                            ToolTip.text:    qsTr("EXPORT PLAYLIST")
-                        }
-                    }
-
-                    Rectangle {
-                        id: removePlaylistBtn
-                        width:  parent.width / 2
-                        height: parent.height
-
-                        readonly property bool active:
-                            root.engine !== null && root.engine.activePlaylistName !== ""
-                            && (!root.autoPlay || root.autoPlay.queueClearAllowed)
-
-                        color:  active && removePlaylistHover.containsMouse
-                                ? Theme.surfaceContainerHigh : Theme.surfaceContainer
-                        border.color: Theme.ov20
-                        border.width: 1
-                        opacity: active ? 1.0 : 0.35
-
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 6
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "\u2715"   // ✕
-                                font.pixelSize: Theme.titleMd
-                                color: Theme.fgSurfaceVariant
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: qsTr("REMOVE")
-                                font.family:        Theme.fontFamilyBody
-                                font.pixelSize:     Theme.labelLg
-                                font.weight:        Font.Medium
-                                font.letterSpacing: Theme.lsWide
-                                color: Theme.fgSurface
-                            }
-                        }
-                        MouseArea {
-                            id: removePlaylistHover; anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: removePlaylistBtn.active
-                                         ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            onClicked: {
-                                if (!removePlaylistBtn.active) return
-                                if (root.autoPlay) root.autoPlay.clearQueueAndHistory()
-                                else if (root.engine) root.engine.clearQueue()
-                            }
-
-                            ToolTip.visible: containsMouse && removePlaylistBtn.active
-                            ToolTip.delay:   600
-                            ToolTip.text:    qsTr("REMOVE PLAYLIST")
                         }
                     }
                 }

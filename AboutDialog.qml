@@ -8,7 +8,8 @@ import QtQuick.Layouts
 // ── AboutDialog ──────────────────────────────────────────────────────────
 // "About Topaz" modal with three tabs:
 //   • TOPAZ        — app icon, neon lettering (NeonWordmark), version/build-date
-//                    and library-statistics chips, description
+//                    and library-statistics chips, lines of code (codestats.h),
+//                    description
 //   • DEVELOPED BY — people (Claude, CrucifyTheMadness) and the tools used
 //   • POWERED BY   — grid of cards for every library/framework/asset Topaz uses,
 //                    each opening a details page (version, license, role in
@@ -320,6 +321,54 @@ Popup {
                                     font.weight:        Font.Medium
                                     font.letterSpacing: 0.8
                                     color: Theme.fgSurface
+                                }
+                            }
+                        }
+                    }
+
+                    // Lines of code (codestats.h, rewritten once per release by
+                    // tools/count-loc.ps1): Topaz's own code, then the vendored
+                    // libraries compiled into Topaz.exe.
+                    Column {
+                        id: locStats
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: 14
+                        spacing: 4
+
+                        function grouped(n) {
+                            return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+                        }
+
+                        Repeater {
+                            model: [
+                                { lines: buildInfo.topazLines,      label: "LINES OF TOPAZ CODE",            dot: Theme.secondary },
+                                { lines: buildInfo.thirdPartyLines, label: "LINES OF 3RD-PARTY CODE BUILT IN", dot: Theme.tertiary }
+                            ]
+                            delegate: Row {
+                                required property var modelData
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 6; height: 6
+                                    radius: 3
+                                    color: modelData.dot
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    text: locStats.grouped(modelData.lines)
+                                    font.family:        Theme.fontFamilyMono
+                                    font.pixelSize:     13
+                                    font.weight:        Font.Bold
+                                    font.letterSpacing: 0.8
+                                    color: Theme.fgSurface
+                                }
+                                Text {
+                                    text: modelData.label
+                                    font.family:        Theme.fontFamilyMono
+                                    font.pixelSize:     13
+                                    font.letterSpacing: 0.8
+                                    color: Theme.fgSurfaceVariant
                                 }
                             }
                         }

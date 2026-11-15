@@ -664,9 +664,12 @@ Topaz module
 │                         Loader { active: audioMeterPaneOpen; sourceComponent: AudioMeterWindow {...} }  — see UC-37
 │                         property bool milkdropPaneOpen  (toggled by BottomBar.onMilkdropToggleRequested / MilkdropWindow.onCloseRequested)
 │                         Loader { active: milkdropPaneOpen; sourceComponent: MilkdropWindow {...} }  — see UC-20
-│                         Dockable panes (audioMeter, audioVisualizer, milkdrop): their floating loaders are active only while
-│                         open AND not docked; dockablePanes registry, dockTop/dockBottom, lastDockSlot, dockPane()/undockPane()/
-│                         closePane()/togglePane() — see UC-38
+│                         Dockable panes (audioMeter, audioVisualizer, milkdrop; playlistButtons = fixed, always docked): the
+│                         floating loaders are active only while open AND not docked; dockablePanes registry, dockZones
+│                         (queueTop/queueBottom/nowPlayingTop/nowPlayingBottom), lastDockZone, selectedDockPane (outline),
+│                         dockPane()/undockPane()/closePane()/swapDocked()/moveDocked()/togglePane(), availableZones()/canMoveTo();
+│                         queueColumn and nowPlayingColumn hold the static dock slots + one free area per zone — see UC-38
+│                         openExportPlaylist() (EXPORT button / ExportPlaylistDialog, UC-26)
 │                         SplitView slot 1: Loader { sourceComponent: activeTab === "search" ? SearchPanel : activeTab === "playlists" ? PlaylistsPanel : LibraryTree }  — see UC-21/UC-22
 │                         SplitView slot 2: Loader { sourceComponent: activeTab === "search" ? SearchResultBrowser : activeTab === "playlists" ? PlaylistViewer : AlbumBrowser }  — see UC-21/UC-22
 ├── SetupDialog.qml     Modal setup popup (tabs: GENRES | FILE MONITORING | PLAYBACK | AUTO PLAY | AUDIO VISUALIZER | AUDIO METER | MILKDROP | MISC, see UC-15 / UC-14 / UC-19 / UC-37 / UC-20)
@@ -675,7 +678,9 @@ Topaz module
 ├── MessageBox.qml      Themed single-message popup with OK button; reusable across the application
 ├── AboutDialog.qml     Modal "About Topaz" (560×760, draggable header, bottom tab bar), three tabs:
 │                         TOPAZ — app_icon.png, NeonWordmark (wordHeight 48), version/build-date chips (BuildInfo),
-│                         track/album/rating chips (LibraryModel), description (mentions Claude Sonnet 4.6/5.0 up to
+│                         track/album/rating chips (LibraryModel), two "LINES OF … CODE" lines (BuildInfo.topazLines /
+│                         thirdPartyLines from the tracked codestats.h, rewritten once per release by tools/count-loc.ps1:
+│                         non-blank lines of git-known code files; 3rd party = vendored third_party/ only), description (mentions Claude Sonnet 4.6/5.0 up to
 │                         1.1.0 and Claude Opus 5.5 for newer versions). DEVELOPED BY — Claude + CrucifyTheMadness
 │                         with links, tools/LLM lines. POWERED BY — no scrolling (the user rejects scrollbars in
 │                         dialogs): a 2×4 GridLayout of cards from one JS model `libs` (name, logo or text `mark`, role,
@@ -695,7 +700,7 @@ Topaz module
 │                         PlaylistViewer's LOAD flows via a missingPlaylistTracks(missingTracks)
 │                         signal — see UC-10/UC-22
 ├── FloatingPane.qml    Reusable base Window for detachable panes (frameless, movable, resizable, right-click-to-close) — see "Detachable panes" below
-│                         Docking API (UC-38): dockable, dockTopAvailable, dockBottomAvailable, signal dockRequested(slot); hover buttons
+│                         Docking API (UC-38): dockable, dockZones (zones with room), signal dockRequested(zone); hover buttons
 ├── BigCoverWindow.qml  FloatingPane specialization: shows only the current track's cover art
 ├── TagInfoWindow.qml   FloatingPane specialization: shows the current track's tag metadata, content scales with pane size — see UC-18
 ├── AudioVisualizerWindow.qml FloatingPane specialization (dockable): hosts AudioVisualizerView — see UC-19
@@ -818,7 +823,7 @@ Topaz module
 │                         icons reproduced Feather's volume-2/volume-x and were redrawn with own geometry]
 │                         sourceSize, recolored to `color` with QtQuick.Effects MultiEffect (colorization 1.0,
 │                         brightness 1.0) — one SVG serves every hover/disabled color.
-├── GenreBar.qml        genre toggle grid, 10 per row, up to 4 rows / 40 buttons (reads lib.genreModel, calls lib.toggleGenre)
+├── GenreBar.qml        genre toggle grid, 10 per row, up to 4 rows / 40 buttons (reads lib.genreModel, calls lib.toggleGenre); buttons in the PlaylistButtonsView tile style without icons (2026-11-15): rounded dark gradient (radius 8, 34 px high), 1 px border, top highlight, teal accent (Theme.secondary) — hover: accent border + 3 px glow ring + 8 % tint, press 0.96; active: accent border, 16 % tint (22 % hovered), faint permanent glow, bold teal Manrope label (replaced the solid secondaryContainer fill). Cheap on purpose: plain Rectangles/gradients (vertex colours, no shader effect), animations only on hover/click, built once per genre list
 ├── FoundGenresDialog.qml  FOUND GENRES — pick genres discovered by Setup → GENRES → SCAN FOLDERS (GenreScanController), see UC-36
 ├── LibraryTree.qml     Left sidebar  default width 286 px, user-resizable  (flat virtualised ListView; flatRows JS array; no nested Repeaters)
 ├── SearchPanel.qml     Replaces LibraryTree in the same SplitView slot when SEARCH is active — see UC-21 (independent of LibraryData; property SearchData searchData)
@@ -835,22 +840,24 @@ Topaz module
 ├── PlaybackQueue.qml   Queue panel  default width 374 px, user-resizable  (bound to PlaybackEngine model; DropArea; move/remove; shows activePlaylistName in header when set; shows LOCK PLAYLIST toggle when a playlist is active)
 │                         Sits in Main.qml's vertical `queueColumn` SplitView between two QueueDockAreas, so its
 │                         height is adjustable from above and below (1.2.0, see "Layout persistence")
-├── QueueDockArea.qml   Free area above/below the queue: Rectangle in the queue's surface colour. Empty: a faint dashed
-│                         rounded outline (Canvas, setLineDash) and a "FREE SPACE / Hover over a pane …" hint, both hidden
-│                         below 48 px (second line below 72 px). Occupied: property Component paneComponent (a docked pane's
-│                         content view) loaded to fill it; hover buttons float again / close, right-click closes;
-│                         signals undockRequested(), closeRequested() — see UC-38
+├── QueueDockArea.qml   A dock area in queueColumn / nowPlayingColumn: Rectangle in the queue's surface colour. Free area
+│                         (no dockHost): a faint dashed rounded outline (Canvas, setLineDash) and a "FREE SPACE / Hover over a
+│                         pane …" hint, both hidden below 48 px (second line below 72 px). Dock slot (dockHost + zone +
+│                         slotIndex): shows dockHost.dockZones[zone][slotIndex]'s content view, invisible while empty; hover
+│                         buttons move up / move down (only with a neighbour), float again, close; right-click closes;
+│                         signals undockRequested(), closeRequested(), moveRequested(dir) — see UC-38
 │                         Auto-scrolls to keep the current track topmost (and upcoming tracks visible below it) on every add/remove, whenever the queue overflows the panel — independent of AUTO PLAY/MANUAL MODE, see UC-11
 │                         property var autoPlay  (gates clear/remove/move/reorder/drop via autoPlay.manualQueueEditingAllowed + autoPlay.queueClearAllowed; row click (select another track) via autoPlay.trackNavigationAllowed; clear button routes through autoPlay.clearQueueAndHistory(), see UC-16)
-├── NowPlaying.qml      Right panel  default width 359 px, user-resizable  (bound to PlaybackEngine + PlaylistManager: art + transport + progress + playlists + 10-star rating row, see UC-14)
+├── NowPlaying.qml      Right panel  default width 359 px, user-resizable  (bound to PlaybackEngine + PlaylistManager: art + transport + progress + 10-star rating row, see UC-14; slot in the vertical nowPlayingColumn, see UC-38)
 |                         property playlistManager PlaylistManager
-|                         property var autoPlay  (gates playlist-load add; LOAD and REMOVE buttons are both fully disabled during an active AUTO PLAY session via autoPlay.queueClearAllowed; Play/Pause via autoPlay.playPauseAllowed; Previous/Next via autoPlay.trackNavigationAllowed, see UC-16)
-|                         signal newPlaylistRequested()  <- "+ NEW" button click
+|                         property var autoPlay  (gates playlist-load add; Play/Pause via autoPlay.playPauseAllowed; Previous/Next via autoPlay.trackNavigationAllowed, see UC-16)
 |                         signal bigCoverRequested()  <- left-click on the album cover (pointing-hand cursor, same as Play/Pause); opens the detachable BigCoverWindow pane, see below
-|                         FileDialog loadPlaylistDialog <- opens on LOAD; default folder = playlistDirectory(); filter *.xml
-|                         Playlist row 1: NEW | LOAD (disabled whenever an AUTO PLAY session is active; when enabled, clears active playlist first if one is loaded, then opens file dialog)
-|                         Playlist row 2: EXPORT (permanently disabled — not yet implemented) | REMOVE (active only when playlist loaded AND queue-clear is allowed; routes through autoPlay.clearQueueAndHistory())
-│                         signal newPlaylistRequested()  ← “+ NEW” button click
+|                         function openLoadPlaylist()  <- called by Main.qml for PlaylistButtonsView's LOAD (returns while autoPlay.queueClearAllowed is false)
+|                         FileDialog loadPlaylistDialog <- opened by openLoadPlaylist(); default folder = playlistDirectory(); filter *.xml; the whole LOAD/import chain (UC-30) stays here because this panel always exists
+├── PlaylistButtonsView.qml  The playlist buttons as a fixed dockable pane (UC-38; moved out of NowPlaying.qml, same look and gating), docked below Now Playing by default
+|                         property var playback (engine), property var autoPlayController
+|                         Header (PLAYLIST + loaded playlist name) over 2 x 2 accent tiles: NEW | LOAD (LOAD disabled while autoPlay.queueClearAllowed is false) — EXPORT (named playlist loaded + queue not empty) | REMOVE (named playlist loaded AND queue-clear allowed)
+|                         signals newRequested / loadRequested / exportRequested / removeRequested -> Main.qml (newPlaylistDialog / nowPlayingPanel.openLoadPlaylist() / openExportPlaylist() / autoPlay.clearQueueAndHistory() or engine.clearQueue())
 └── BottomBar.qml       Footer toolbar  height 56 px  (signal scanRequested; scanning property; autoPlayReady property — bound to libraryModel.ratingsReady, gates whether AUTO PLAY is clickable at all (together with autoPlay.genreRequirementMet/ratingRequirementMet, but those only while no session is running); autoPlay property — bound to the AutoPlayController instance; button color reads autoPlay.active (green/red traffic light), click calls autoPlay.toggle(), see UC-16). Icons are text glyphs (AUDIO VISUALIZER ▃▅▇) except AUDIO METER, drawn as two rows of six small Rectangles (L/R level bars, the lower one's last two dimmed) in the button colour
                           signal tagInfoToggleRequested()  ← TAG INFORMATION button click; property tagInfoPaneOpen (bound from Main.qml) drives its on/off color — same "dumb button, owner decides" split as scanRequested()/scanning, see UC-18
                           signal audioVisualizerToggleRequested()  ← AUDIO VISUALIZER button click; property audioVisualizerPaneOpen (bound from Main.qml) drives its on/off color — same split, see UC-19
@@ -1607,9 +1614,8 @@ what "configured" means — absent means that pane has never been positioned yet
 | `setFolderActive(index, flag)` | Toggle whether this folder is scanned at all (default `true`); auto-saves. Takes effect on the next scan, not immediately — see UC-04/UC-05. |
 | `saveLayout(windowWidth, windowHeight, libraryTreeWidth, playbackQueueWidth, nowPlayingWidth, fullscreen = false)` | Persist the current window size and resizable panel widths in a single atomic JSON write. Called from QML via a 500 ms debounce timer on every resize event. Window dimensions are not overwritten while in fullscreen. `fullscreen` selects the panel-width set written: windowed (`libraryTreeWidth`/`playbackQueueWidth`/`nowPlayingWidth`) or full screen (below). |
 | `fullscreenLibraryTreeWidth` / `fullscreenPlaybackQueueWidth` / `fullscreenNowPlayingWidth` | Full-screen mode's own panel widths (1.1.0), default `0` = not set yet; NOTIFY `panelWidthsChanged`. Written by `saveLayout(..., true)`, applied by `Main.qml`'s `applyPanelWidths()` — see "Layout persistence". |
-| `queueTopDockHeight` / `queueBottomDockHeight` / `fullscreenQueueTopDockHeight` / `fullscreenQueueBottomDockHeight` | Heights (px) of the free areas above/below the playback queue (1.2.0), per mode. Windowed default `0` (no area); full screen default `-1` = not set yet (keep current). NOTIFY `panelWidthsChanged`. Applied by `applyPanelWidths()` — see "Layout persistence" → "Free areas above/below the queue". Since UC-38 only written while the area holds a docked pane. |
-| `queueTopDockPane` / `queueBottomDockPane`, `saveDockedPanes(top, bottom)` | The pane docked above / below the queue (`"audioMeter"`, `"audioVisualizer"`, `"milkdrop"`, `""` = none), set only while a pane is docked **and** open there; `Main.qml` saves on every dock change and reopens those panes docked at startup. NOTIFY `dockedPanesChanged` (emitted on load only). See UC-38. |
-| `saveQueueDockHeights(topHeight, bottomHeight, fullscreen = false)` | Persists the two free-area heights for one mode (clamped ≥ 0; no write if unchanged; no NOTIFY). Called from `saveLayoutTimer` with the areas' `SplitView.preferredHeight`. |
+| `dockZones`, `saveDockZones(zones)` | The docked panes (UC-38): `{ queueTop: [...], queueBottom: [...], nowPlayingTop: [...], nowPlayingBottom: [...] }`, each list of pane ids (`"audioMeter"`, `"audioVisualizer"`, `"milkdrop"`, `"playlistButtons"`, …) running **from the host outwards** (index 0 next to the queue / Now Playing). A pane is listed only while docked **and** open; `Main.qml` saves on every dock change (after the startup restore) and reopens those panes docked at startup. Sanitized on load and save: empty ids and duplicates dropped, capacity enforced per column (`kMaxQueueDockPanes` = 4 for `queueTop` + `queueBottom` together, `kMaxNowPlayingDockPanes` = 3 for `nowPlayingTop` + `nowPlayingBottom`, the playlist buttons included); unknown ids are dropped by `Main.qml`. NOTIFY `dockedPanesChanged` (emitted on load only). Migrated from the 1.2.0 keys `queueTopDockPane` / `queueBottomDockPane`, which are no longer written; a `nowPlaying` zone (a development build between 1.2.0 and the next release) is read as `nowPlayingBottom`. |
+| `dockPaneHeights`, `saveDockPaneHeights(heights, fullscreen = false)` | Height (px) of each docked pane **per pane id and per mode**: `{ "<id>": { "window": h, "fullscreen": h } }`, `-1` = not set (the pane's default is used). The save merges `{ "<id>": h }` into the given mode (panes not listed keep their values; no write if unchanged; no NOTIFY). Called from `saveLayoutTimer` with the slots' `SplitView.preferredHeight`. Per pane, so a height travels with its pane (swap, other zone). Migrated from the 1.2.0 per-area heights (`queueTopDockHeight` … `fullscreenQueueBottomDockHeight`, windowed `0` → `-1`), which are no longer written. NOTIFY `panelWidthsChanged`. |
 | `windowX` / `windowY` / `windowScreenName` / `windowPositionConfigured` / `saveWindowPosition(x, y, screenName)` | Persist the main window's last windowed (non-fullscreen) position and which monitor it was on; same debounce timer and calling convention as `saveLayout` above (called alongside it). `windowPositionConfigured` distinguishes "never positioned yet" (fresh config) from "restore to this position", same convention as `bigCoverPaneConfigured` below. `windowScreenName` is also consulted on startup to pick which monitor `Window.FullScreen` lands on — see UC-28. |
 | `crossfadeEnabled` / `setCrossfadeEnabled(enabled)` | Whether crossfade is active between tracks (default `false`); auto-saves. Set from `SetupDialog`'s PLAYBACK tab toggle (see UC-15). |
 | `crossfadeSeconds` / `setCrossfadeSeconds(seconds)` | Crossfade length in seconds (default `5.0`); clamped to `[2.0, 12.0]` and snapped to the nearest `0.5` s; auto-saves. Set from `SetupDialog`'s PLAYBACK tab slider. |
@@ -1876,35 +1882,37 @@ first full-screen use behaves exactly as before 1.1.0. `saveLayoutTimer` passes
 `root.layoutFullscreen` (not `visibility`, so a minimised full-screen window still saves to its
 own set) as `saveLayout()`'s `fullscreen` argument.
 
-**Free areas above/below the queue (1.2.0).** The queue's slot in the main horizontal
+**Dock columns: free areas and dock slots (UC-38).** The queue's slot in the main horizontal
 `SplitView` is a vertical `SplitView` (`queueColumn`, carries the queue width's
-`SplitView.preferredWidth`/`minimumWidth`) of three children: `QueueDockArea` `queueTopDock` |
-`PlaybackQueue` (`SplitView.fillHeight`, `minimumHeight` 200) | `QueueDockArea`
-`queueBottomDock`. Its two handles sit directly above and below the queue, so the user makes the
-queue shorter from the top or the bottom; a dockable pane can be docked into the freed area
-(UC-38). Dragging a handle back to the
-edge collapses that area to 0 (the default — existing layouts are unchanged). The queue fills the
-remaining height, so window-height changes go to the queue and the areas keep their size.
-Persisted per mode like the widths: `queueTopDockHeight`/`queueBottomDockHeight` (windowed,
-default 0) and `fullscreenQueueTopDockHeight`/`fullscreenQueueBottomDockHeight` (default `-1` =
-never set → `applyPanelWidths()` keeps the current heights; `0` is a real value there).
-`saveLayoutTimer` calls `saveQueueDockHeights(top, bottom, layoutFullscreen)` with the areas'
-**`SplitView.preferredHeight`, not their `height`**: only a handle drag writes `preferredHeight`,
-whereas a window squeezed below "both areas + the queue's minimum" shrinks the actual heights —
-saving those would overwrite the user's sizes; growing the window again restores them. Each area
-also restarts the timer from `SplitView.onPreferredHeightChanged`. Like `saveLayout()`,
-`saveQueueDockHeights()` emits no NOTIFY.
+`SplitView.preferredWidth`/`minimumWidth`): `QueueDockArea` `queueTopFree` | dock slots
+`queueTopSlot3` … `queueTopSlot0` | `PlaybackQueue` (`SplitView.fillHeight`, `minimumHeight`
+`queueMinHeight` = 200) | `queueBottomSlot0` … `queueBottomSlot3` | `queueBottomFree`. Now Playing
+got the same treatment: `nowPlayingColumn` (carries the Now Playing width's
+`preferredWidth`/`minimumWidth` 280; `applyPanelWidths()` and `saveLayout()` address it, not
+`nowPlayingPanel`) = `nowPlayingTopFree` | `nowPlayingTopSlot2` … `nowPlayingTopSlot0` |
+`NowPlaying` (`fillHeight`, `minimumHeight` `nowPlayingMinHeight` = 300; it is a `Flickable`, so
+a shorter panel just scrolls) | `nowPlayingBottomSlot0` … `nowPlayingBottomSlot2` |
+`nowPlayingBottomFree` (3 slots per zone: one zone may hold all 3 panes the column allows). A
+**free area** (one per zone, at the zone's outer edge) starts collapsed
+(`preferredHeight: 0`, not persisted) and is dragged open by the user: the queue (or Now Playing)
+gets shorter and FREE SPACE appears. A **dock slot** is invisible — so it has no handle and costs
+nothing — unless `root.dockZones` puts a pane in it (see UC-38). The host fills the remaining
+height, so window-height changes go to the queue / Now Playing and the slots and areas keep their
+size.
 
-**Since docking (UC-38) the heights are those of a docked pane, and empty areas don't survive a
-restart.** Both areas start with `SplitView.preferredHeight: 0` (no longer bound to the config);
-at startup `restoreDockedPanes()` reopens the panes saved in `queueTopDockPane` /
-`queueBottomDockPane` docked, which gives their areas the stored height (or the pane's default if
-the stored one is below the pane's minimum). `saveLayoutTimer` writes an area's height **only
-while it holds a docked pane** — for an empty area it passes the stored value back unchanged
-(`saveQueueDockHeights()` therefore keeps a full-screen `-1`). On a windowed ↔ full-screen flip
-`applyPanelWidths()` → `applyDockHeights(full)` re-applies only occupied areas (a full-screen
-`-1` keeps the current height); empty areas keep whatever size they have in the session. This
-supersedes the 1.2.0 behaviour above, where an empty free area also came back after a restart.
+**Dock heights are per pane and per mode** (`AppConfig.dockPaneHeights`, `-1` = not set). At
+startup `restoreDockedPanes()` docks the saved panes with their stored height (or the pane's
+default if the stored one is below its minimum). `saveLayoutTimer` saves every docked pane's
+slot height via `saveDockPaneHeights(heights, layoutFullscreen)` — **`SplitView.preferredHeight`,
+not `height`**: only a handle drag (or `Main.qml`) writes `preferredHeight`, whereas a window
+squeezed below "all docked panes + the host's minimum" shrinks the actual heights; saving those
+would overwrite the user's sizes, and growing the window again restores them. Each slot restarts
+the timer from `SplitView.onPreferredHeightChanged`. On a windowed ↔ full-screen flip
+`applyPanelWidths()` → `applyDockHeights(full)` re-applies each docked pane's height for that
+mode (not set → keeps the current height if it fits, else the default); free areas keep whatever
+size they have in the session. Like `saveLayout()`, `saveDockPaneHeights()` emits no NOTIFY.
+(1.2.0 had one area above and one below the queue, with a height per area; that config is
+migrated, see the AppConfig rows.)
 Nothing is persisted at all until `settleTimer` (~1.2 s after the window is
 shown) has fired (`Main.layoutSettled`), so transient startup geometry — a DPI
 re-scale, a `SplitView` squeeze — can never overwrite what the user configured.
@@ -2713,13 +2721,13 @@ every mounted volume for the stored relative path if the named volume isn't foun
 | **Goal** | User creates a new XSPF playlist, optionally pre-populated with the current queue. |
 | **Actor** | User |
 | **Precondition** | Application is running. |
-| **Trigger** | User clicks **+ NEW** in the `NowPlaying` panel. |
+| **Trigger** | User clicks **+ NEW** in the playlist buttons pane (`PlaylistButtonsView`, docked below Now Playing by default — UC-38). |
 
 ### Normal Flow
 
 1. User clicks **+ NEW**.
-2. `NowPlaying` emits `newPlaylistRequested()`.
-3. `Main.qml` handles `onNewPlaylistRequested` → calls `newPlaylistDialog.open()`.
+2. `PlaylistButtonsView` emits `newRequested()`.
+3. `Main.qml` (its dock component) handles `onNewRequested` → calls `newPlaylistDialog.open()`.
 4. `NewPlaylistDialog` opens centred on the application window.
 5. User types a playlist name (no extension required) and clicks **OK** (or presses Enter).
 6. `NewPlaylistDialog.tryCreate()`:
@@ -2766,12 +2774,12 @@ This is valid XSPF and no special handling is required.
 | **Goal** | User unloads the active playlist and clears the queue without deleting the file from disk. |
 | **Actor** | User |
 | **Precondition** | A playlist is active (`engine.activePlaylistName` is non-empty). |
-| **Trigger** | User clicks **REMOVE** in the `NowPlaying` panel. |
+| **Trigger** | User clicks **REMOVE** in the playlist buttons pane (`PlaylistButtonsView`, UC-38). |
 
 ### Normal Flow
 
 1. User clicks **REMOVE** (button is enabled only when `activePlaylistName ≠ ""`; otherwise rendered at 35 % opacity with `ArrowCursor`).
-2. `NowPlaying` calls `engine.clearQueue()`.
+2. `PlaylistButtonsView` emits `removeRequested()`; `Main.qml` calls `autoPlay.clearQueueAndHistory()` (or `engine.clearQueue()` without an AutoPlayController), which ends in `engine.clearQueue()`.
 3. `PlaybackEngine.clearQueue()` stops playback, empties `m_queue`, clears `m_activePlaylistName`, and emits `activePlaylistNameChanged` + `queueCountChanged`.
 4. `PlaybackQueue` header loses the playlist name display; queue `ListView` becomes empty.
 5. The REMOVE button returns to its inactive (dimmed) state.
@@ -2805,7 +2813,7 @@ This is valid XSPF and no special handling is required.
 | **Goal** | User loads an existing XSPF playlist from disk into the queue. |
 | **Actor** | User |
 | **Precondition** | Application is running. |
-| **Trigger** | User clicks **LOAD** in the `NowPlaying` panel. |
+| **Trigger** | User clicks **LOAD** in the playlist buttons pane (`PlaylistButtonsView`, UC-38) → `Main.qml` → `NowPlaying.openLoadPlaylist()`. |
 
 > A file picked from outside `PlaylistManager::playlistDirectory()` is
 > imported into that folder first — see UC-30 — before continuing with
@@ -3891,7 +3899,7 @@ bool trackNavigationAllowed() const {
 remove, drag-reorder, and album-drop `DropArea`; `AlbumCard`'s double-click add;
 `NowPlaying`'s playlist-load add) — always `true` outside a session (MANUAL MODE),
 otherwise following `autoPlayAllowManualModification`. `queueClearAllowed` governs the
-queue's CLEAR button and `NowPlaying`'s LOAD/REMOVE buttons — all three are fully
+queue's CLEAR button and the playlist buttons pane's LOAD/REMOVE buttons — all three are fully
 disabled (dimmed, non-interactive), not just gated on click — **always** `false`
 during an active session regardless of `autoPlayAllowManualModification`,
 matching "it is forbidden for the user to clear the whole queue during a session; this
@@ -6335,11 +6343,12 @@ this doc) — never persisted anywhere.
 | **Goal** | Copy every audio file in a playlist (either the currently-loaded queue, or a playlist merely selected in the PLAYLISTS tab's list) to a chosen destination folder (typically a USB stick, for car use) under a generated `<prefix><index>_<title>.<ext>` filename, after confirming the destination has enough free space and is actually writable. Optionally (checkboxes) writes a Replay Gain tag into the copies and/or converts every non-MP3 track to MP3 (44.1 kHz, stereo, CBR 320 kbps) in the copies — library originals are never changed. |
 | **Actor** | User |
 | **Precondition** | Either a named playlist is loaded into the queue and non-empty (`PlaybackEngine.activePlaylistName`/`queueCount`), or a playlist with at least one resolvable track is selected in the PLAYLISTS tab (`PlaylistsData.selectedRawTracks`). |
-| **Trigger** | User clicks EXPORT in NowPlaying's playlist-management row, or EXPORT next to LOAD in the PLAYLISTS tab's `PlaylistViewer.qml`, then EXPORT again inside `ExportPlaylistDialog`. |
+| **Trigger** | User clicks EXPORT in the playlist buttons pane (`PlaylistButtonsView`, UC-38), or EXPORT next to LOAD in the PLAYLISTS tab's `PlaylistViewer.qml`, then EXPORT again inside `ExportPlaylistDialog`. |
 
-EXPORT (`NowPlaying.qml`'s Row 2, next to REMOVE) was a permanently-disabled
-placeholder from the day that row was first laid out. It's gated the same
-way `removePlaylistBtn` is —
+EXPORT (Row 2 of the playlist buttons, next to REMOVE — then in `NowPlaying.qml`, now in
+`PlaylistButtonsView.qml`, which makes `Main.qml` call `openExportPlaylist()`) was a
+permanently-disabled placeholder from the day that row was first laid out. It's gated the same
+way REMOVE is —
 `engine.activePlaylistName !== "" && engine.queueCount > 0` — but
 deliberately *not* also gated on `autoPlay.queueClearAllowed`: that guard
 protects against *clearing* the queue while AUTO PLAY manages it (see
@@ -7323,7 +7332,7 @@ non-Windows toolchains.
 |-------|--------|
 | **Goal** | Close a real gap in UC-10's LOAD flow: a playlist picked from outside Topaz's own playlist folder played correctly, but `PlaylistsPanel`/`PlaylistViewer` never saw it (both only ever list `PlaylistManager::playlistDirectory()`), and every subsequent queue-sync write (`appendTrack()`/`removeTrackByPath()`/`rewritePlaylist()`, which all build their target path as `playlistDirectory() + "/" + activePlaylistName`) silently wrote into the playlist folder under the same bare file name — never touching the original file, and silently overwriting any unrelated same-named playlist already there if one happened to exist. |
 | **Actor** | User |
-| **Trigger** | User clicks **LOAD** in `NowPlaying`, then picks an `.xml` file outside `PlaylistManager::playlistDirectory()` via the native file picker. |
+| **Trigger** | User clicks **LOAD** in the playlist buttons pane (dialog chain in `NowPlaying`), then picks an `.xml` file outside `PlaylistManager::playlistDirectory()` via the native file picker. |
 
 ### Normal Flow
 
@@ -8174,74 +8183,203 @@ Backend side: `struct DeckLevels` + `virtual bool AudioDeck::readLevels(DeckLeve
 Build + `qmllint` clean. **Not verified here**: the meter's look and readings on BASS vs FFmpeg,
 OVER behaviour on real tracks, crossfade — the user's test.
 
-## UC-38 Dock Panes into the Queue Column
+## UC-38 Dock Panes into the Queue and Now Playing Columns
 
-**Goal**: the Audio Meter, the Audio Visualizer and Milkdrop (and future panes) can live either as
-their floating window or **docked** into one of the two free areas above / below the playback
-queue (`queueTopDock` / `queueBottomDock`, see "Layout persistence"). Decided with the user: dock
-via **hover buttons**; reopening a docked pane from the BottomBar puts it **back in its dock** if
-that area is free; after a restart only areas holding a docked pane come back (the persistence
-part: see "Persistence" below).
+**Goal**: the Audio Meter, the Audio Visualizer and Milkdrop (and future panes, e.g. an "Up Next"
+pane) can live either as their floating window or **docked** into one of four **zones**:
+**above / below the queue** (`queueColumn`, together at most **4** panes, any split 4+0 … 0+4) and
+**above / below Now Playing** (`nowPlayingColumn`, together at most **3**: the playlist buttons +
+2, any split). The **playlist buttons** (NEW / LOAD / EXPORT / REMOVE, formerly part of
+`NowPlaying.qml`) are a **fixed** pane: always docked, never floating, never closed — only moved
+to another zone. Library and Album Browser have no docking. Decided with the user: dock via
+**hover buttons**; **▲/▼ swap buttons** on docked panes; **one FREE SPACE area per zone**;
+reopening a docked pane from the BottomBar puts it **back where it was** if that zone still has
+room; after a restart exactly the docked panes come back (see "Persistence"); a click on a docked
+pane shows the same **selection outline** as on a floating pane. History: 1 + 1 queue areas in
+1.2.0; zones on 2026-11-14 (4K displays); on 2026-11-15 Now Playing got a zone above as well, the
+playlist buttons became a pane, and docked panes got the outline.
+
+### Model
+`Main.qml` keeps `dockZones: { queueTop: [], queueBottom: [], nowPlayingTop: [], nowPlayingBottom: [] }`:
+per zone the docked pane ids, **running from the host outwards** (`queueTop[0]` /
+`nowPlayingTop[0]` sit directly above their host, `queueBottom[0]` / `nowPlayingBottom[0]`
+directly below it). A new pane is appended (= the outer edge), so panes already docked keep their
+slot and aren't reloaded (matters for Milkdrop's GL context). The object is always replaced as a
+whole (`setZone()`), never mutated, so every binding on it re-evaluates. A pane counts as docked
+only while open.
+
+**Capacity + space check** (`canDock(id, zone)`): the pane exists, isn't docked, its column has
+capacity left (`zoneCapacityLeft()`: `maxQueueDock` 4 shared by the two queue zones,
+`maxNowPlayingDock` 3 shared by the two Now Playing zones — the playlist buttons count), and
+`columnRoomFor()`: column height − the host's minimum (`queueMinHeight` 200 /
+`nowPlayingMinHeight` 300) − every docked pane's `minDockHeight` in that column − handles (5 px
+each) ≥ the pane's `minDockHeight`. So on a smaller screen dock buttons simply disappear before a
+layout could break. `availableZones(id)` lists the zones that pass — bound to each floating
+pane's `dockZones`, so the buttons follow window size and dock changes live. `canMoveTo(id,
+zone)` is the same check for a pane that is already docked (a fixed pane's move buttons): another
+zone, with the pane itself left out of the capacity and room count (`exceptId`).
 
 ### Flow
-1. Hovering a floating dockable pane shows a small button box in its top-right corner (inside the
-   resize grips): **Dock above the queue** / **Dock below the queue**, each only while that area
-   is empty; no box when both areas are occupied. Click → `FloatingPane.dockRequested(slot)` →
-   `Main.dockPane(id, slot)`.
-2. `dockPane()` sets `dockTop`/`dockBottom` to the pane id **before** setting the open flag, so the
-   floating loader (active only while open *and* not docked) never starts; the floating window of
-   an already open pane is destroyed by the same binding. The area gets room: its current height if
-   ≥ the pane's `minDockHeight`, else the mode's saved height if big enough, else the pane's
-   `defaultDockHeight`. While occupied, the area's `SplitView.minimumHeight` is the pane's
-   `minDockHeight` (0 when empty).
-3. Docked, the area loads the pane's content view (`paneComponent`). Hovering it shows
-   **Float as a separate window** (`undockPane()`: empties the area, the open flag stays true, so the
-   floating loader starts at the window's saved geometry; forgets `lastDockSlot`) and **Close**
-   (`closePane()`); a right-click closes too, like a floating pane (a `TapHandler`, so the docked
-   content keeps its hover and left clicks).
-4. `closePane()` clears the open flag **before** emptying the area (otherwise the floating window
-   would flash up). The area keeps its size and shows FREE SPACE again.
-5. BottomBar → `togglePane(id)`: open → `closePane()`; closed → `dockPane(id, lastDockSlot[id])`
-   when that area is free, else floating.
+1. Hovering a floating dockable pane shows a button box in its top-right corner (inside the
+   resize grips): **Dock above the queue** / **Dock below the queue** / **Dock above Now
+   Playing** / **Dock below Now Playing**, one per zone in `dockZones`; no box when none. Click →
+   `FloatingPane.dockRequested(zone)` → `Main.dockPane(id, zone)`.
+2. `dockPane(id, zone, index, restoring, height)` inserts the id (default: outer edge) **before**
+   setting the open flag, so the floating loader (active only while open *and* not docked) never
+   starts; the floating window of an already open pane is destroyed by the same binding. It
+   refuses when the zone's slots are all used or (except for a fixed pane being restored) the
+   column has no capacity left. Height: the zone's free area if it is open and ≥ the pane's
+   `minDockHeight` (taken over, the free area collapses — the 1.2.0 feel), else `height` (from
+   `moveDocked()`) or the mode's saved height for this pane, else its `defaultDockHeight`, limited
+   to what the column can spare (`spareHeight()`, skipped while `restoring` — the column isn't
+   laid out yet at startup; `applyDockHeights()` follows). Records `lastDockZone[id] = { zone,
+   index }`.
+3. Docked, the slot loads the pane's content view. Hovering it shows **Move up** / **Move down**
+   (only when a neighbour exists in the same zone; `swapDocked(id, dir)` swaps the two ids — `dir`
+   is on screen, so it is inverted for the `…Top` zones, which run upwards — and each slot then
+   gets the height of the pane it now holds, so heights travel with the panes), **Float as a
+   separate window** (`undockPane()`: removes it, the open flag stays true, so the floating loader
+   starts at the window's saved geometry; forgets `lastDockZone`) and **Close** (`closePane()`); a
+   right-click closes too (a `TapHandler`, so the docked content keeps its hover and left clicks).
+   A **fixed** pane shows neither Float nor Close (and right-click does nothing; `undockPane()` /
+   `closePane()` return early for it) but one **Move above / below the queue / Now Playing**
+   button per other zone where `canMoveTo()` passes → `moveDocked(id, zone)`: `removeDocked(id,
+   true)` (its space goes back to the host, not to the free area) then `dockPane()` at the target's
+   outer edge with the pane's current height.
+4. Removing a pane (`removeDocked()`, used by float/close) moves its height (+ its handle) to the
+   zone's free area, so the layout doesn't jump and FREE SPACE stays where the pane was.
+   `closePane()` clears the open flag **before** that (otherwise the floating window would flash
+   up) and records `lastDockZone`.
+5. BottomBar → `togglePane(id)`: open → `closePane()`; closed → `dockPane(id, last.zone,
+   last.index)` when `canDock()`, else floating. (The playlist buttons have no BottomBar button.)
+6. **Selection outline**: a passive left-button `PointHandler` on each occupied slot calls
+   `Main.selectDockPane(id)` (`selectedDockPane` + a 4 s timer, the same timeout as
+   `FloatingPane`'s fine-tuning selection); the slot draws the same 2 px `Theme.secondary`
+   rectangle above its content. Cleared after 4 s, when the main window loses focus
+   (`onActiveFocusItemChanged`) or when the pane leaves its slot; a click on another pane moves
+   it. While a handle of the column is dragged (`SplitView.view.resizing`), every docked pane in
+   that column shows the outline, so its edges are visible exactly while resizing. Passive, so
+   the docked content (buttons, meter, Milkdrop) still gets every click.
 
 ### Pieces
-- **Content/window split** — the floating windows became thin hosts: `AudioVisualizerView.qml`
+- **Dock slots** — static `QueueDockArea` instances, not a `Repeater` (not reliable inside a
+  `SplitView`): `queueTopSlot0..3`, `queueBottomSlot0..3`, `nowPlayingTopSlot0..2`,
+  `nowPlayingBottomSlot0..2` (3 per Now Playing zone: one zone may hold all 3 panes), each with
+  `dockHost: root`, `zone`, `slotIndex`. A slot derives its pane from `dockHost.dockZones`, is
+  `visible` only while it holds one (SplitView ignores invisible items: no handle, no cost) and
+  sets its own `SplitView.minimumHeight` to the pane's `minDockHeight`. Free areas
+  (`queueTopFree`, `queueBottomFree`, `nowPlayingTopFree`, `nowPlayingBottomFree`) are
+  `QueueDockArea`s without `dockHost`; their `freeAllowed` is bound to
+  `zoneCapacityLeft(zone) > 0`, so while a column is full its free areas are invisible (no handle
+  to drag one open — FREE SPACE nothing could be docked into made no sense; found in the user's
+  test) and their height is reset to 0, i.e. given back to the host. `zoneSlots(zone)` /
+  `zoneFree(zone)` map a zone to its
+  items, `columnZones(zone)` to both zones of its column. Column layout: see "Layout
+  persistence" → "Dock columns".
+- **Content/window split** — the floating windows are thin hosts: `AudioVisualizerView.qml`
   (bars, placeholder) and `MilkdropPaneView.qml` (MilkdropView, placeholders, preset toast);
   `AudioMeterView.qml` already was one. Their engine property is named `playback` so `Main.qml`'s
   dock components can bind it to the outer `engine` id without the shadowing gotcha. Window-only
   features stay in the windows: Milkdrop's F10 full screen, double-click positions, cursor
   auto-hide and keyboard nudging don't exist docked; `MilkdropWindow` sets `dockable:
   !_isFullscreen`.
+- **Playlist buttons** — `PlaylistButtonsView.qml`: NEW | LOAD / EXPORT | REMOVE, moved out of
+  `NowPlaying.qml` with the same gating (LOAD and REMOVE need `autoPlay.queueClearAllowed`, EXPORT
+  and REMOVE a named playlist, EXPORT a non-empty queue) and a new, more prominent look: a header
+  (primary → secondary gradient tick, "PLAYLIST", the loaded playlist's name without `.xml` in
+  `Theme.primary`, or "none loaded") over a 2 × 2 grid of rounded tiles (radius 10, dark vertical
+  gradient, 1 px border). Each tile has an accent — NEW `Theme.secondary`, LOAD `Theme.primary`,
+  EXPORT `Theme.tertiary`, REMOVE `Theme.neonPink` (the wordmark's glow colours became the Theme
+  tokens `neonPink` / `neonCyan`) — shown in a round icon chip (`SvgIcon`, own icons
+  `playlist-new/-load/-export/-remove.svg`); on hover the border turns to the accent, a 3 px glow
+  ring and an 8 % accent tint fade in, pressed the tile scales to 0.97; disabled tiles are dimmed
+  to 35 % with a grey accent. The tiles share the pane's height. UI only: it emits `newRequested` / `loadRequested` /
+  `exportRequested` / `removeRequested`, which `Main.qml`'s dock component turns into
+  `newPlaylistDialog.open()` / `nowPlayingPanel.openLoadPlaylist()` / `openExportPlaylist()` /
+  `autoPlay.clearQueueAndHistory()`. The LOAD dialog chain (`loadPlaylistDialog`, the import
+  conflict dialogs, `ImportPlaylistDialog`, `_finishLoad`, UC-10/UC-30) stays in `NowPlaying.qml`
+  on purpose: that panel always exists, while a docked view is recreated on every swap or move
+  and would take an open dialog down with it.
 - **Registry** (`Main.qml`, `dockablePanes`): id → `{ component, minDockHeight,
-  defaultDockHeight }` — `audioMeter` 90/140, `audioVisualizer` 120/200, `milkdrop` 160/260. The id
-  is also the prefix of the open flag (`root[id + "PaneOpen"]`). A future dockable pane = a content
-  view, one registry entry with its dock `Component`, and the dock properties on its floating
-  loader (`dockable: true` in the window, `dockTopAvailable`/`dockBottomAvailable`,
-  `onDockRequested`, `active: open && not docked`).
-- **State** (`Main.qml`): `dockTop`, `dockBottom` (pane id or ""; a pane counts as docked only
-  while open), `lastDockSlot` (session memory per pane).
+  defaultDockHeight, fixed?, home? }` — `audioMeter` 90/140, `audioVisualizer` 120/200,
+  `milkdrop` 160/260, `playlistButtons` 118/132 `fixed: true, home: "nowPlayingBottom"`. The id is
+  also the prefix of the open flag (`root[id + "PaneOpen"]`; `playlistButtonsPaneOpen` is
+  constantly true). A future dockable pane = a content view, one registry entry with its dock
+  `Component`, and the dock properties on its floating loader (`dockable: true` in the window,
+  `dockZones: root.availableZones(id)`, `onDockRequested: (zone) => root.dockPane(id, zone)`,
+  `active: open && !root.isDocked(id)`); a future fixed pane needs only the registry entry.
+  Nothing else changes: every zone accepts every registered pane.
 - **One instance per pane** — floating and docked never coexist, which matters for Milkdrop (its
   own offscreen GL context + projectM instance; it renders offscreen and hands frames over as a
-  texture, so it works inside the main window as well). Moving between window and dock recreates
-  the content: Milkdrop restarts its preset playlist; the Audio Meter's `acquire()` count keeps
-  the controller running across the swap.
+  texture, so it works inside the main window as well). Moving between window and dock, a swap and
+  a move recreate the content: Milkdrop restarts its preset playlist; the Audio Meter's
+  `acquire()` count keeps the controller running across the swap.
 - **Icons** (own geometry, `icons/`): `dock-top.svg`, `dock-bottom.svg` (column outline with a
-  band at the top/bottom and an arrow towards it), `undock.svg` (two overlapping windows with an
-  arrow out); close reuses `close.svg`. Buttons are `IconButton` (28 px).
+  band at the top/bottom and an arrow towards it), `dock-nowplaying-top.svg` /
+  `dock-nowplaying-bottom.svg` (outline split into two columns, a band at the top / bottom of the
+  right one with an arrow into it; also used by the fixed panes' move buttons), `move-up.svg` /
+  `move-down.svg` (an arrow towards a bar), `undock.svg` (two overlapping windows with an arrow
+  out); close reuses `close.svg`. Buttons are `IconButton` (28 px).
 
 ### Persistence
-- `onDockTopChanged` / `onDockBottomChanged` → `appConfig.saveDockedPanes(dockTop, dockBottom)`.
-  Since a pane counts as docked only while open, the config always holds exactly what a restart
-  should bring back (closing a docked pane empties its entry; quitting changes nothing).
+- `onDockZonesChanged` → `appConfig.saveDockZones(dockZones)`, **only once
+  `dockZonesRestored` is true** (set at the end of `restoreDockedPanes()`, also on its error
+  path). Found the hard way: without the guard a change before the restore — the property's own
+  initial value — saved empty zones over the stored ones before they were read, so nothing came
+  back docked. Since a pane counts as docked only while open, the config always holds exactly
+  what a restart should bring back (closing a docked pane removes it; quitting changes nothing).
 - Startup: `Component.onCompleted` (window still hidden, in the `finally` before it is shown, in
-  its own try/catch) → `restoreDockedPanes()` reads both keys first, then `dockPane()`s each known
-  id (unknown ids and a duplicate are ignored). Floating panes are not restored (unchanged).
-- Heights and empty areas: see "Layout persistence" → "Since docking".
+  its own try/catch) → `restoreDockedPanes()` reads `appConfig.dockZones` and `dockPane()`s each
+  known id per zone in order (unknown ids, duplicates and over-capacity entries are ignored).
+  Then every **fixed** pane that isn't docked yet (first start, a config from before it existed)
+  is docked at index 0 of its `home` zone — for the playlist buttons directly below Now Playing,
+  where they always were — else of the first zone with a free slot (capacity check skipped: it
+  must always be somewhere). Then it saves once (drops what wasn't restored). Floating panes are
+  not restored (unchanged).
+- Heights: per pane and per mode, see "Layout persistence" → "Dock heights". Free areas are not
+  persisted (they start collapsed).
+- **Migration**: `AppConfig::applyJson()` converts the 1.2.0 keys `queueTopDockPane` /
+  `queueBottomDockPane` into `dockZones.queueTop` / `.queueBottom` and their per-area heights into
+  `dockPaneHeights` (windowed `0` → `-1`); the old keys are no longer written. A `nowPlaying` zone
+  (the single zone below Now Playing of the 2026-11-14 development build) is read as
+  `nowPlayingBottom`.
 - A Backup/Restore of `Topaz.config` mid-session doesn't redock anything; the restored keys apply
   at the next start (until the user changes the dock state, which overwrites them).
 
 ### Verification
-Build + `qmllint` clean. User-confirmed on Windows: docking each pane top/bottom, float again, close
-from the dock and reopen via the BottomBar, Milkdrop rendering docked, restart with 0/1/2 docked
-panes (exactly those come back at their heights, empty areas collapsed), F11 per-mode heights.
-Not yet tested on Linux.
+Build + `qmllint` clean. Migration checked against the real config (backed up first, restored
+after each run): 1.2.0 keys (Audio Meter above at 127 px, Visualizer below at 280 px) → both back
+docked in their zones with their heights; a `nowPlaying: ["milkdrop"]` zone → `nowPlayingBottom:
+["playlistButtons", "milkdrop"]` (the playlist buttons inserted at their home position, no QML
+warnings at startup). User-confirmed on Windows: the 1.2.0 version (one area above/below:
+docking, float again, close + reopen via the BottomBar, Milkdrop docked, restart with 0/1/2
+panes, F11 per-mode heights) and the 2026-11-14 zones (all queue splits, ▲/▼ swaps, the space
+check, Now Playing below) and the 2026-11-15 round (Now Playing above + below, the playlist
+buttons pane incl. its new look, the selection outline, no free area in a full column). Not yet
+tested on Linux.
+
+# Deployment
+
+The build and deploy recipes (Windows `deploy/`, Linux `deploy-linux/` via Docker) live in
+`CLAUDE.md`; this section records the design decisions behind what users get.
+
+## Windows installer (Inno Setup 6)
+
+Since 1.2.0 Windows users can install Topaz with `Topaz-<version>-setup.exe`, next to the
+unchanged 7z archive of `deploy/`. `packaging/windows/build-installer.ps1` stages `deploy/` and
+compiles `packaging/windows/topaz.iss` (modelled on MatryoshkaV2's installer).
+
+| Decision | Why |
+|---|---|
+| Per user by default (`PrivilegesRequired=lowest`, "all users" selectable), into `%LOCALAPPDATA%\Programs\Topaz` | No admin rights needed; the same as the per-user data folder model |
+| Fixed `AppId` (never changed); update = run the newer setup | Inno finds the installation by it: same folder (`UsePreviousAppDir`), same tasks, one uninstall entry; `CloseApplications` closes a running Topaz before files are replaced |
+| `[InstallDelete]` only for Qt's generated folders (`qml`, `Topaz`, `platforms`, `imageformats`, `multimedia`, `styles`, `tls`, …) | Modules of an older Qt version must not linger next to new ones; the root folder is left alone because the user puts their own `bass*.dll` / `bass_fx.dll` / `ffmpeg.exe` there |
+| BASS and ffmpeg never shipped (excluded while staging and again by `Excludes`) | Licence (BASS) and the user-supplied model (ffmpeg, UC-26); same exclusions as the 7z |
+| The data folder `%LOCALAPPDATA%\Topaz` is never touched, also not by the uninstaller | Library, playlists, ratings and settings survive reinstalls and updates |
+| Start menu: "Topaz" and "Topaz User Guide" (PDF); desktop shortcut optional (unchecked); English + German installer texts | Small and familiar; the app itself stays English |
+
+Verified 2026-11-15: a silent install into a scratch folder (files present, no BASS/ffmpeg/logs,
+starts with a minimal `PATH`), a second silent run as an update (found the folder itself, kept
+a user `bass.dll`, removed a stray file in `qml\`, one uninstall entry), a silent uninstall
+(only the user's `bass.dll` left; Start menu links and the uninstall entry removed; the data
+folder's `Topaz.config` unchanged by SHA-256).

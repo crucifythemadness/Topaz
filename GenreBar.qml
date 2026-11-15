@@ -4,7 +4,8 @@
 
 // Grid of genre toggle buttons, 10 per row, up to 4 rows (40 enabled genres,
 // AppConfig.maxEnabledGenres()). The bar's height follows the number of rows.
-// Active genres are highlighted with secondaryContainer background.
+// Buttons use the PlaylistButtonsView tile style (teal accent; active genres
+// keep the accent border, tint, glow and a bold teal label).
 // lib.genreModel drives the button states; lib.toggleGenre() handles clicks.
 Rectangle {
     id: root
@@ -37,42 +38,85 @@ Rectangle {
         Repeater {
             model: lib ? lib.genreModel : null
 
-            delegate: Rectangle {
+            // Same tile style as PlaylistButtonsView (without the icon chip):
+            // rounded dark gradient, 1 px border, accent glow ring + tint on
+            // hover, small press-in. Accent = Theme.secondary (teal). Active
+            // genres keep the accent border, a stronger tint, a fainter glow
+            // ring and a bold teal label, so on/off reads at a glance.
+            delegate: Item {
                 id: genreBtn
                 // Equal width: fill available width across 10 columns with 9 gaps
                 width:  (genreGrid.width - 9 * 6) / 10
                 height: 34
-                radius: Theme.radiusSm
 
                 property bool active: model.active
                 property bool hovered: genreHover.containsMouse
+                readonly property color accent: Theme.secondary
 
-                color: {
-                    if (active)  return Theme.secondaryContainer
-                    if (hovered) return Theme.surfaceContainerHighest
-                    return Theme.surfaceContainerHigh
-                }
-
-                // "Hover glow" вЂ” 2 px top-edge primary highlight (design: micro-slab rule)
+                // Glow ring (fits the 6 px grid gap)
                 Rectangle {
-                    anchors { left: parent.left; right: parent.right; top: parent.top }
-                    height: 2
-                    color: Theme.primary
-                    visible: genreBtn.hovered && !genreBtn.active
-                    radius: Theme.radiusSm
+                    anchors.fill: face
+                    anchors.margins: -3
+                    radius: face.radius + 3
+                    color: "transparent"
+                    border.width: 3
+                    border.color: Qt.rgba(genreBtn.accent.r, genreBtn.accent.g, genreBtn.accent.b,
+                                          genreBtn.hovered ? 0.22 : 0.12)
+                    scale: face.scale
+                    opacity: (genreBtn.hovered || genreBtn.active) ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 160 } }
                 }
 
-                Text {
-                    anchors.centerIn: parent
-                    text: model.name.toUpperCase()
-                    font.family: Theme.fontFamilyBody
-                    font.pixelSize:    Theme.labelSm
-                    font.weight:       active ? Font.Bold : Font.Normal
-                    font.letterSpacing: 1.2
-                    color: active ? Theme.fgSecondaryContainer : Theme.fgSurfaceVariant
-                    elide: Text.ElideRight
-                    width: parent.width - 8
-                    horizontalAlignment: Text.AlignHCenter
+                Rectangle {
+                    id: face
+                    anchors.fill: parent
+                    radius: 8
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: Theme.surfaceContainerHighest }
+                        GradientStop { position: 1.0; color: Theme.surfaceContainer }
+                    }
+                    border.width: 1
+                    border.color: genreBtn.active  ? genreBtn.accent
+                                : genreBtn.hovered ? Qt.rgba(genreBtn.accent.r, genreBtn.accent.g,
+                                                             genreBtn.accent.b, 0.7)
+                                :                    Theme.ov30
+                    Behavior on border.color { ColorAnimation { duration: 160 } }
+                    scale: genreHover.pressed ? 0.96 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutQuad } }
+
+                    // Accent tint: stronger while active
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: parent.radius
+                        color: Qt.rgba(genreBtn.accent.r, genreBtn.accent.g, genreBtn.accent.b,
+                                       genreBtn.active ? (genreBtn.hovered ? 0.22 : 0.16) : 0.08)
+                        opacity: (genreBtn.active || genreBtn.hovered) ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 160 } }
+                        Behavior on color { ColorAnimation { duration: 160 } }
+                    }
+                    // Thin highlight along the top edge
+                    Rectangle {
+                        anchors { top: parent.top; left: parent.left; right: parent.right
+                                  topMargin: 1; leftMargin: parent.radius; rightMargin: parent.radius }
+                        height: 1
+                        color: Qt.rgba(1, 1, 1, 0.06)
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: model.name.toUpperCase()
+                        font.family:        Theme.fontFamilyHeadline
+                        font.pixelSize:     Theme.labelSm
+                        font.weight:        genreBtn.active ? Font.Bold : Font.DemiBold
+                        font.letterSpacing: 1.2
+                        color: genreBtn.active  ? genreBtn.accent
+                             : genreBtn.hovered ? Theme.fgSurface
+                             :                    Theme.fgSurfaceVariant
+                        Behavior on color { ColorAnimation { duration: 160 } }
+                        elide: Text.ElideRight
+                        width: parent.width - 8
+                        horizontalAlignment: Text.AlignHCenter
+                    }
                 }
 
                 MouseArea {

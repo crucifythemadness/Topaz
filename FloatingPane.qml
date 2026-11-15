@@ -34,7 +34,8 @@ import QtQuick.Window
 //     drag. Disabled while keyboardMoveEnabled is false (MilkdropWindow:
 //     during its F10 fullscreen).
 //   - When dockable (UC-38), hovering shows small "dock above / below the
-//     queue" buttons in the top-right corner (dockRequested()).
+//     queue" / "dock below Now Playing" buttons in the top-right corner
+//     (dockRequested()).
 //   - Any settled change to x/y/width/height (debounced 500ms, same pattern
 //     as Main.qml's saveLayoutTimer) emits geometrySettled() for the owner to
 //     persist -- including an arrow-key nudge.
@@ -252,17 +253,17 @@ Window {
     // stacked hover mechanism.
     signal mouseMoved()
 
-    // ── Docking into the queue column (UC-38) ───────────────────────────
-    // Generic like the rest of this file: the pane only offers the two dock
-    // buttons and emits dockRequested("top"/"bottom"); Main.qml owns the dock
-    // state and decides what docking means. dockable = this pane can be docked
-    // at all (and right now -- MilkdropWindow switches it off during F10);
-    // dockTop/BottomAvailable = that free area is empty, so its button shows.
-    // The buttons appear while the mouse is over the pane.
+    // ── Docking into the main window (UC-38) ────────────────────────────
+    // Generic like the rest of this file: the pane only offers the dock
+    // buttons and emits dockRequested(zone) ("queueTop" / "queueBottom" /
+    // "nowPlayingTop" / "nowPlayingBottom"); Main.qml owns the dock state and decides what docking
+    // means. dockable = this pane can be docked at all (and right now --
+    // MilkdropWindow switches it off during F10); dockZones = the zones that
+    // can take this pane right now (room left, fits the screen), one button
+    // each. The buttons appear while the mouse is over the pane.
     property bool dockable: false
-    property bool dockTopAvailable: false
-    property bool dockBottomAvailable: false
-    signal dockRequested(string slot)
+    property var  dockZones: []
+    signal dockRequested(string zone)
 
     Item {
         id: contentItem
@@ -464,7 +465,8 @@ Window {
     // a button takes the hover away from the move area beneath it), with a
     // short grace period so moving from the pane onto a button never flickers.
     readonly property bool _dockHover: moveArea.containsMouse || dockTopBtn.hovered
-                                       || dockBottomBtn.hovered
+                                       || dockBottomBtn.hovered || dockNowPlayingTopBtn.hovered
+                                       || dockNowPlayingBottomBtn.hovered
     property bool _dockButtonsShown: false
     on_DockHoverChanged: {
         if (_dockHover) {
@@ -493,8 +495,7 @@ Window {
         border.width: 1
         border.color: Theme.outlineVariant
         visible: opacity > 0
-        opacity: (pane.dockable && pane._dockButtonsShown
-                  && (pane.dockTopAvailable || pane.dockBottomAvailable)) ? 1 : 0
+        opacity: (pane.dockable && pane._dockButtonsShown && pane.dockZones.length > 0) ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
 
         Row {
@@ -504,18 +505,34 @@ Window {
             IconButton {
                 id: dockTopBtn
                 buttonSize: 28
-                visible: pane.dockTopAvailable
+                visible: pane.dockZones.indexOf("queueTop") >= 0
                 iconName: "dock-top"
                 tooltip: qsTr("Dock above the queue")
-                onClicked: pane.dockRequested("top")
+                onClicked: pane.dockRequested("queueTop")
             }
             IconButton {
                 id: dockBottomBtn
                 buttonSize: 28
-                visible: pane.dockBottomAvailable
+                visible: pane.dockZones.indexOf("queueBottom") >= 0
                 iconName: "dock-bottom"
                 tooltip: qsTr("Dock below the queue")
-                onClicked: pane.dockRequested("bottom")
+                onClicked: pane.dockRequested("queueBottom")
+            }
+            IconButton {
+                id: dockNowPlayingTopBtn
+                buttonSize: 28
+                visible: pane.dockZones.indexOf("nowPlayingTop") >= 0
+                iconName: "dock-nowplaying-top"
+                tooltip: qsTr("Dock above Now Playing")
+                onClicked: pane.dockRequested("nowPlayingTop")
+            }
+            IconButton {
+                id: dockNowPlayingBottomBtn
+                buttonSize: 28
+                visible: pane.dockZones.indexOf("nowPlayingBottom") >= 0
+                iconName: "dock-nowplaying-bottom"
+                tooltip: qsTr("Dock below Now Playing")
+                onClicked: pane.dockRequested("nowPlayingBottom")
             }
         }
     }

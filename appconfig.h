@@ -144,26 +144,26 @@ class AppConfig : public QObject
     Q_PROPERTY(int fullscreenLibraryTreeWidth   READ fullscreenLibraryTreeWidth   NOTIFY panelWidthsChanged)
     Q_PROPERTY(int fullscreenPlaybackQueueWidth READ fullscreenPlaybackQueueWidth NOTIFY panelWidthsChanged)
     Q_PROPERTY(int fullscreenNowPlayingWidth    READ fullscreenNowPlayingWidth    NOTIFY panelWidthsChanged)
-    // Heights (px) of the free "dock" areas above and below the playback
-    // queue (Main.qml's vertical queueColumn SplitView), per mode like the
-    // widths. Windowed default 0 = no area. Full screen -1 = not set yet --
-    // Main.qml then keeps the current heights (0 is a real value here: the
-    // user collapsed the area). Stored from the areas' SplitView.preferredHeight
-    // (written only by a handle drag), so a window squeezed too small never
-    // overwrites them. Reuses panelWidthsChanged ("panel layout changed").
-    Q_PROPERTY(int queueTopDockHeight              READ queueTopDockHeight              NOTIFY panelWidthsChanged)
-    Q_PROPERTY(int queueBottomDockHeight           READ queueBottomDockHeight           NOTIFY panelWidthsChanged)
-    Q_PROPERTY(int fullscreenQueueTopDockHeight    READ fullscreenQueueTopDockHeight    NOTIFY panelWidthsChanged)
-    Q_PROPERTY(int fullscreenQueueBottomDockHeight READ fullscreenQueueBottomDockHeight NOTIFY panelWidthsChanged)
-
-    // The pane docked in the free area above / below the queue (UC-38): a
-    // dockable pane id ("audioMeter", "audioVisualizer", "milkdrop") or "" for
-    // none. Set only while a pane is docked AND open there, so at startup
-    // Main.qml reopens exactly those panes docked and collapses empty areas.
-    // Since 1.2.x the dock heights above are only written while their area
-    // holds a pane (they are "the height of a docked pane", per mode).
-    Q_PROPERTY(QString queueTopDockPane    READ queueTopDockPane    NOTIFY dockedPanesChanged)
-    Q_PROPERTY(QString queueBottomDockPane READ queueBottomDockPane NOTIFY dockedPanesChanged)
+    // Docked panes (UC-38): four dock zones, each an ordered list (from the
+    // host outwards) of dockable pane ids ("audioMeter", "audioVisualizer",
+    // "milkdrop", "playlistButtons", ...): "queueTop" + "queueBottom" (above /
+    // below the playback queue, together at most kMaxQueueDockPanes) and
+    // "nowPlayingTop" + "nowPlayingBottom" (above / below Now Playing, together
+    // at most kMaxNowPlayingDockPanes). A pane is listed only while
+    // it is docked AND open, so at startup Main.qml reopens exactly those
+    // panes docked. Duplicates / over-capacity entries are dropped here;
+    // unknown ids by Main.qml (it owns the pane registry). Replaces the
+    // 1.2.0 keys queueTopDockPane / queueBottomDockPane (migrated on load);
+    // an older "nowPlaying" zone is read as "nowPlayingBottom".
+    Q_PROPERTY(QVariantMap dockZones READ dockZones NOTIFY dockedPanesChanged)
+    // Height (px) of each docked pane, per pane id and per mode:
+    // { "<id>": { "window": h, "fullscreen": h } }, -1 = not set yet (Main.qml
+    // then uses the pane's default). Stored from the dock slots'
+    // SplitView.preferredHeight (written only by a handle drag / by Main.qml),
+    // so a window squeezed too small never overwrites them. Per pane, not per
+    // slot, so a height travels with its pane (swap, other zone). Replaces the
+    // 1.2.0 per-area heights (migrated on load).
+    Q_PROPERTY(QVariantMap dockPaneHeights READ dockPaneHeights NOTIFY panelWidthsChanged)
 
     // Startup fullscreen/windowed preference (Setup > MISC). Default false
     // (Windowed) -- see Main.qml's `visibility` binding.
@@ -334,12 +334,8 @@ public:
     int fullscreenLibraryTreeWidth()   const { return m_fullscreenLibraryTreeWidth;   }
     int fullscreenPlaybackQueueWidth() const { return m_fullscreenPlaybackQueueWidth; }
     int fullscreenNowPlayingWidth()    const { return m_fullscreenNowPlayingWidth;    }
-    int queueTopDockHeight()              const { return m_queueTopDockHeight;              }
-    int queueBottomDockHeight()           const { return m_queueBottomDockHeight;           }
-    int fullscreenQueueTopDockHeight()    const { return m_fullscreenQueueTopDockHeight;    }
-    int fullscreenQueueBottomDockHeight() const { return m_fullscreenQueueBottomDockHeight; }
-    QString queueTopDockPane()    const { return m_queueTopDockPane;    }
-    QString queueBottomDockPane() const { return m_queueBottomDockPane; }
+    QVariantMap dockZones() const;
+    QVariantMap dockPaneHeights() const { return m_dockPaneHeights; }
     bool startFullscreen()     const { return m_startFullscreen;   }
     bool visualFolderScanning() const { return m_visualFolderScanning; }
     bool modifyCurrentRatingEnabled() const { return m_modifyCurrentRatingEnabled; }
@@ -477,15 +473,19 @@ public:
                                 int nowPlayingWidth,
                                 bool fullscreen = false);
 
-    // Persists the heights of the free areas above/below the playback queue
-    // for one mode (fullscreen selects the set, like saveLayout()). Called
-    // from the same debounce timer; negative values are clamped to 0.
-    Q_INVOKABLE void saveQueueDockHeights(int topHeight, int bottomHeight,
-                                          bool fullscreen = false);
+    // Persists the heights of docked panes for one mode (fullscreen selects
+    // the set, like saveLayout()): { "<id>": height }, merged into
+    // dockPaneHeights (panes not listed keep their stored heights). Called
+    // from the layout debounce timer.
+    Q_INVOKABLE void saveDockPaneHeights(const QVariantMap &heights, bool fullscreen = false);
 
-    // Persists which pane is docked above / below the queue ("" = none),
-    // see queueTopDockPane. Called by Main.qml whenever its dock state changes.
-    Q_INVOKABLE void saveDockedPanes(const QString &topPane, const QString &bottomPane);
+    // Persists the dock zones ({ queueTop: [...], queueBottom: [...],
+    // nowPlayingTop: [...], nowPlayingBottom: [...] }), see dockZones. Called
+    // by Main.qml whenever its dock state changes.
+    Q_INVOKABLE void saveDockZones(const QVariantMap &zones);
+
+    static constexpr int kMaxQueueDockPanes      = 4;   // above + below the queue together
+    static constexpr int kMaxNowPlayingDockPanes = 3;   // above + below Now Playing (incl. the playlist buttons)
 
     // Persists the main window's last windowed (non-fullscreen) position and
     // which monitor it was on -- same calling convention as
@@ -706,12 +706,13 @@ private:
     int m_fullscreenLibraryTreeWidth   = 0;   // 0 = not set yet
     int m_fullscreenPlaybackQueueWidth = 0;
     int m_fullscreenNowPlayingWidth    = 0;
-    int m_queueTopDockHeight              = 0;    // 0 = no free area
-    int m_queueBottomDockHeight           = 0;
-    int m_fullscreenQueueTopDockHeight    = -1;   // -1 = not set yet
-    int m_fullscreenQueueBottomDockHeight = -1;
-    QString m_queueTopDockPane;                   // "" = no docked pane
-    QString m_queueBottomDockPane;
+    QStringList m_dockQueueTop;                   // dock zones, see dockZones
+    QStringList m_dockQueueBottom;
+    QStringList m_dockNowPlayingTop;
+    QStringList m_dockNowPlayingBottom;
+    QVariantMap m_dockPaneHeights;                // see dockPaneHeights
+    void setDockZonesSanitized(const QStringList &queueTop, const QStringList &queueBottom,
+                               const QStringList &nowPlayingTop, const QStringList &nowPlayingBottom);
     bool m_startFullscreen   = false;
     bool m_visualFolderScanning = false;
     bool m_modifyCurrentRatingEnabled = true;

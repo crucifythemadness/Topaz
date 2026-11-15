@@ -257,30 +257,74 @@ void AppConfig::saveLayout(int windowWidth, int windowHeight,
     save();
 }
 
-void AppConfig::saveQueueDockHeights(int topHeight, int bottomHeight, bool fullscreen)
+void AppConfig::saveDockPaneHeights(const QVariantMap &heights, bool fullscreen)
 {
-    // Full screen keeps -1 ("never set"): Main.qml passes the stored value
-    // back unchanged for an area without a docked pane.
-    const int lowest = fullscreen ? -1 : 0;
-    topHeight    = qMax(lowest, topHeight);
-    bottomHeight = qMax(lowest, bottomHeight);
-    int &top    = fullscreen ? m_fullscreenQueueTopDockHeight    : m_queueTopDockHeight;
-    int &bottom = fullscreen ? m_fullscreenQueueBottomDockHeight : m_queueBottomDockHeight;
-    if (top == topHeight && bottom == bottomHeight) return;
-    top    = topHeight;
-    bottom = bottomHeight;
+    const QString modeKey = fullscreen ? QStringLiteral("fullscreen") : QStringLiteral("window");
+    bool changed = false;
+    for (auto it = heights.constBegin(); it != heights.constEnd(); ++it) {
+        const int h = qMax(-1, it.value().toInt());
+        QVariantMap entry = m_dockPaneHeights.value(it.key()).toMap();
+        if (entry.contains(modeKey) && entry.value(modeKey).toInt() == h) continue;
+        if (!entry.contains(QStringLiteral("window")))     entry[QStringLiteral("window")]     = -1;
+        if (!entry.contains(QStringLiteral("fullscreen"))) entry[QStringLiteral("fullscreen")] = -1;
+        entry[modeKey] = h;
+        m_dockPaneHeights[it.key()] = entry;
+        changed = true;
+    }
+    if (!changed) return;
     // No panelWidthsChanged here, same as saveLayout(): Main.qml's dock
     // heights are already what's being saved, so re-notifying would only
-    // feed back into the (still bound) SplitView.preferredHeight bindings.
+    // feed back into what Main.qml just wrote.
     save();
 }
 
-void AppConfig::saveDockedPanes(const QString &topPane, const QString &bottomPane)
+QVariantMap AppConfig::dockZones() const
 {
-    if (m_queueTopDockPane == topPane && m_queueBottomDockPane == bottomPane) return;
-    m_queueTopDockPane    = topPane;
-    m_queueBottomDockPane = bottomPane;
-    // Like saveQueueDockHeights(): Main.qml's dock state is the source, so
+    return {
+        { QStringLiteral("queueTop"),    m_dockQueueTop    },
+        { QStringLiteral("queueBottom"), m_dockQueueBottom },
+        { QStringLiteral("nowPlayingTop"),    m_dockNowPlayingTop    },
+        { QStringLiteral("nowPlayingBottom"), m_dockNowPlayingBottom },
+    };
+}
+
+// Drops empty ids, duplicates (first occurrence wins, zones in the order
+// queueTop, queueBottom, nowPlayingTop, nowPlayingBottom) and entries beyond
+// a column's capacity (each column's two zones share one limit).
+void AppConfig::setDockZonesSanitized(const QStringList &queueTop, const QStringList &queueBottom,
+                                      const QStringList &nowPlayingTop, const QStringList &nowPlayingBottom)
+{
+    QSet<QString> seen;
+    int queueCount = 0;
+    auto take = [&](const QStringList &in, int &count, int max) {
+        QStringList out;
+        for (const QString &id : in) {
+            if (id.isEmpty() || seen.contains(id) || count >= max) continue;
+            seen.insert(id);
+            out.append(id);
+            ++count;
+        }
+        return out;
+    };
+    m_dockQueueTop    = take(queueTop,    queueCount, kMaxQueueDockPanes);
+    m_dockQueueBottom = take(queueBottom, queueCount, kMaxQueueDockPanes);
+    int npCount = 0;
+    m_dockNowPlayingTop    = take(nowPlayingTop,    npCount, kMaxNowPlayingDockPanes);
+    m_dockNowPlayingBottom = take(nowPlayingBottom, npCount, kMaxNowPlayingDockPanes);
+}
+
+void AppConfig::saveDockZones(const QVariantMap &zones)
+{
+    const QStringList oldTop = m_dockQueueTop, oldBottom = m_dockQueueBottom;
+    const QStringList oldNpTop = m_dockNowPlayingTop, oldNpBottom = m_dockNowPlayingBottom;
+    setDockZonesSanitized(zones.value(QStringLiteral("queueTop")).toStringList(),
+                          zones.value(QStringLiteral("queueBottom")).toStringList(),
+                          zones.value(QStringLiteral("nowPlayingTop")).toStringList(),
+                          zones.value(QStringLiteral("nowPlayingBottom")).toStringList());
+    if (m_dockQueueTop == oldTop && m_dockQueueBottom == oldBottom
+        && m_dockNowPlayingTop == oldNpTop && m_dockNowPlayingBottom == oldNpBottom)
+        return;
+    // Like saveDockPaneHeights(): Main.qml's dock state is the source, so
     // no notify back (it only reads these at startup).
     save();
 }
@@ -940,12 +984,45 @@ void AppConfig::applyJson(const QJsonObject &root)
     m_fullscreenLibraryTreeWidth   = root[QStringLiteral("fullscreenLibraryTreeWidth")].toInt(0);
     m_fullscreenPlaybackQueueWidth = root[QStringLiteral("fullscreenPlaybackQueueWidth")].toInt(0);
     m_fullscreenNowPlayingWidth    = root[QStringLiteral("fullscreenNowPlayingWidth")].toInt(0);
-    m_queueTopDockHeight              = qMax(0, root[QStringLiteral("queueTopDockHeight")].toInt(0));
-    m_queueBottomDockHeight           = qMax(0, root[QStringLiteral("queueBottomDockHeight")].toInt(0));
-    m_fullscreenQueueTopDockHeight    = qMax(-1, root[QStringLiteral("fullscreenQueueTopDockHeight")].toInt(-1));
-    m_fullscreenQueueBottomDockHeight = qMax(-1, root[QStringLiteral("fullscreenQueueBottomDockHeight")].toInt(-1));
-    m_queueTopDockPane    = root[QStringLiteral("queueTopDockPane")].toString();
-    m_queueBottomDockPane = root[QStringLiteral("queueBottomDockPane")].toString();
+    m_dockPaneHeights.clear();
+    if (root.contains(QStringLiteral("dockZones"))) {
+        const QJsonObject zones = root[QStringLiteral("dockZones")].toObject();
+        auto list = [&zones](const char *key) {
+            QStringList out;
+            for (const QJsonValue &v : zones[QLatin1String(key)].toArray()) out.append(v.toString());
+            return out;
+        };
+        // "nowPlaying" = the single zone below Now Playing of an earlier
+        // development build -> nowPlayingBottom.
+        const QStringList npBottom = zones.contains(QStringLiteral("nowPlayingBottom"))
+                                     ? list("nowPlayingBottom") : list("nowPlaying");
+        setDockZonesSanitized(list("queueTop"), list("queueBottom"), list("nowPlayingTop"), npBottom);
+        const QJsonObject heights = root[QStringLiteral("dockPaneHeights")].toObject();
+        for (auto it = heights.constBegin(); it != heights.constEnd(); ++it) {
+            const QJsonObject h = it.value().toObject();
+            m_dockPaneHeights[it.key()] = QVariantMap{
+                { QStringLiteral("window"),     qMax(-1, h[QStringLiteral("window")].toInt(-1)) },
+                { QStringLiteral("fullscreen"), qMax(-1, h[QStringLiteral("fullscreen")].toInt(-1)) },
+            };
+        }
+    } else {
+        // Migration from 1.2.0: one pane above / below the queue, heights
+        // per area (windowed 0 = no area -> "not set").
+        const QString top    = root[QStringLiteral("queueTopDockPane")].toString();
+        const QString bottom = root[QStringLiteral("queueBottomDockPane")].toString();
+        setDockZonesSanitized(top.isEmpty()    ? QStringList() : QStringList{ top },
+                              bottom.isEmpty() ? QStringList() : QStringList{ bottom }, {}, {});
+        auto migrate = [&](const QString &id, const char *winKey, const char *fullKey) {
+            if (id.isEmpty()) return;
+            const int win = root[QLatin1String(winKey)].toInt(0);
+            m_dockPaneHeights[id] = QVariantMap{
+                { QStringLiteral("window"),     win > 0 ? win : -1 },
+                { QStringLiteral("fullscreen"), qMax(-1, root[QLatin1String(fullKey)].toInt(-1)) },
+            };
+        };
+        migrate(top,    "queueTopDockHeight",    "fullscreenQueueTopDockHeight");
+        migrate(bottom, "queueBottomDockHeight", "fullscreenQueueBottomDockHeight");
+    }
     m_startFullscreen    = root[QStringLiteral("startFullscreen")].toBool(false);
     m_visualFolderScanning = root[QStringLiteral("visualFolderScanning")].toBool(false);
     // Default true; the 1.0.0 key "deleteCurrentRatingEnabled" is ignored (see appconfig.h).
@@ -1177,12 +1254,15 @@ void AppConfig::save()
     root[QStringLiteral("fullscreenLibraryTreeWidth")]   = m_fullscreenLibraryTreeWidth;
     root[QStringLiteral("fullscreenPlaybackQueueWidth")] = m_fullscreenPlaybackQueueWidth;
     root[QStringLiteral("fullscreenNowPlayingWidth")]    = m_fullscreenNowPlayingWidth;
-    root[QStringLiteral("queueTopDockHeight")]              = m_queueTopDockHeight;
-    root[QStringLiteral("queueBottomDockHeight")]           = m_queueBottomDockHeight;
-    root[QStringLiteral("fullscreenQueueTopDockHeight")]    = m_fullscreenQueueTopDockHeight;
-    root[QStringLiteral("fullscreenQueueBottomDockHeight")] = m_fullscreenQueueBottomDockHeight;
-    root[QStringLiteral("queueTopDockPane")]                = m_queueTopDockPane;
-    root[QStringLiteral("queueBottomDockPane")]             = m_queueBottomDockPane;
+    {
+        QJsonObject zones;
+        zones[QStringLiteral("queueTop")]    = QJsonArray::fromStringList(m_dockQueueTop);
+        zones[QStringLiteral("queueBottom")] = QJsonArray::fromStringList(m_dockQueueBottom);
+        zones[QStringLiteral("nowPlayingTop")]    = QJsonArray::fromStringList(m_dockNowPlayingTop);
+        zones[QStringLiteral("nowPlayingBottom")] = QJsonArray::fromStringList(m_dockNowPlayingBottom);
+        root[QStringLiteral("dockZones")] = zones;
+        root[QStringLiteral("dockPaneHeights")] = QJsonObject::fromVariantMap(m_dockPaneHeights);
+    }
     root[QStringLiteral("startFullscreen")]    = m_startFullscreen;
     root[QStringLiteral("visualFolderScanning")] = m_visualFolderScanning;
     root[QStringLiteral("modifyCurrentRatingEnabled")] = m_modifyCurrentRatingEnabled;

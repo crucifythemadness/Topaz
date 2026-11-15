@@ -32,6 +32,10 @@ QtObject {
     readonly property color fgTertiary:            "#482900"
     readonly property color fgTertiaryFixedVariant:"#673D00"
 
+    // Neon accents of the TOPAZ JUKEBOX wordmark's glow (NeonWordmark.qml)
+    readonly property color neonPink:              "#FF4FB8"
+    readonly property color neonCyan:              "#3BE8FF"
+
     // в”Ђв”Ђ Surface On-Colors в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     readonly property color fgSurface:        "#E5E2E1"
     readonly property color fgSurfaceVariant: "#CBC3D7"
